@@ -61,7 +61,7 @@ export default function AppStartScreen() {
       if (role === "admin") {
         router.replace("/admin");
       } else {
-        router.replace("/home");
+        router.replace("/(tabs)/home" as any);
       }
     } catch (error: any) {
       Alert.alert("Login failed", "Invalid email or password.");

@@ -1,14 +1,14 @@
 import React from "react";
 import {
-  Image,
-  Pressable,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  View,
+    Image,
+    Pressable,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 
-const logoImg = require("../assets/images/logo-new.jpg");
+const logoImg = require("../../assets/images/logo-new.jpg");
 
 export default function HomeScreen() {
   return (
