@@ -2,16 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 type Driver = {
@@ -116,43 +116,33 @@ export default function ErrandsBookScreen() {
   };
 
   if (submitted) {
-  return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.successContainer}>
-        <Ionicons name="checkmark-circle-outline" size={90} color="#F58220" />
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.successContainer}>
+          <Ionicons name="checkmark-circle-outline" size={90} color="#F58220" />
 
-        <Text style={styles.successTitle}>Request Sent!</Text>
+          <Text style={styles.successTitle}>Request Sent!</Text>
 
-        <Text style={styles.successText}>
-          Your request has been sent to{" "}
-          <Text style={styles.boldText}>{driver.name}</Text>. They will
-          contact you soon.
-        </Text>
+          <Text style={styles.successText}>
+            Your request has been sent to{" "}
+            <Text style={styles.boldText}>{driver.name}</Text>. They will
+            contact you soon.
+          </Text>
 
-        <View style={styles.successButtonsRow}>
-          <Pressable
-            style={styles.outlineButton}
-            onPress={() =>
-              router.replace("/booking/work-errand/errand/errand" as any)
-            }
-          >
-            <Text style={styles.outlineButtonText}>Browse More</Text>
-          </Pressable>
-
+          <View style={styles.successButtonsRow}>
             <Pressable
-            style={styles.successButton}
-            onPress={() => {
-                router.dismissAll();
-                router.push("/booking/ride-category" as any);
-            }}
+              style={styles.outlineButton}
+              onPress={() =>
+                router.replace("/booking/work-errand/errand/errand" as any)
+              }
             >
-            <Text style={styles.successButtonText}>Back to Categories</Text>
+              <Text style={styles.outlineButtonText}>Browse More</Text>
             </Pressable>
+          </View>
         </View>
-      </View>
-    </SafeAreaView>
-  );
-}
+      </SafeAreaView>
+    );
+  }
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
@@ -231,9 +221,7 @@ export default function ErrandsBookScreen() {
             <View style={styles.languagesRow}>
               {driver.languages?.map((lang) => (
                 <View key={lang} style={styles.languageBadge}>
-                  <Text style={styles.languageText}>
-                    {LANGUAGES_MAP[lang]}
-                  </Text>
+                  <Text style={styles.languageText}>{LANGUAGES_MAP[lang]}</Text>
                 </View>
               ))}
             </View>

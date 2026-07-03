@@ -2,16 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 type JobListing = {
@@ -106,7 +106,7 @@ export default function WorkApplyScreen() {
     if (!/^05\d{8}$/.test(cleanPhone)) {
       Alert.alert(
         "Invalid phone number",
-        "Phone number must start with 05 and contain 10 digits."
+        "Phone number must start with 05 and contain 10 digits.",
       );
       return;
     }
@@ -120,7 +120,7 @@ export default function WorkApplyScreen() {
         "Employer Response",
         accepted
           ? `Good news! ${job.name} accepted your application.`
-          : `${job.name} reviewed your application, but it was not accepted this time.`
+          : `${job.name} reviewed your application, but it was not accepted this time.`,
       );
     }, 5000);
   };
@@ -136,16 +136,6 @@ export default function WorkApplyScreen() {
           <Text style={styles.successText}>
             The employer will review your application and get back to you.
           </Text>
-       <Pressable
-            style={styles.successButton}
-            onPress={() => {
-                router.dismissAll();
-                router.push("/booking/ride-category" as any);
-            }}
-            >
-            <Text style={styles.successButtonText}>Back to Categories</Text>
-            </Pressable>
-
         </View>
       </SafeAreaView>
     );
