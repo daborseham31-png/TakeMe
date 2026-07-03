@@ -1,7 +1,10 @@
 import { router } from "expo-router";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -10,18 +13,59 @@ import {
   View,
 } from "react-native";
 
+import { auth, db } from "../firebase";
+
 export default function AppStartScreen() {
   const [loading, setLoading] = useState(true);
   const [showPw, setShowPw] = useState(false);
   const [role, setRole] = useState<"user" | "admin">("user");
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 2500);
     return () => clearTimeout(timer);
   }, []);
 
-  const handleLogin = () => {
-    router.replace("/home");
+  const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert("Missing details", "Please enter email and password.");
+      return;
+    }
+
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+
+      const userDoc = await getDoc(doc(db, "users", "admin"));
+
+      let roleFromDatabase = "user";
+
+      if (userDoc.exists()) {
+        const adminEmail = userDoc.data().email;
+        const adminRole = userDoc.data().role;
+
+        if (
+          email.trim().toLowerCase() === adminEmail.trim().toLowerCase() &&
+          adminRole === "admin"
+        ) {
+          roleFromDatabase = "admin";
+        }
+      }
+
+      if (role === "admin" && roleFromDatabase !== "admin") {
+        Alert.alert("Access denied", "This account is not an admin.");
+        return;
+      }
+
+      if (role === "admin") {
+        router.replace("/login/admin");
+      } else {
+        router.replace("/(tabs)/home" as any);
+      }
+    } catch (error: any) {
+      Alert.alert("Login failed", "Invalid email or password.");
+    }
   };
 
   if (loading) {
@@ -83,6 +127,8 @@ export default function AppStartScreen() {
           placeholderTextColor="#8b7b6b"
           keyboardType="email-address"
           autoCapitalize="none"
+          value={email}
+          onChangeText={setEmail}
         />
 
         <Text style={styles.label}>Password</Text>
@@ -92,13 +138,15 @@ export default function AppStartScreen() {
             placeholder="Password"
             placeholderTextColor="#8b7b6b"
             secureTextEntry={!showPw}
+            value={password}
+            onChangeText={setPassword}
           />
           <Pressable onPress={() => setShowPw(!showPw)}>
             <Text style={styles.eye}>{showPw ? "Hide" : "Show"}</Text>
           </Pressable>
         </View>
 
-        <Pressable>
+        <Pressable onPress={() => router.push("/login/forgot-password" as any)}>
           <Text style={styles.forgot}>Forgot Password?</Text>
         </Pressable>
 
@@ -106,9 +154,12 @@ export default function AppStartScreen() {
           <Text style={styles.loginText}>Login</Text>
         </Pressable>
 
-        <Text style={styles.signupText}>
-          Don't have an account? <Text style={styles.signupLink}>Sign Up</Text>
-        </Text>
+        <Pressable onPress={() => router.push("/login/signup" as any)}>
+          <Text style={styles.signupText}>
+            Don't have an account?{" "}
+            <Text style={styles.signupLink}>Sign Up</Text>
+          </Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
