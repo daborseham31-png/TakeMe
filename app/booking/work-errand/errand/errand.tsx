@@ -1,7 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useState } from "react";
+import { collection, getDocs } from "firebase/firestore";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -10,6 +13,8 @@ import {
   View,
 } from "react-native";
 
+import { db } from "../../../../firebase";
+
 type Comment = {
   user: string;
   text: string;
@@ -17,10 +22,9 @@ type Comment = {
 };
 
 type Driver = {
-  id: number;
+  id: string;
   name: string;
   gender: "male" | "female";
-  age: number;
   phone: string;
   languages: string[];
   rating: number;
@@ -53,131 +57,112 @@ const DESTINATION_ICONS: Record<string, string> = {
   mall: "🏬",
   gym: "💪",
   pharmacy: "💊",
+  errands: "📍",
 };
 
-const mockDrivers: Driver[] = [
-  {
-    id: 1,
-    name: "Layla Mansour",
-    gender: "female",
-    age: 28,
-    phone: "050-1234567",
-    languages: ["ar", "he"],
-    rating: 4.9,
-    reviews: 53,
-    price: 20,
-    destination: "shopping",
-    destinationLabel: "Shopping at Big Mall",
-    departureTime: "10:00",
-    returnTime: "13:00",
-    date: "2026-03-14",
-    day: "Sat",
-    location: "Nazareth",
-    seats: 3,
-    comments: [
-      { user: "Noor", text: "Very friendly and punctual!", stars: 5 },
-      { user: "Hana", text: "Great ride, comfortable car", stars: 5 },
-    ],
-  },
-  {
-    id: 2,
-    name: "Khaled Issa",
-    gender: "male",
-    age: 35,
-    phone: "052-9876543",
-    languages: ["ar", "en"],
-    rating: 4.7,
-    reviews: 31,
-    price: 15,
-    destination: "nature",
-    destinationLabel: "Trip to Mount Tabor",
-    departureTime: "08:00",
-    returnTime: "15:00",
-    date: "2026-03-15",
-    day: "Sun",
-    location: "Kafr Kanna",
-    seats: 4,
-    comments: [
-      { user: "Ahmad", text: "Safe driver, knows the roads well", stars: 5 },
-      { user: "Sara", text: "Good price for the trip", stars: 4 },
-    ],
-  },
-  {
-    id: 3,
-    name: "Rania Khalil",
-    gender: "female",
-    age: 24,
-    phone: "054-5551234",
-    languages: ["ar", "he", "en"],
-    rating: 4.8,
-    reviews: 19,
-    price: 25,
-    destination: "beach",
-    destinationLabel: "Beach Day in Haifa",
-    departureTime: "09:00",
-    returnTime: "17:00",
-    date: "2026-03-14",
-    day: "Sat",
-    location: "Nazareth",
-    seats: 2,
-    comments: [{ user: "Lina", text: "Amazing experience!", stars: 5 }],
-  },
-  {
-    id: 4,
-    name: "Omar Haddad",
-    gender: "male",
-    age: 42,
-    phone: "050-7778899",
-    languages: ["ar"],
-    rating: 4.5,
-    reviews: 65,
-    price: 18,
-    destination: "restaurant",
-    destinationLabel: "Lunch at Tiberias",
-    departureTime: "11:30",
-    returnTime: "14:30",
-    date: "2026-03-16",
-    day: "Mon",
-    location: "Yafa an-Naseriyye",
-    seats: 3,
-    comments: [
-      { user: "Yusuf", text: "Reliable and on time", stars: 4 },
-      { user: "Fatima", text: "Very nice person", stars: 5 },
-    ],
-  },
-  {
-    id: 5,
-    name: "Mira Sabbagh",
-    gender: "female",
-    age: 30,
-    phone: "053-1112233",
-    languages: ["ar", "he", "ru"],
-    rating: 4.6,
-    reviews: 27,
-    price: 22,
-    destination: "mall",
-    destinationLabel: "Shopping at Grand Canyon Mall",
-    departureTime: "14:00",
-    returnTime: "18:00",
-    date: "2026-03-15",
-    day: "Sun",
-    location: "Shefa-Amr",
-    seats: 1,
-    comments: [{ user: "Dina", text: "Fun and safe ride!", stars: 5 }],
-  },
-];
+const isTodayOrFuture = (dateText: string) => {
+  const match = dateText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) return true;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  const errandDate = new Date(year, month - 1, day);
+  errandDate.setHours(0, 0, 0, 0);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return errandDate >= today;
+};
 
 export default function ErrandsScreen() {
-  const [expandedDriver, setExpandedDriver] = useState<number | null>(null);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedDriver, setExpandedDriver] = useState<string | null>(null);
 
-const handleSelectDriver = (driver: Driver) => {
-  router.push({
-    pathname: "/booking/work-errand/errand/book",
-    params: {
-      driver: JSON.stringify(driver),
-    },
-  } as any);
-};
+  useEffect(() => {
+    loadErrands();
+  }, []);
+
+  const loadErrands = async () => {
+    try {
+      setLoading(true);
+
+      const snapshot = await getDocs(collection(db, "errandJobs"));
+
+      const errandsList: Driver[] = snapshot.docs
+        .map((docSnap): Driver => {
+          const data = docSnap.data();
+
+          return {
+            id: docSnap.id,
+            name: data.ownerName || "Person",
+            gender: (data.gender === "female" ? "female" : "male") as
+              | "male"
+              | "female",
+            phone: data.phone || "",
+            languages: Array.isArray(data.languages) ? data.languages : [],
+
+            rating: Number(data.rating || 4.8),
+            reviews: Number(data.reviews || 0),
+
+            price: Number(data.price || 0),
+
+            destination: "errands",
+            destinationLabel: data.errandTitle || "Errand",
+
+            departureTime: data.startTime || "",
+            returnTime: data.endTime || "",
+
+            date: data.date || "",
+            day: data.day || "",
+
+            location: data.location || "",
+            seats: Number(data.seats || 1),
+
+            comments: Array.isArray(data.comments) ? data.comments : [],
+          };
+        })
+        .filter((driver) => isTodayOrFuture(driver.date))
+        .sort((a, b) => {
+          if (a.date === b.date) {
+            return a.departureTime.localeCompare(b.departureTime);
+          }
+
+          return a.date.localeCompare(b.date);
+        });
+
+      setDrivers(errandsList);
+    } catch (error: any) {
+      console.log("Load errands error:", error.message);
+      Alert.alert("Error", "Could not load errands.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectDriver = (driver: Driver) => {
+    router.push({
+      pathname: "/booking/work-errand/errand/book",
+      params: {
+        driver: JSON.stringify(driver),
+      },
+    } as any);
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.loadingBox}>
+          <ActivityIndicator size="large" color="#F58220" />
+          <Text style={styles.loadingText}>Loading errands...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -189,147 +174,174 @@ const handleSelectDriver = (driver: Driver) => {
         <Text style={styles.title}>📍 Errands</Text>
         <Text style={styles.subtitle}>Shopping, appointments, etc.</Text>
 
-        <View style={styles.list}>
-          {mockDrivers.map((driver) => (
-            <View key={driver.id} style={styles.card}>
-              <View style={styles.header}>
-                <View style={styles.profileRow}>
-                  <View style={styles.avatar}>
-                    <Ionicons name="person-outline" size={25} color="#B45309" />
-                  </View>
-
-                  <View style={styles.profileInfo}>
-                    <Text style={styles.name}>{driver.name}</Text>
-
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoText}>
-                        {driver.gender === "male" ? "♂" : "♀"}
-                      </Text>
-                      <Text style={styles.infoText}>Age {driver.age}</Text>
-                      <Text style={styles.infoText}>•</Text>
+        {drivers.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="location-outline" size={44} color="#7A665C" />
+            <Text style={styles.emptyTitle}>No errands found</Text>
+            <Text style={styles.emptyText}>
+              When someone creates an errand, it will appear here.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.list}>
+            {drivers.map((driver) => (
+              <View key={driver.id} style={styles.card}>
+                <View style={styles.header}>
+                  <View style={styles.profileRow}>
+                    <View style={styles.avatar}>
                       <Ionicons
-                        name="location-outline"
-                        size={13}
-                        color="#7A5C4B"
+                        name="person-outline"
+                        size={25}
+                        color="#B45309"
                       />
-                      <Text style={styles.infoText}>{driver.location}</Text>
                     </View>
+
+                    <View style={styles.profileInfo}>
+                      <Text style={styles.name}>{driver.name}</Text>
+
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoText}>
+                          {driver.gender === "male" ? "♂" : "♀"}
+                        </Text>
+
+                        <Text style={styles.infoText}>•</Text>
+
+                        <Ionicons
+                          name="location-outline"
+                          size={13}
+                          color="#7A5C4B"
+                        />
+
+                        <Text style={styles.infoText}>{driver.location}</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.ratingBox}>
+                    <Ionicons name="star" size={16} color="#B45309" />
+                    <Text style={styles.ratingText}>{driver.rating}</Text>
+                    <Text style={styles.reviewsText}>({driver.reviews})</Text>
                   </View>
                 </View>
 
-                <View style={styles.ratingBox}>
-                  <Ionicons name="star" size={16} color="#B45309" />
-                  <Text style={styles.ratingText}>{driver.rating}</Text>
-                  <Text style={styles.reviewsText}>({driver.reviews})</Text>
-                </View>
-              </View>
+                <View style={styles.destinationBox}>
+                  <Text style={styles.destinationIcon}>
+                    {DESTINATION_ICONS[driver.destination] || "📍"}
+                  </Text>
 
-              <View style={styles.destinationBox}>
-                <Text style={styles.destinationIcon}>
-                  {DESTINATION_ICONS[driver.destination] || "📍"}
-                </Text>
-                <Text style={styles.destinationText}>
-                  {driver.destinationLabel}
-                </Text>
-              </View>
-
-              <View style={styles.detailsGrid}>
-                <View style={styles.detail}>
-                  <Ionicons name="calendar-outline" size={16} color="#F58220" />
-                  <Text style={styles.detailText}>
-                    {driver.date} ({driver.day})
+                  <Text style={styles.destinationText}>
+                    {driver.destinationLabel}
                   </Text>
                 </View>
 
-                <View style={styles.detail}>
-                  <Ionicons name="people-outline" size={16} color="#F58220" />
-                  <Text style={styles.detailText}>
-                    {driver.seats} seats available
-                  </Text>
+                <View style={styles.detailsGrid}>
+                  <View style={styles.detail}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={16}
+                      color="#F58220"
+                    />
+                    <Text style={styles.detailText}>
+                      {driver.date} ({driver.day})
+                    </Text>
+                  </View>
+
+                  <View style={styles.detail}>
+                    <Ionicons name="people-outline" size={16} color="#F58220" />
+                    <Text style={styles.detailText}>
+                      {driver.seats} seats available
+                    </Text>
+                  </View>
+
+                  <View style={styles.detail}>
+                    <Ionicons name="time-outline" size={16} color="#F58220" />
+                    <Text style={styles.detailText}>
+                      🚗 {driver.departureTime} → 🏠 {driver.returnTime}
+                    </Text>
+                  </View>
+
+                  <View style={styles.detail}>
+                    <Ionicons name="bag-outline" size={16} color="#F58220" />
+                    <Text style={styles.price}>{driver.price} ₪</Text>
+                  </View>
                 </View>
 
-                <View style={styles.detail}>
-                  <Ionicons name="time-outline" size={16} color="#F58220" />
-                  <Text style={styles.detailText}>
-                    🚗 {driver.departureTime} → 🏠 {driver.returnTime}
-                  </Text>
-                </View>
+                <View style={styles.phoneLangRow}>
+                  <View style={styles.phoneRow}>
+                    <Ionicons name="call-outline" size={16} color="#F58220" />
+                    <Text style={styles.phoneText}>{driver.phone}</Text>
+                  </View>
 
-                <View style={styles.detail}>
-                  <Ionicons name="bag-outline" size={16} color="#F58220" />
-                  <Text style={styles.price}>{driver.price} ₪</Text>
-                </View>
-              </View>
-
-              <View style={styles.phoneLangRow}>
-                <View style={styles.phoneRow}>
-                  <Ionicons name="call-outline" size={16} color="#F58220" />
-                  <Text style={styles.phoneText}>{driver.phone}</Text>
-                </View>
-
-                <View style={styles.languagesRow}>
-                  {driver.languages.map((lang) => (
-                    <View key={lang} style={styles.languageBadge}>
-                      <Text style={styles.languageText}>
-                        {LANGUAGES_MAP[lang]}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              <Pressable
-                style={styles.commentsButton}
-                onPress={() =>
-                  setExpandedDriver(
-                    expandedDriver === driver.id ? null : driver.id
-                  )
-                }
-              >
-                <Ionicons name="chatbox-outline" size={15} color="#F58220" />
-
-                <Text style={styles.commentsText}>
-                  Comments ({driver.comments.length})
-                </Text>
-
-                <Ionicons
-                  name={
-                    expandedDriver === driver.id
-                      ? "chevron-up"
-                      : "chevron-down"
-                  }
-                  size={15}
-                  color="#F58220"
-                />
-              </Pressable>
-
-              {expandedDriver === driver.id && (
-                <View style={styles.commentsBox}>
-                  {driver.comments.map((comment, index) => (
-                    <View key={index} style={styles.commentItem}>
-                      <View style={styles.commentHeader}>
-                        <Text style={styles.commentUser}>{comment.user}</Text>
-
-                        <Text style={styles.commentStars}>
-                          {"★".repeat(comment.stars)}
+                  <View style={styles.languagesRow}>
+                    {driver.languages.map((lang) => (
+                      <View key={lang} style={styles.languageBadge}>
+                        <Text style={styles.languageText}>
+                          {LANGUAGES_MAP[lang] || lang}
                         </Text>
                       </View>
-
-                      <Text style={styles.commentText}>{comment.text}</Text>
-                    </View>
-                  ))}
+                    ))}
+                  </View>
                 </View>
-              )}
 
-              <Pressable
-                style={styles.bookButton}
-                onPress={() => handleSelectDriver(driver)}
-              >
-                <Text style={styles.bookButtonText}>Select & Book</Text>
-              </Pressable>
-            </View>
-          ))}
-        </View>
+                <Pressable
+                  style={styles.commentsButton}
+                  onPress={() =>
+                    setExpandedDriver(
+                      expandedDriver === driver.id ? null : driver.id,
+                    )
+                  }
+                >
+                  <Ionicons name="chatbox-outline" size={15} color="#F58220" />
+
+                  <Text style={styles.commentsText}>
+                    Comments ({driver.comments.length})
+                  </Text>
+
+                  <Ionicons
+                    name={
+                      expandedDriver === driver.id
+                        ? "chevron-up"
+                        : "chevron-down"
+                    }
+                    size={15}
+                    color="#F58220"
+                  />
+                </Pressable>
+
+                {expandedDriver === driver.id && (
+                  <View style={styles.commentsBox}>
+                    {driver.comments.length === 0 ? (
+                      <Text style={styles.commentText}>No comments yet.</Text>
+                    ) : (
+                      driver.comments.map((comment, index) => (
+                        <View key={index} style={styles.commentItem}>
+                          <View style={styles.commentHeader}>
+                            <Text style={styles.commentUser}>
+                              {comment.user}
+                            </Text>
+
+                            <Text style={styles.commentStars}>
+                              {"★".repeat(comment.stars)}
+                            </Text>
+                          </View>
+
+                          <Text style={styles.commentText}>{comment.text}</Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                )}
+
+                <Pressable
+                  style={styles.bookButton}
+                  onPress={() => handleSelectDriver(driver)}
+                >
+                  <Text style={styles.bookButtonText}>Select & Book</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -344,6 +356,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 30,
     paddingBottom: 40,
+  },
+  loadingBox: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 12,
+    color: "#7A5C4B",
+    fontWeight: "800",
   },
   backButton: {
     width: 45,
@@ -361,6 +383,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#7A5C4B",
     marginBottom: 26,
+  },
+  emptyCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E4DDD7",
+    borderRadius: 14,
+    padding: 28,
+    alignItems: "center",
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#111827",
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  emptyText: {
+    color: "#7A5C4B",
+    textAlign: "center",
+    lineHeight: 20,
   },
   list: {
     gap: 16,
