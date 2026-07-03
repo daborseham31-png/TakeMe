@@ -6,15 +6,11 @@ export default function RootLayout() {
     <>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
-<<<<<<< Updated upstream
-        <Stack.Screen name="signup" />
-        <Stack.Screen name="home" />
-        <Stack.Screen name="forgot-password" />
-        <Stack.Screen name="admin" />
-=======
-        <Stack.Screen name="home" />
->>>>>>> Stashed changes
+        <Stack.Screen name="login" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="modal" />
       </Stack>
+
       <StatusBar style="auto" />
     </>
   );

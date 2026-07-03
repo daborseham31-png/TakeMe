@@ -3,16 +3,16 @@ import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-    Alert,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
-import { auth, db } from "../firebase";
+import { auth, db } from "../../firebase";
 
 export default function SignUpScreen() {
   const [showPw, setShowPw] = useState(false);
@@ -56,7 +56,7 @@ export default function SignUpScreen() {
       });
 
       Alert.alert("Success", "Account created successfully!");
-      router.replace("/home");
+      router.replace("/(tabs)/home" as any);
     } catch (error: any) {
       Alert.alert("Sign up failed", error.message);
     }

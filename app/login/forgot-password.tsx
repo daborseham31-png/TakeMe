@@ -2,14 +2,14 @@ import { router } from "expo-router";
 import { sendPasswordResetEmail } from "firebase/auth";
 import React, { useState } from "react";
 import {
-    Pressable,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
-import { auth } from "../firebase";
+import { auth } from "../../firebase";
 
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState("");
