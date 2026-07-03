@@ -1,11 +1,12 @@
+import { router } from "expo-router";
 import React from "react";
 import {
-    Image,
-    Pressable,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    View,
+  Image,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 const logoImg = require("../../assets/images/logo-new.jpg");
@@ -27,7 +28,10 @@ export default function HomeScreen() {
           deliveries for your community.
         </Text>
 
-        <Pressable style={styles.primaryButton}>
+        <Pressable
+          style={styles.primaryButton}
+          onPress={() => router.push("/booking/ride-category")}
+        >
           <Text style={styles.primaryButtonText}>🔍 Find a Ride</Text>
         </Pressable>
 
