@@ -1,17 +1,22 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React from "react";
+import { collection, getDocs } from "firebase/firestore";
+import React, { useEffect, useState } from "react";
 import {
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
+import { db } from "../../../../firebase";
+
 type JobListing = {
-  id: number;
+  id: string;
   name: string;
   gender: "male" | "female";
   jobTypeEn: string;
@@ -36,126 +41,100 @@ const LANGUAGES_MAP: Record<string, string> = {
   ru: "Русский",
 };
 
-const mockListings: JobListing[] = [
-  {
-    id: 1,
-    name: "Ahmad Jabarin",
-    gender: "male",
-    jobTypeEn: "Carpenter",
-    descriptionEn: "Looking for a carpenter to help install a full kitchen",
-    hourlyRate: 80,
-    phone: "050-1234567",
-    workHoursFrom: "08:00",
-    workHoursTo: "16:00",
-    dayEn: "Sunday",
-    date: "2026-03-15",
-    workersNeeded: 2,
-    locationEn: "Nazareth",
-    rating: 4.8,
-    ratingCount: 23,
-    languages: ["ar", "he"],
-  },
-  {
-    id: 2,
-    name: "Yousef Khatib",
-    gender: "male",
-    jobTypeEn: "Blacksmith",
-    descriptionEn: "Looking for a blacksmith to help repair an iron gate",
-    hourlyRate: 70,
-    phone: "052-9876543",
-    workHoursFrom: "07:00",
-    workHoursTo: "14:00",
-    dayEn: "Monday",
-    date: "2026-03-16",
-    workersNeeded: 1,
-    locationEn: "Haifa",
-    rating: 4.5,
-    ratingCount: 15,
-    languages: ["ar", "en"],
-  },
-  {
-    id: 3,
-    name: "Sami Awad",
-    gender: "male",
-    jobTypeEn: "Cook",
-    descriptionEn: "Looking for a cook to help with a family party of 50 people",
-    hourlyRate: 60,
-    phone: "054-5551234",
-    workHoursFrom: "10:00",
-    workHoursTo: "18:00",
-    dayEn: "Friday",
-    date: "2026-03-20",
-    workersNeeded: 3,
-    locationEn: "Kafr Kanna",
-    rating: 4.9,
-    ratingCount: 41,
-    languages: ["ar", "he", "en"],
-  },
-  {
-    id: 4,
-    name: "Khaled Zoabi",
-    gender: "male",
-    jobTypeEn: "Painter",
-    descriptionEn: "Looking for a painter to help with a 4-room apartment",
-    hourlyRate: 55,
-    phone: "053-7778899",
-    workHoursFrom: "09:00",
-    workHoursTo: "17:00",
-    dayEn: "Tuesday",
-    date: "2026-03-17",
-    workersNeeded: 2,
-    locationEn: "Nazareth",
-    rating: 4.3,
-    ratingCount: 9,
-    languages: ["ar"],
-  },
-  {
-    id: 5,
-    name: "Lina Haddad",
-    gender: "female",
-    jobTypeEn: "Clothing Sales",
-    descriptionEn: "Looking for someone to work with me at a clothing store in Nazareth",
-    hourlyRate: 45,
-    phone: "050-3334455",
-    workHoursFrom: "09:00",
-    workHoursTo: "17:00",
-    dayEn: "Sunday",
-    date: "2026-03-15",
-    workersNeeded: 1,
-    locationEn: "Nazareth",
-    rating: 4.7,
-    ratingCount: 18,
-    languages: ["ar", "he"],
-  },
-  {
-    id: 6,
-    name: "Rania Masri",
-    gender: "female",
-    jobTypeEn: "Bakery Assistant",
-    descriptionEn: "Looking for someone to work with me at a cake and sweets shop",
-    hourlyRate: 50,
-    phone: "052-6667788",
-    workHoursFrom: "07:00",
-    workHoursTo: "15:00",
-    dayEn: "Monday",
-    date: "2026-03-16",
-    workersNeeded: 2,
-    locationEn: "Kafr Kanna",
-    rating: 4.9,
-    ratingCount: 32,
-    languages: ["ar", "ru"],
-  },
-];
+const isTodayOrFuture = (dateText: string) => {
+  const match = dateText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) return true;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  const jobDate = new Date(year, month - 1, day);
+  jobDate.setHours(0, 0, 0, 0);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return jobDate >= today;
+};
 
 export default function FindWorkScreen() {
-const handleApply = (listing: JobListing) => {
-  router.push({
-    pathname: "/booking/work-errand/work/apply",
-    params: {
-      job: JSON.stringify(listing),
-    },
-  } as any);
-};
+  const [listings, setListings] = useState<JobListing[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadWorkJobs();
+  }, []);
+
+  const loadWorkJobs = async () => {
+    try {
+      setLoading(true);
+
+      const snapshot = await getDocs(collection(db, "workJobs"));
+
+      const jobs: JobListing[] = snapshot.docs
+        .map((docSnap) => {
+          const data = docSnap.data();
+
+          return {
+            id: docSnap.id,
+            name: data.employerName || "Employer",
+            gender: (data.gender === "female" ? "female" : "male") as
+              | "male"
+              | "female",
+            jobTypeEn: data.jobTitle || "Work Job",
+            descriptionEn: data.description || "No description",
+            hourlyRate: Number(data.hourlyPay || 0),
+            phone: data.phone || "",
+            workHoursFrom: data.startTime || "",
+            workHoursTo: data.endTime || "",
+            dayEn: data.day || "",
+            date: data.date || "",
+            workersNeeded: Number(data.workersNeeded || 1),
+            locationEn: data.location || "",
+            rating: Number(data.rating || 4.8),
+            ratingCount: Number(data.reviews || 0),
+            languages: Array.isArray(data.languages) ? data.languages : [],
+          };
+        })
+        .filter((job) => isTodayOrFuture(job.date))
+        .sort((a, b) => {
+          if (a.date === b.date) {
+            return a.workHoursFrom.localeCompare(b.workHoursFrom);
+          }
+
+          return a.date.localeCompare(b.date);
+        });
+
+      setListings(jobs);
+    } catch (error: any) {
+      console.log("Load work jobs error:", error.message);
+      Alert.alert("Error", "Could not load work jobs.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApply = (listing: JobListing) => {
+    router.push({
+      pathname: "/booking/work-errand/work/apply",
+      params: {
+        job: JSON.stringify(listing),
+      },
+    } as any);
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.loadingBox}>
+          <ActivityIndicator size="large" color="#F58220" />
+          <Text style={styles.loadingText}>Loading work jobs...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -170,90 +149,110 @@ const handleApply = (listing: JobListing) => {
           Employers looking for workers — apply now!
         </Text>
 
-        <View style={styles.list}>
-          {mockListings.map((listing) => (
-            <View key={listing.id} style={styles.card}>
-              <View style={styles.header}>
-                <View style={styles.leftHeader}>
-                  <Text style={styles.name}>
-                    {listing.name}{" "}
-                    <Text style={styles.gender}>
-                      {listing.gender === "male" ? "♂" : "♀"}
+        {listings.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="briefcase-outline" size={44} color="#7A665C" />
+            <Text style={styles.emptyTitle}>No work jobs found</Text>
+            <Text style={styles.emptyText}>
+              When someone posts a Work Helpers job, it will appear here.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.list}>
+            {listings.map((listing) => (
+              <View key={listing.id} style={styles.card}>
+                <View style={styles.header}>
+                  <View style={styles.leftHeader}>
+                    <Text style={styles.name}>
+                      {listing.name}{" "}
+                      <Text style={styles.gender}>
+                        {listing.gender === "male" ? "♂" : "♀"}
+                      </Text>
                     </Text>
-                  </Text>
 
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{listing.jobTypeEn}</Text>
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{listing.jobTypeEn}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.ratingBox}>
+                    <Ionicons name="star" size={16} color="#F58220" />
+                    <Text style={styles.ratingNumber}>{listing.rating}</Text>
+                    <Text style={styles.ratingCount}>
+                      ({listing.ratingCount})
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.description}>{listing.descriptionEn}</Text>
+
+                <View style={styles.detailsGrid}>
+                  <View style={styles.detail}>
+                    <Ionicons name="time-outline" size={16} color="#7A665C" />
+                    <Text style={styles.detailText}>
+                      {listing.workHoursFrom} - {listing.workHoursTo}
+                    </Text>
+                  </View>
+
+                  <View style={styles.detail}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={16}
+                      color="#7A665C"
+                    />
+                    <Text style={styles.detailText}>
+                      {listing.dayEn} · {listing.date}
+                    </Text>
+                  </View>
+
+                  <View style={styles.detail}>
+                    <Ionicons
+                      name="location-outline"
+                      size={16}
+                      color="#7A665C"
+                    />
+                    <Text style={styles.detailText}>{listing.locationEn}</Text>
+                  </View>
+
+                  <View style={styles.detail}>
+                    <Ionicons name="people-outline" size={16} color="#7A665C" />
+                    <Text style={styles.detailText}>
+                      {listing.workersNeeded} workers needed
+                    </Text>
+                  </View>
+
+                  <View style={styles.detail}>
+                    <Ionicons name="call-outline" size={16} color="#7A665C" />
+                    <Text style={styles.detailText}>{listing.phone}</Text>
+                  </View>
+
+                  <View style={styles.detail}>
+                    <Text style={styles.price}>₪{listing.hourlyRate}/hr</Text>
                   </View>
                 </View>
 
-                <View style={styles.ratingBox}>
-                  <Ionicons name="star" size={16} color="#F58220" />
-                  <Text style={styles.ratingNumber}>{listing.rating}</Text>
-                  <Text style={styles.ratingCount}>({listing.ratingCount})</Text>
+                <View style={styles.languagesRow}>
+                  <Ionicons name="language-outline" size={16} color="#7A665C" />
+
+                  {listing.languages.map((lang) => (
+                    <View key={lang} style={styles.languageBadge}>
+                      <Text style={styles.languageText}>
+                        {LANGUAGES_MAP[lang] || lang}
+                      </Text>
+                    </View>
+                  ))}
                 </View>
+
+                <Pressable
+                  style={styles.applyButton}
+                  onPress={() => handleApply(listing)}
+                >
+                  <Text style={styles.applyText}>Apply for This Job</Text>
+                </Pressable>
               </View>
-
-              <Text style={styles.description}>{listing.descriptionEn}</Text>
-
-              <View style={styles.detailsGrid}>
-                <View style={styles.detail}>
-                  <Ionicons name="time-outline" size={16} color="#7A665C" />
-                  <Text style={styles.detailText}>
-                    {listing.workHoursFrom} - {listing.workHoursTo}
-                  </Text>
-                </View>
-
-                <View style={styles.detail}>
-                  <Ionicons name="calendar-outline" size={16} color="#7A665C" />
-                  <Text style={styles.detailText}>
-                    {listing.dayEn} · {listing.date}
-                  </Text>
-                </View>
-
-                <View style={styles.detail}>
-                  <Ionicons name="location-outline" size={16} color="#7A665C" />
-                  <Text style={styles.detailText}>{listing.locationEn}</Text>
-                </View>
-
-                <View style={styles.detail}>
-                  <Ionicons name="people-outline" size={16} color="#7A665C" />
-                  <Text style={styles.detailText}>
-                    {listing.workersNeeded} workers needed
-                  </Text>
-                </View>
-
-                <View style={styles.detail}>
-                  <Ionicons name="call-outline" size={16} color="#7A665C" />
-                  <Text style={styles.detailText}>{listing.phone}</Text>
-                </View>
-
-                <View style={styles.detail}>
-                  <Text style={styles.price}>₪{listing.hourlyRate}/hr</Text>
-                </View>
-              </View>
-
-              <View style={styles.languagesRow}>
-                <Ionicons name="language-outline" size={16} color="#7A665C" />
-
-                {listing.languages.map((lang) => (
-                  <View key={lang} style={styles.languageBadge}>
-                    <Text style={styles.languageText}>
-                      {LANGUAGES_MAP[lang]}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-
-              <Pressable
-                style={styles.applyButton}
-                onPress={() => handleApply(listing)}
-              >
-                <Text style={styles.applyText}>Apply for This Job</Text>
-              </Pressable>
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -268,6 +267,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 35,
     paddingBottom: 40,
+  },
+  loadingBox: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 12,
+    color: "#7A5C4B",
+    fontWeight: "800",
   },
   backButton: {
     width: 45,
@@ -288,6 +297,26 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 10,
     marginBottom: 28,
+  },
+  emptyCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E4DDD7",
+    borderRadius: 14,
+    padding: 28,
+    alignItems: "center",
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#111827",
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  emptyText: {
+    color: "#7A5C4B",
+    textAlign: "center",
+    lineHeight: 20,
   },
   list: {
     gap: 16,
