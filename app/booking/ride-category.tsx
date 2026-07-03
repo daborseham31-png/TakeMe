@@ -59,7 +59,7 @@ const categories: Category[] = [
 export default function RideCategoryScreen() {
   const handleSelect = (key: string) => {
     const routes: Record<string, string> = {
-      school: "/school-ride",
+      school: "/booking/school",
       workErrands: "/work-errands",
       personal: "/personal-ride",
       delivery: "/item-delivery",
