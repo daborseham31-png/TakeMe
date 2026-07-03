@@ -2,12 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React from "react";
 import {
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 type Category = {
@@ -60,7 +60,7 @@ export default function RideCategoryScreen() {
   const handleSelect = (key: string) => {
     const routes: Record<string, string> = {
       school: "/school-ride",
-      workErrands: "/work-errands",
+      workErrands: "/booking/work-errand",
       personal: "/personal-ride",
       delivery: "/item-delivery",
       help: "/roadside-help",
