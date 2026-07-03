@@ -32,10 +32,6 @@ export default function WorkErrandScreen() {
           Choose the type of ride or service
         </Text>
 
-        <Pressable style={styles.backTextBox} onPress={() => router.back()}>
-          <Text style={styles.backText}>← Back to categories</Text>
-        </Pressable>
-
         <Text style={styles.sectionTitle}>Work & Errands</Text>
 
         <View style={styles.cardsRow}>
@@ -95,14 +91,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 42,
   },
-  backTextBox: {
-    alignSelf: "flex-start",
-    marginBottom: 25,
-  },
-  backText: {
-    fontSize: 16,
-    color: "#7A5C4B",
-  },
+
   sectionTitle: {
     fontSize: 24,
     fontWeight: "900",
