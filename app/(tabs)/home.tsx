@@ -30,12 +30,15 @@ export default function HomeScreen() {
 
         <Pressable
           style={styles.primaryButton}
-          onPress={() => router.push("/booking/ride-category")}
+          onPress={() => router.push("/booking/ride-category" as any)}
         >
           <Text style={styles.primaryButtonText}>🔍 Find a Ride</Text>
         </Pressable>
 
-        <Pressable style={styles.outlineButton}>
+        <Pressable
+          style={styles.outlineButton}
+          onPress={() => router.push("/driver/add-route" as any)}
+        >
           <Text style={styles.outlineButtonText}>Become a Driver →</Text>
         </Pressable>
 
