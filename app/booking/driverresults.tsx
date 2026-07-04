@@ -1,28 +1,47 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 import { db } from "../../firebase";
 
+type DriverProfile = {
+  name?: string;
+  phone?: string;
+  age?: number | string;
+  driverAge?: number | string;
+  gender?: string;
+  language?: string;
+  languages?: string[];
+};
+
 type DriverRoute = {
   id: string;
   driverId?: string;
+
   driverName?: string;
   phone?: string;
-  car?: string;
   gender?: "male" | "female";
   languages?: string[];
+
+  profile?: DriverProfile;
+
+  car?: string;
+  carColor?: string;
+  carPlate?: string;
+
+  hasChildSeat?: boolean;
+  allowsPets?: boolean;
 
   category?: string;
   from?: string;
@@ -31,10 +50,16 @@ type DriverRoute = {
   toNormalized?: string;
 
   tripDate?: string;
+  deliveryDate?: string;
+  day?: string;
   availableDays?: string[];
   time?: string;
   price?: number;
   seats?: number;
+
+  storeName?: string;
+  recipientPhone?: string;
+  itemDescription?: string;
 
   rating?: number;
   reviews?: number;
@@ -57,9 +82,7 @@ const LANGUAGES: Record<string, string> = {
 
 const MAX_TIME_DIFF_MINUTES = 30;
 
-const normalize = (value: string) => {
-  return value.trim().toLowerCase();
-};
+const normalize = (value: string) => value.trim().toLowerCase();
 
 const locationMatches = (driverValue: string, userValue: string) => {
   const driver = normalize(driverValue);
@@ -83,7 +106,7 @@ const timeToMinutes = (time: string) => {
 };
 
 const isTimeClose = (driverTime: string | undefined, passengerTime: string) => {
-  if (!passengerTime) return false;
+  if (!passengerTime) return true;
   if (!driverTime) return false;
 
   const driverMinutes = timeToMinutes(driverTime);
@@ -91,9 +114,99 @@ const isTimeClose = (driverTime: string | undefined, passengerTime: string) => {
 
   if (driverMinutes === null || passengerMinutes === null) return false;
 
-  const difference = Math.abs(driverMinutes - passengerMinutes);
+  return Math.abs(driverMinutes - passengerMinutes) <= MAX_TIME_DIFF_MINUTES;
+};
 
-  return difference <= MAX_TIME_DIFF_MINUTES;
+const languageToCode = (value: any) => {
+  const clean = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    clean === "ar" ||
+    clean === "arabic" ||
+    clean === "عربي" ||
+    clean === "العربية"
+  ) {
+    return "ar";
+  }
+
+  if (clean === "he" || clean === "hebrew" || clean === "עברית") {
+    return "he";
+  }
+
+  if (clean === "en" || clean === "english") {
+    return "en";
+  }
+
+  if (clean === "ru" || clean === "russian" || clean === "русский") {
+    return "ru";
+  }
+
+  return "";
+};
+
+const getProfileLanguages = (profile?: DriverProfile) => {
+  if (!profile) return [];
+
+  if (Array.isArray(profile.languages)) {
+    return profile.languages
+      .map(languageToCode)
+      .filter(Boolean)
+      .filter((value, index, array) => array.indexOf(value) === index);
+  }
+
+  const singleLanguage = languageToCode(profile.language);
+
+  return singleLanguage ? [singleLanguage] : [];
+};
+
+const getDriverLanguages = (driver: DriverRoute) => {
+  const profileLanguages = getProfileLanguages(driver.profile);
+
+  if (profileLanguages.length > 0) {
+    return profileLanguages;
+  }
+
+  if (Array.isArray(driver.languages)) {
+    return driver.languages
+      .map(languageToCode)
+      .filter(Boolean)
+      .filter((value, index, array) => array.indexOf(value) === index);
+  }
+
+  return [];
+};
+
+const normalizeGender = (value?: string) => {
+  const gender = String(value || "").toLowerCase();
+
+  if (gender === "female") return "female";
+  if (gender === "male") return "male";
+
+  return "";
+};
+
+const getDriverGender = (driver: DriverRoute) => {
+  return (
+    normalizeGender(driver.profile?.gender) || normalizeGender(driver.gender)
+  );
+};
+
+const getDriverName = (driver: DriverRoute) => {
+  return driver.profile?.name || driver.driverName || "Driver";
+};
+
+const getDateText = (driver: DriverRoute) => {
+  return driver.tripDate || driver.deliveryDate || "";
+};
+
+const getDaysText = (driver: DriverRoute) => {
+  if (Array.isArray(driver.availableDays) && driver.availableDays.length > 0) {
+    return driver.availableDays.join(", ");
+  }
+
+  return driver.day || "";
 };
 
 export default function DriverResultsScreen() {
@@ -138,55 +251,90 @@ export default function DriverResultsScreen() {
 
       const snapshot = await getDocs(collection(db, "driverRoutes"));
 
-      const allDrivers: DriverRoute[] = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
+      const routesWithoutProfiles: DriverRoute[] = snapshot.docs.map(
+        (docSnap) => {
+          const data = docSnap.data();
 
-        return {
-          id: docSnap.id,
-          ...(data as Omit<DriverRoute, "id">),
-        };
-      });
+          return {
+            id: docSnap.id,
+            ...(data as Omit<DriverRoute, "id">),
+          };
+        },
+      );
 
-      const filtered = allDrivers.filter((driver) => {
+      const routesWithProfiles: DriverRoute[] = await Promise.all(
+        routesWithoutProfiles.map(async (driver) => {
+          if (!driver.driverId) {
+            return driver;
+          }
+
+          try {
+            const profileSnap = await getDoc(doc(db, "users", driver.driverId));
+
+            if (!profileSnap.exists()) {
+              return driver;
+            }
+
+            return {
+              ...driver,
+              profile: profileSnap.data() as DriverProfile,
+            };
+          } catch {
+            return driver;
+          }
+        }),
+      );
+
+      const filtered = routesWithProfiles.filter((driver) => {
         const driverFrom =
           driver.fromNormalized || normalize(driver.from || "");
         const driverTo = driver.toNormalized || normalize(driver.to || "");
 
         const activeMatches = driver.active !== false;
-
         const categoryMatches = !category || driver.category === category;
 
         const fromMatches = locationMatches(driverFrom, from);
         const toMatches = locationMatches(driverTo, to);
 
+        const driverGender = getDriverGender(driver);
+        const driverLanguages = getDriverLanguages(driver);
+
         const genderMatches =
-          genderPref === "any" || driver.gender === genderPref;
+          genderPref === "any" || driverGender === genderPref;
 
         const languageMatches =
           selectedLanguages.length === 0 ||
-          selectedLanguages.some((lang) =>
-            (driver.languages || []).includes(lang),
-          );
+          selectedLanguages.some((lang) => driverLanguages.includes(lang));
 
-        const seatsMatches = Number(driver.seats || 0) >= seats;
+        const isDelivery = driver.category === "delivery";
 
-        const dateMatches = !requestedDate || driver.tripDate === requestedDate;
+        const seatsMatches = isDelivery
+          ? true
+          : Number(driver.seats || 0) >= seats;
+
+        const dateMatches =
+          !requestedDate ||
+          driver.tripDate === requestedDate ||
+          driver.deliveryDate === requestedDate;
 
         let timeMatches = true;
 
-        if (requestedDays.length > 0) {
+        if (isDelivery) {
+          timeMatches =
+            !requestedTime || isTimeClose(driver.time, requestedTime);
+        } else if (requestedDays.length > 0) {
           timeMatches = requestedDays.some((day) => {
             const driverDays = driver.availableDays || [];
-            const driverWorksThisDay = driverDays.includes(day);
             const passengerTimeForDay = requestedDayTimes[day];
 
             return (
-              driverWorksThisDay &&
+              driverDays.includes(day) &&
               isTimeClose(driver.time, passengerTimeForDay)
             );
           });
         } else {
-          timeMatches = isTimeClose(driver.time, requestedTime);
+          timeMatches =
+            !requestedTime || isTimeClose(driver.time, requestedTime);
         }
 
         return (
@@ -214,9 +362,9 @@ export default function DriverResultsScreen() {
   const handleBookDriver = (driver: DriverRoute) => {
     Alert.alert(
       "Booking Confirmed",
-      `You selected ${
-        driver.driverName || "this driver"
-      }. The booking will be added to My Bookings.`,
+      `You selected ${getDriverName(
+        driver,
+      )}. The booking will be added to My Bookings.`,
     );
 
     router.push("/(tabs)/bookings" as any);
@@ -253,161 +401,334 @@ export default function DriverResultsScreen() {
             <Text style={styles.emptyTitle}>No drivers found</Text>
             <Text style={styles.emptyText}>
               Try changing pickup location, destination, time, gender, language,
-              or seats.
+              date, or seats.
             </Text>
           </View>
         ) : (
-          drivers.map((driver) => {
-            const totalPrice = Number(driver.price || 0) * seats;
-            const expanded = expandedDriver === driver.id;
-            const comments = driver.comments || [];
+          <View style={styles.list}>
+            {drivers.map((driver) => {
+              const isDelivery = driver.category === "delivery";
+              const totalPrice =
+                Number(driver.price || 0) * (isDelivery ? 1 : seats);
 
-            return (
-              <View key={driver.id} style={styles.card}>
-                <View style={styles.topRow}>
-                  <View style={styles.driverInfoRow}>
-                    <View style={styles.avatar}>
-                      <Ionicons
-                        name="person-outline"
-                        size={28}
-                        color="#B86115"
-                      />
+              const expanded = expandedDriver === driver.id;
+              const comments = driver.comments || [];
+              const driverLanguages = getDriverLanguages(driver);
+              const dateText = getDateText(driver);
+              const daysText = getDaysText(driver);
+              const driverGender = getDriverGender(driver);
+
+              return (
+                <View key={driver.id} style={styles.card}>
+                  <View style={styles.topRow}>
+                    <View style={styles.driverInfoRow}>
+                      <View style={styles.avatar}>
+                        <Ionicons
+                          name="person-outline"
+                          size={29}
+                          color="#F58220"
+                        />
+                      </View>
+
+                      <View style={styles.driverTextBox}>
+                        <Text style={styles.driverName}>
+                          {getDriverName(driver)}
+                        </Text>
+
+                        <View style={styles.driverMetaRow}>
+                          {driverGender ? (
+                            <>
+                              <Text style={styles.genderText}>
+                                {driverGender === "female" ? "♀" : "♂"}
+                              </Text>
+                              <Text style={styles.dot}>•</Text>
+                            </>
+                          ) : null}
+
+                          <Ionicons
+                            name="location-outline"
+                            size={15}
+                            color="#7C5F46"
+                          />
+
+                          <Text style={styles.driverMetaText}>
+                            {driver.from || from} → {driver.to || to}
+                          </Text>
+                        </View>
+                      </View>
                     </View>
 
-                    <View style={styles.driverTextBox}>
-                      <Text style={styles.driverName}>
-                        {driver.driverName || "Driver"}
+                    <View style={styles.ratingBox}>
+                      <Ionicons name="star" size={16} color="#B86115" />
+                      <Text style={styles.ratingText}>
+                        {driver.rating || 4.8}
                       </Text>
-
-                      <Text style={styles.carText}>
-                        {driver.car || "Car information"}
-                      </Text>
-
-                      <Text style={styles.localText}>
-                        📍 Local driver - {driver.from} to {driver.to}
-                      </Text>
-
-                      {driver.time && (
-                        <Text style={styles.timeText}>
-                          Departure time: {driver.time}
-                        </Text>
-                      )}
-
-                      {driver.tripDate && (
-                        <Text style={styles.timeText}>
-                          Date: {driver.tripDate}
-                        </Text>
-                      )}
-
-                      {driver.availableDays?.length ? (
-                        <Text style={styles.timeText}>
-                          Days: {driver.availableDays.join(", ")}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-
-                  <View style={styles.ratingBox}>
-                    <Ionicons name="star" size={15} color="#B86115" />
-                    <Text style={styles.ratingText}>
-                      {driver.rating || 4.8}
-                    </Text>
-                    <Text style={styles.reviewCount}>
-                      ({driver.reviews || 0})
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.detailsRow}>
-                  <View style={styles.detailItem}>
-                    <Ionicons name="cash-outline" size={18} color="#F58220" />
-                    <Text style={styles.detailText}>{totalPrice} ₪</Text>
-                  </View>
-
-                  <View style={styles.detailItem}>
-                    <Ionicons name="time-outline" size={18} color="#F58220" />
-                    <Text style={styles.detailText}>
-                      {driver.eta || 10} min
-                    </Text>
-                  </View>
-
-                  <View style={styles.detailItem}>
-                    <Ionicons name="people-outline" size={18} color="#F58220" />
-                    <Text style={styles.detailText}>
-                      {driver.seats || 1} seats
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.languageRow}>
-                  {(driver.languages || []).map((lang) => (
-                    <View key={lang} style={styles.languageBadge}>
-                      <Text style={styles.languageText}>
-                        {LANGUAGES[lang] || lang}
+                      <Text style={styles.reviewCount}>
+                        ({driver.reviews || 0})
                       </Text>
                     </View>
-                  ))}
-                </View>
+                  </View>
 
-                <Pressable
-                  style={styles.reviewsButton}
-                  onPress={() => setExpandedDriver(expanded ? null : driver.id)}
-                >
-                  <Ionicons
-                    name="chatbubble-outline"
-                    size={16}
-                    color="#F58220"
-                  />
-                  <Text style={styles.reviewsButtonText}>
-                    Reviews ({comments.length})
-                  </Text>
-                  <Ionicons
-                    name={expanded ? "chevron-up" : "chevron-down"}
-                    size={16}
-                    color="#F58220"
-                  />
-                </Pressable>
-
-                {expanded && (
-                  <View style={styles.commentsBox}>
-                    {comments.length === 0 ? (
-                      <Text style={styles.commentText}>
-                        No reviews yet for this driver.
-                      </Text>
-                    ) : (
-                      comments.map((comment, index) => (
-                        <View key={index} style={styles.commentItem}>
-                          <Text style={styles.commentUser}>{comment.user}</Text>
-
-                          <View style={styles.starsRow}>
-                            {Array.from({ length: comment.stars }).map(
-                              (_, i) => (
-                                <Ionicons
-                                  key={i}
-                                  name="star"
-                                  size={12}
-                                  color="#F58220"
-                                />
-                              ),
-                            )}
+                  <View style={styles.detailsPanel}>
+                    <View style={styles.detailsColumn}>
+                      {(dateText || daysText) && (
+                        <View style={styles.detailRow}>
+                          <View style={styles.iconCircle}>
+                            <Ionicons
+                              name="calendar-outline"
+                              size={17}
+                              color="#F58220"
+                            />
                           </View>
 
-                          <Text style={styles.commentText}>{comment.text}</Text>
+                          <View style={styles.detailTextBox}>
+                            {dateText ? (
+                              <Text style={styles.detailMainText}>
+                                {dateText}
+                              </Text>
+                            ) : null}
+
+                            {daysText ? (
+                              <Text style={styles.detailSubText}>
+                                {daysText}
+                              </Text>
+                            ) : null}
+                          </View>
                         </View>
-                      ))
+                      )}
+
+                      <View style={styles.softLine} />
+
+                      <View style={styles.detailRow}>
+                        <View style={styles.iconCircle}>
+                          <Ionicons
+                            name="time-outline"
+                            size={17}
+                            color="#F58220"
+                          />
+                        </View>
+
+                        <View style={styles.detailTextBox}>
+                          <Text style={styles.detailMainText}>
+                            {driver.time || "--:--"}
+                          </Text>
+                          <Text style={styles.detailSubText}>
+                            {isDelivery ? "Arrival time" : "Departure time"}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={styles.verticalDivider} />
+
+                    <View style={styles.detailsColumn}>
+                      {!isDelivery && (
+                        <View style={styles.detailRow}>
+                          <View style={styles.iconCircle}>
+                            <Ionicons
+                              name="people-outline"
+                              size={17}
+                              color="#F58220"
+                            />
+                          </View>
+
+                          <View style={styles.detailTextBox}>
+                            <Text style={styles.detailMainText}>
+                              {driver.seats || 1} seats
+                            </Text>
+                            <Text style={styles.detailSubText}>Available</Text>
+                          </View>
+                        </View>
+                      )}
+
+                      {!isDelivery && <View style={styles.softLine} />}
+
+                      <View style={styles.detailRow}>
+                        <View style={styles.iconCircle}>
+                          <Ionicons
+                            name="bag-outline"
+                            size={17}
+                            color="#F58220"
+                          />
+                        </View>
+
+                        <View style={styles.detailTextBox}>
+                          <Text style={styles.priceText}>{totalPrice} ₪</Text>
+                          <Text style={styles.detailSubText}>Price</Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.badgesRow}>
+                    {driverLanguages.map((lang) => (
+                      <View key={lang} style={styles.languageBadge}>
+                        <Ionicons
+                          name="language-outline"
+                          size={15}
+                          color="#178C7B"
+                        />
+                        <Text style={styles.languageText}>
+                          {LANGUAGES[lang] || lang}
+                        </Text>
+                      </View>
+                    ))}
+
+                    {typeof driver.allowsPets === "boolean" && (
+                      <View
+                        style={[
+                          styles.petBadge,
+                          driver.allowsPets
+                            ? styles.petAllowedBadge
+                            : styles.petNotAllowedBadge,
+                        ]}
+                      >
+                        <Ionicons
+                          name={
+                            driver.allowsPets ? "paw-outline" : "close-outline"
+                          }
+                          size={15}
+                          color={driver.allowsPets ? "#F58220" : "#7C5F46"}
+                        />
+
+                        <Text
+                          style={[
+                            styles.petText,
+                            driver.allowsPets
+                              ? styles.petAllowedText
+                              : styles.petNotAllowedText,
+                          ]}
+                        >
+                          {driver.allowsPets ? "Pets allowed" : "No pets"}
+                        </Text>
+                      </View>
+                    )}
+
+                    {typeof driver.hasChildSeat === "boolean" && (
+                      <View
+                        style={[
+                          styles.childSeatBadge,
+                          driver.hasChildSeat
+                            ? styles.childSeatAllowedBadge
+                            : styles.childSeatNotAllowedBadge,
+                        ]}
+                      >
+                        <Ionicons
+                          name={
+                            driver.hasChildSeat
+                              ? "shield-checkmark-outline"
+                              : "close-outline"
+                          }
+                          size={15}
+                          color={driver.hasChildSeat ? "#2563EB" : "#7C5F46"}
+                        />
+
+                        <Text
+                          style={[
+                            styles.childSeatText,
+                            driver.hasChildSeat
+                              ? styles.childSeatAllowedText
+                              : styles.childSeatNotAllowedText,
+                          ]}
+                        >
+                          {driver.hasChildSeat ? "Child seat" : "No child seat"}
+                        </Text>
+                      </View>
                     )}
                   </View>
-                )}
 
-                <Pressable
-                  style={styles.bookButton}
-                  onPress={() => handleBookDriver(driver)}
-                >
-                  <Text style={styles.bookButtonText}>Book This Driver</Text>
-                </Pressable>
-              </View>
-            );
-          })
+                  <View style={styles.divider} />
+
+                  <Pressable
+                    style={styles.reviewsButton}
+                    onPress={() =>
+                      setExpandedDriver(expanded ? null : driver.id)
+                    }
+                  >
+                    <View style={styles.reviewsLeft}>
+                      <Ionicons
+                        name="chatbubble-ellipses-outline"
+                        size={18}
+                        color="#F58220"
+                      />
+
+                      <Text style={styles.reviewsButtonText}>
+                        Reviews ({comments.length})
+                      </Text>
+                    </View>
+
+                    <Ionicons
+                      name={expanded ? "chevron-up" : "chevron-down"}
+                      size={20}
+                      color="#7C5F46"
+                    />
+                  </Pressable>
+
+                  {expanded && (
+                    <View style={styles.commentsBox}>
+                      {comments.length === 0 ? (
+                        <View style={styles.noCommentsRow}>
+                          <View style={styles.noCommentsIcon}>
+                            <Ionicons
+                              name="chatbox-outline"
+                              size={18}
+                              color="#7C5F46"
+                            />
+                          </View>
+
+                          <Text style={styles.commentText}>
+                            No reviews yet for this driver.
+                          </Text>
+                        </View>
+                      ) : (
+                        comments.map((comment, index) => (
+                          <View key={index} style={styles.commentItem}>
+                            <View style={styles.commentHeader}>
+                              <Text style={styles.commentUser}>
+                                {comment.user}
+                              </Text>
+
+                              <View style={styles.starsRow}>
+                                {Array.from({ length: comment.stars }).map(
+                                  (_, i) => (
+                                    <Ionicons
+                                      key={i}
+                                      name="star"
+                                      size={12}
+                                      color="#F58220"
+                                    />
+                                  ),
+                                )}
+                              </View>
+                            </View>
+
+                            <Text style={styles.commentText}>
+                              {comment.text}
+                            </Text>
+                          </View>
+                        ))
+                      )}
+                    </View>
+                  )}
+
+                  <Pressable
+                    style={styles.bookButton}
+                    onPress={() => handleBookDriver(driver)}
+                  >
+                    <Text style={styles.bookButtonText}>Book This Driver</Text>
+
+                    <View style={styles.bookArrowCircle}>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={22}
+                        color="#F58220"
+                      />
+                    </View>
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -458,7 +779,7 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: "#E7DCD1",
     padding: 30,
@@ -476,29 +797,39 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
   },
+  list: {
+    gap: 18,
+  },
   card: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E7DCD1",
-    borderRadius: 16,
+    borderRadius: 24,
     padding: 18,
-    marginBottom: 16,
+    marginBottom: 18,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 14,
+    elevation: 2,
   },
   topRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     gap: 10,
+    marginBottom: 20,
   },
   driverInfoRow: {
     flexDirection: "row",
     flex: 1,
     gap: 12,
+    alignItems: "center",
   },
   avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     backgroundColor: "#FFF2E8",
     alignItems: "center",
     justifyContent: "center",
@@ -507,118 +838,264 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   driverName: {
-    fontSize: 19,
+    fontSize: 21,
     fontWeight: "900",
     color: "#111827",
+    marginBottom: 5,
   },
-  carText: {
+  driverMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    flexWrap: "wrap",
+  },
+  genderText: {
     color: "#7C5F46",
-    marginTop: 2,
+    fontSize: 15,
+    fontWeight: "900",
   },
-  localText: {
-    color: "#F58220",
-    marginTop: 4,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  timeText: {
+  dot: {
     color: "#7C5F46",
-    marginTop: 4,
-    fontSize: 12,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  driverMetaText: {
+    color: "#7C5F46",
+    fontSize: 14,
     fontWeight: "700",
+    flexShrink: 1,
   },
   ratingBox: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
+    gap: 4,
     backgroundColor: "#FFF2E8",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 15,
   },
   ratingText: {
     fontWeight: "900",
     color: "#111827",
+    fontSize: 15,
   },
   reviewCount: {
     color: "#7C5F46",
     fontSize: 12,
   },
-  detailsRow: {
+  detailsPanel: {
+    flexDirection: "row",
+    backgroundColor: "#FBF7F1",
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 14,
+  },
+  detailsColumn: {
+    flex: 1,
+    gap: 10,
+  },
+  verticalDivider: {
+    width: 1,
+    backgroundColor: "#E9DCD0",
+    marginHorizontal: 14,
+  },
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 42,
+  },
+  iconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    backgroundColor: "#FFF2E8",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  detailTextBox: {
+    flex: 1,
+  },
+  detailMainText: {
+    color: "#111827",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  detailSubText: {
+    color: "#7C5F46",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  priceText: {
+    color: "#111827",
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  softLine: {
+    height: 1,
+    backgroundColor: "#E9DCD0",
+  },
+  badgesRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 18,
-    marginTop: 16,
-    marginBottom: 10,
+    gap: 9,
+    marginBottom: 16,
   },
-  detailItem: {
+  languageBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-  },
-  detailText: {
-    fontWeight: "900",
-    color: "#111827",
-  },
-  languageRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 10,
-  },
-  languageBadge: {
-    backgroundColor: "#3F9D96",
+    backgroundColor: "#EAF8F5",
+    borderWidth: 1,
+    borderColor: "#9DDDD2",
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
   },
   languageText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    fontSize: 12,
+    color: "#178C7B",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  petBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  petAllowedBadge: {
+    backgroundColor: "#FFF3E6",
+    borderColor: "#FDBA74",
+  },
+  petNotAllowedBadge: {
+    backgroundColor: "#F5F1ED",
+    borderColor: "#E4DDD7",
+  },
+  petText: {
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  petAllowedText: {
+    color: "#F58220",
+  },
+  petNotAllowedText: {
+    color: "#7C5F46",
+  },
+  childSeatBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  childSeatAllowedBadge: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#93C5FD",
+  },
+  childSeatNotAllowedBadge: {
+    backgroundColor: "#F5F1ED",
+    borderColor: "#E4DDD7",
+  },
+  childSeatText: {
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  childSeatAllowedText: {
+    color: "#2563EB",
+  },
+  childSeatNotAllowedText: {
+    color: "#7C5F46",
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#F0E5DC",
+    marginBottom: 14,
   },
   reviewsButton: {
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    gap: 6,
-    marginTop: 6,
-    marginBottom: 12,
+    marginBottom: 14,
+  },
+  reviewsLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
   },
   reviewsButtonText: {
-    color: "#F58220",
-    fontWeight: "800",
+    color: "#3C2319",
+    fontSize: 15,
+    fontWeight: "900",
   },
   commentsBox: {
-    backgroundColor: "#FBF7F1",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
+    backgroundColor: "#F8F4EF",
+    borderRadius: 16,
+    padding: 13,
+    marginBottom: 16,
+    gap: 10,
+  },
+  noCommentsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  noCommentsIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#EFE6DD",
+    alignItems: "center",
+    justifyContent: "center",
   },
   commentItem: {
-    marginBottom: 10,
+    gap: 4,
+  },
+  commentHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   commentUser: {
+    fontSize: 14,
     fontWeight: "900",
     color: "#111827",
   },
   starsRow: {
     flexDirection: "row",
     gap: 2,
-    marginVertical: 3,
   },
   commentText: {
     color: "#7C5F46",
+    fontSize: 14,
   },
   bookButton: {
     backgroundColor: "#F58220",
-    borderRadius: 12,
-    padding: 15,
-    marginTop: 4,
+    borderRadius: 18,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    position: "relative",
   },
   bookButtonText: {
     color: "#FFFFFF",
-    textAlign: "center",
+    fontSize: 17,
     fontWeight: "900",
-    fontSize: 16,
+  },
+  bookArrowCircle: {
+    position: "absolute",
+    right: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

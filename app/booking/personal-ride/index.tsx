@@ -5,5 +5,5 @@ import React from "react";
 // Defaults to the Ride (Person) screen; the Ride Type toggle there
 // switches to the Deliver Item screen.
 export default function PersonalRideIndex() {
-  return <Redirect href={"/personal-ride/ride-person" as any} />;
+  return <Redirect href={"/booking/personal-ride/ride-person" as any} />;
 }

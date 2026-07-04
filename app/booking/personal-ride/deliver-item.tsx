@@ -2,14 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
-    Alert,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 const LANGUAGES_LIST = [
@@ -172,7 +172,7 @@ export default function DeliverItemScreen() {
             <Pressable
               style={styles.rideTypeBox}
               onPress={() =>
-                router.replace("/personal-ride/ride-person" as any)
+                router.replace("/booking/personal-ride/ride-person" as any)
               }
             >
               <Ionicons name="person-outline" size={22} color="#8B7B6B" />
