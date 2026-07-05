@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Location from "expo-location";
 import { router } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
@@ -259,6 +260,27 @@ export default function RideForm({ category, showPets, onBack }: Props) {
     try {
       setLoading(true);
 
+      // Best-effort: store route coordinates so Roadside Help can match
+      // passengers to this route quickly. Falls back to city text if geocoding
+      // fails (Roadside Help geocodes the text at match time in that case).
+      const routeCoords: Record<string, number> = {};
+
+      try {
+        const [fromGeo] = await Location.geocodeAsync(from);
+        if (fromGeo) {
+          routeCoords.fromLat = fromGeo.latitude;
+          routeCoords.fromLng = fromGeo.longitude;
+        }
+
+        const [toGeo] = await Location.geocodeAsync(to);
+        if (toGeo) {
+          routeCoords.toLat = toGeo.latitude;
+          routeCoords.toLng = toGeo.longitude;
+        }
+      } catch {
+        // Ignore geocoding errors — matching still works via text fallback.
+      }
+
       await addDoc(collection(db, "driverRoutes"), {
         driverId: user.uid,
 
@@ -282,6 +304,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
         to,
         fromNormalized: normalize(from),
         toNormalized: normalize(to),
+        ...routeCoords,
 
         // إذا مش مكرر: هذا هو تاريخ السفرة
         // إذا مكرر: هذا هو تاريخ بداية التكرار
