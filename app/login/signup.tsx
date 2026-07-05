@@ -22,14 +22,26 @@ export default function SignUpScreen() {
     name: "",
     email: "",
     phone: "",
+    age: "",
     password: "",
     language: "English",
     gender: "No Preference",
   });
 
+  const getDigitsOnly = (value: string) => {
+    return value.replace(/\D/g, "");
+  };
+
   const handleSignUp = async () => {
-    if (!form.name || !form.email || !form.password) {
+    if (!form.name || !form.email || !form.password || !form.age) {
       Alert.alert("Missing details", "Please fill in all required fields.");
+      return;
+    }
+
+    const cleanAge = Number(form.age);
+
+    if (Number.isNaN(cleanAge) || cleanAge <= 0 || cleanAge > 120) {
+      Alert.alert("Invalid age", "Please enter a valid age.");
       return;
     }
 
@@ -49,6 +61,7 @@ export default function SignUpScreen() {
         name: form.name,
         email: form.email.trim().toLowerCase(),
         phone: form.phone,
+        age: cleanAge,
         language: form.language,
         gender: form.gender,
         isDriver: isDriver,
@@ -96,7 +109,22 @@ export default function SignUpScreen() {
             placeholderTextColor="#8b7b6b"
             keyboardType="phone-pad"
             value={form.phone}
-            onChangeText={(text) => setForm({ ...form, phone: text })}
+            onChangeText={(text) =>
+              setForm({ ...form, phone: getDigitsOnly(text) })
+            }
+          />
+
+          <Text style={styles.label}>Age</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Your age"
+            placeholderTextColor="#8b7b6b"
+            keyboardType="numeric"
+            maxLength={3}
+            value={form.age}
+            onChangeText={(text) =>
+              setForm({ ...form, age: getDigitsOnly(text).slice(0, 3) })
+            }
           />
 
           <Text style={styles.label}>Password</Text>

@@ -2,15 +2,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
-    Alert,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
+
+import { TimeInput } from "../../driver/create/DateInput";
 
 const LANGUAGES_LIST = [
   { key: "ar", label: "العربية" },
@@ -38,18 +40,17 @@ const normalizeTime = (value: string) => {
   )}`;
 };
 
-const cleanTimeInput = (value: string) => {
-  return value.replace(/[^\d:]/g, "").slice(0, 5);
-};
-
 export default function SchoolWeeklyBookingScreen() {
   const [schoolName, setSchoolName] = useState("");
   const [pickupLocation, setPickupLocation] = useState("");
   const [schoolLocation, setSchoolLocation] = useState("");
-  const [seats, setSeats] = useState(1);
 
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
   const [dayTimes, setDayTimes] = useState<Record<string, string>>({});
+  const [daySeats, setDaySeats] = useState<Record<string, number>>({});
+  const [openTimePickerDay, setOpenTimePickerDay] = useState<string | null>(
+    null,
+  );
 
   const [genderPref, setGenderPref] = useState<"any" | "male" | "female">(
     "any",
@@ -64,10 +65,21 @@ export default function SchoolWeeklyBookingScreen() {
       const newTimes = { ...dayTimes };
       delete newTimes[day];
       setDayTimes(newTimes);
-    } else {
-      setSelectedDays([...selectedDays, day]);
-      setDayTimes({ ...dayTimes, [day]: "07:30" });
+
+      const newSeats = { ...daySeats };
+      delete newSeats[day];
+      setDaySeats(newSeats);
+
+      if (openTimePickerDay === day) {
+        setOpenTimePickerDay(null);
+      }
+
+      return;
     }
+
+    setSelectedDays([...selectedDays, day]);
+    setDayTimes({ ...dayTimes, [day]: "07:30" });
+    setDaySeats({ ...daySeats, [day]: 1 });
   };
 
   const toggleLanguage = (lang: string) => {
@@ -76,6 +88,24 @@ export default function SchoolWeeklyBookingScreen() {
     } else {
       setSelectedLanguages([...selectedLanguages, lang]);
     }
+  };
+
+  const decreaseSeatsForDay = (day: string) => {
+    const currentSeats = daySeats[day] || 1;
+
+    setDaySeats({
+      ...daySeats,
+      [day]: Math.max(1, currentSeats - 1),
+    });
+  };
+
+  const increaseSeatsForDay = (day: string) => {
+    const currentSeats = daySeats[day] || 1;
+
+    setDaySeats({
+      ...daySeats,
+      [day]: Math.min(8, currentSeats + 1),
+    });
   };
 
   const handleSearch = () => {
@@ -90,6 +120,7 @@ export default function SchoolWeeklyBookingScreen() {
     }
 
     const cleanedDayTimes: Record<string, string> = {};
+    const cleanedDaySeats: Record<string, number> = {};
 
     for (const day of selectedDays) {
       const timeValue = dayTimes[day] || "";
@@ -98,13 +129,26 @@ export default function SchoolWeeklyBookingScreen() {
       if (!cleanTime) {
         Alert.alert(
           "Invalid time",
-          `Please enter a valid time for ${day} between 00:00 and 23:59.`,
+          `Please choose a valid time for ${day} between 00:00 and 23:59.`,
+        );
+        return;
+      }
+
+      const seatsValue = daySeats[day] || 1;
+
+      if (seatsValue < 1 || seatsValue > 8) {
+        Alert.alert(
+          "Invalid seats",
+          `Seats for ${day} must be between 1 and 8.`,
         );
         return;
       }
 
       cleanedDayTimes[day] = cleanTime;
+      cleanedDaySeats[day] = seatsValue;
     }
+
+    const maxSeatsNeeded = Math.max(...Object.values(cleanedDaySeats));
 
     router.push({
       pathname: "/booking/driverresults",
@@ -114,9 +158,16 @@ export default function SchoolWeeklyBookingScreen() {
         to: schoolLocation.trim(),
         genderPref,
         languages: selectedLanguages.join(","),
-        seats: String(seats),
+
+        // بنبعت أكبر عدد مقاعد مطلوب عشان صفحة النتائج تطلع سائق عنده مقاعد كافية
+        seats: String(maxSeatsNeeded),
+
         days: selectedDays.join(","),
         dayTimes: JSON.stringify(cleanedDayTimes),
+
+        // هذا بنحتاجه بعدين بالحجز الحقيقي: كل يوم كم مقعد
+        daySeats: JSON.stringify(cleanedDaySeats),
+
         bookingType: "weekly",
       },
     } as any);
@@ -174,25 +225,6 @@ export default function SchoolWeeklyBookingScreen() {
             </View>
           </View>
 
-          <Text style={styles.label}>Seats</Text>
-          <View style={styles.seatsRow}>
-            <Pressable
-              style={styles.seatButton}
-              onPress={() => setSeats(Math.max(1, seats - 1))}
-            >
-              <Ionicons name="remove" size={20} color="#111827" />
-            </Pressable>
-
-            <Text style={styles.seatsNumber}>{seats}</Text>
-
-            <Pressable
-              style={styles.seatButton}
-              onPress={() => setSeats(Math.min(8, seats + 1))}
-            >
-              <Ionicons name="add" size={20} color="#111827" />
-            </Pressable>
-          </View>
-
           <Text style={styles.label}>Select Days</Text>
           <View style={styles.daysRow}>
             {DAYS.map((day) => {
@@ -215,27 +247,63 @@ export default function SchoolWeeklyBookingScreen() {
           </View>
 
           {selectedDays.length > 0 && (
-            <View style={styles.timesBox}>
-              {selectedDays.map((day) => (
-                <View key={day} style={styles.dayTimeRow}>
-                  <Text style={styles.dayTimeLabel}>{day}</Text>
+            <View style={styles.daySettingsBox}>
+              {selectedDays.map((day, index) => {
+                const currentSeats = daySeats[day] || 1;
+                const isLast = index === selectedDays.length - 1;
 
-                  <TextInput
-                    style={styles.timeInput}
-                    value={dayTimes[day] || "07:30"}
-                    onChangeText={(text) =>
-                      setDayTimes({
-                        ...dayTimes,
-                        [day]: cleanTimeInput(text),
-                      })
-                    }
-                    placeholder="07:30"
-                    placeholderTextColor="#8B7B6B"
-                    keyboardType="numbers-and-punctuation"
-                    maxLength={5}
-                  />
-                </View>
-              ))}
+                return (
+                  <View
+                    key={day}
+                    style={[styles.dayItem, !isLast && styles.dayItemDivider]}
+                  >
+                    <Text style={styles.daySettingTitle}>{day}</Text>
+
+                    <View style={styles.dayFieldsRow}>
+                      <View style={styles.dayFieldColumn}>
+                        <TimeInput
+                          label="Time"
+                          value={dayTimes[day] || "07:30"}
+                          onChange={(value) =>
+                            setDayTimes({
+                              ...dayTimes,
+                              [day]: value,
+                            })
+                          }
+                          showPicker={openTimePickerDay === day}
+                          setShowPicker={(value) =>
+                            setOpenTimePickerDay(value ? day : null)
+                          }
+                        />
+                      </View>
+
+                      <View style={styles.dayFieldColumn}>
+                        <Text style={styles.smallLabel}>Seats</Text>
+
+                        <View style={styles.inlineSeatsBox}>
+                          <Pressable
+                            style={styles.inlineSeatButton}
+                            onPress={() => decreaseSeatsForDay(day)}
+                          >
+                            <Ionicons name="remove" size={20} color="#111827" />
+                          </Pressable>
+
+                          <Text style={styles.inlineSeatsNumber}>
+                            {currentSeats}
+                          </Text>
+
+                          <Pressable
+                            style={styles.inlineSeatButton}
+                            onPress={() => increaseSeatsForDay(day)}
+                          >
+                            <Ionicons name="add" size={20} color="#111827" />
+                          </Pressable>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
           )}
         </View>
@@ -376,6 +444,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 10,
   },
+  smallLabel: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 8,
+    marginTop: 10,
+  },
   input: {
     borderWidth: 1,
     borderColor: "#E2D8CF",
@@ -406,29 +481,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     color: "#111827",
   },
-  seatsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    marginBottom: 8,
-  },
-  seatButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E2D8CF",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  seatsNumber: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: "#111827",
-    minWidth: 28,
-    textAlign: "center",
-  },
   daysRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -453,31 +505,60 @@ const styles = StyleSheet.create({
   dayTextActive: {
     color: "#FFFFFF",
   },
-  timesBox: {
+  daySettingsBox: {
     marginTop: 14,
     borderTopWidth: 1,
     borderTopColor: "#E7DCD1",
     paddingTop: 12,
-    gap: 10,
   },
-  dayTimeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
+  dayItem: {
+    paddingVertical: 12,
   },
-  dayTimeLabel: {
-    width: 45,
+  dayItemDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1E7DD",
+  },
+  daySettingTitle: {
+    fontSize: 17,
     fontWeight: "900",
     color: "#111827",
+    marginBottom: 8,
   },
-  timeInput: {
-    width: 120,
+  dayFieldsRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  dayFieldColumn: {
+    flex: 1,
+  },
+  inlineSeatsBox: {
+    height: 56,
     borderWidth: 1,
     borderColor: "#E2D8CF",
-    borderRadius: 10,
-    padding: 12,
+    borderRadius: 14,
     backgroundColor: "#FFFDFC",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
+  },
+  inlineSeatButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  inlineSeatsNumber: {
+    fontSize: 22,
+    fontWeight: "900",
     color: "#111827",
+    minWidth: 24,
+    textAlign: "center",
   },
   sectionTitle: {
     fontSize: 18,

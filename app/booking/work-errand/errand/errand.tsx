@@ -27,6 +27,8 @@ type Driver = {
   gender: "male" | "female";
   phone: string;
   languages: string[];
+  allowsPets: boolean;
+  canTakeKids: boolean;
   rating: number;
   reviews: number;
   price: number;
@@ -105,6 +107,8 @@ export default function ErrandsScreen() {
               | "female",
             phone: data.phone || "",
             languages: Array.isArray(data.languages) ? data.languages : [],
+            allowsPets: data.allowsPets === true,
+            canTakeKids: data.canTakeKids === true,
 
             rating: Number(data.rating || 4.8),
             reviews: Number(data.reviews || 0),
@@ -168,11 +172,19 @@ export default function ErrandsScreen() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#7A665C" />
+          <Ionicons name="arrow-back" size={25} color="#7A5C4B" />
         </Pressable>
 
-        <Text style={styles.title}>📍 Errands</Text>
-        <Text style={styles.subtitle}>Shopping, appointments, etc.</Text>
+        <View style={styles.pageHeader}>
+          <View style={styles.headerIconCircle}>
+            <Text style={styles.headerEmoji}>📍</Text>
+          </View>
+
+          <View>
+            <Text style={styles.title}>Errands</Text>
+            <Text style={styles.subtitle}>Shopping, appointments, etc.</Text>
+          </View>
+        </View>
 
         {drivers.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -184,162 +196,280 @@ export default function ErrandsScreen() {
           </View>
         ) : (
           <View style={styles.list}>
-            {drivers.map((driver) => (
-              <View key={driver.id} style={styles.card}>
-                <View style={styles.header}>
-                  <View style={styles.profileRow}>
-                    <View style={styles.avatar}>
-                      <Ionicons
-                        name="person-outline"
-                        size={25}
-                        color="#B45309"
-                      />
+            {drivers.map((driver) => {
+              const isExpanded = expandedDriver === driver.id;
+
+              return (
+                <View key={driver.id} style={styles.card}>
+                  <View style={styles.header}>
+                    <View style={styles.profileRow}>
+                      <View style={styles.avatar}>
+                        <Ionicons
+                          name="person-outline"
+                          size={27}
+                          color="#F58220"
+                        />
+                      </View>
+
+                      <View style={styles.profileInfo}>
+                        <Text style={styles.name}>{driver.name}</Text>
+
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoText}>
+                            {driver.gender === "male" ? "♂" : "♀"}
+                          </Text>
+
+                          <Text style={styles.dot}>•</Text>
+
+                          <Ionicons
+                            name="location-outline"
+                            size={14}
+                            color="#7A5C4B"
+                          />
+
+                          <Text style={styles.infoText}>{driver.location}</Text>
+                        </View>
+                      </View>
                     </View>
 
-                    <View style={styles.profileInfo}>
-                      <Text style={styles.name}>{driver.name}</Text>
+                    <View style={styles.ratingBox}>
+                      <Ionicons name="star" size={17} color="#B45309" />
+                      <Text style={styles.ratingText}>{driver.rating}</Text>
+                      <Text style={styles.reviewsText}>({driver.reviews})</Text>
+                    </View>
+                  </View>
 
-                      <View style={styles.infoRow}>
-                        <Text style={styles.infoText}>
-                          {driver.gender === "male" ? "♂" : "♀"}
+                  <View style={styles.destinationBox}>
+                    <Text style={styles.destinationIcon}>
+                      {DESTINATION_ICONS[driver.destination] || "📍"}
+                    </Text>
+
+                    <Text style={styles.destinationText}>
+                      {driver.destinationLabel}
+                    </Text>
+                  </View>
+
+                  <View style={styles.detailsBox}>
+                    <View style={styles.detailColumn}>
+                      <View style={styles.detailRow}>
+                        <View style={styles.detailIconBox}>
+                          <Ionicons
+                            name="calendar-outline"
+                            size={17}
+                            color="#F58220"
+                          />
+                        </View>
+
+                        <Text style={styles.detailText}>
+                          {driver.date} ({driver.day})
                         </Text>
+                      </View>
 
-                        <Text style={styles.infoText}>•</Text>
+                      <View style={styles.line} />
 
-                        <Ionicons
-                          name="location-outline"
-                          size={13}
-                          color="#7A5C4B"
-                        />
+                      <View style={styles.detailRow}>
+                        <View style={styles.detailIconBox}>
+                          <Ionicons
+                            name="time-outline"
+                            size={17}
+                            color="#F58220"
+                          />
+                        </View>
 
-                        <Text style={styles.infoText}>{driver.location}</Text>
+                        <Text style={styles.detailText}>
+                          {driver.departureTime} - {driver.returnTime}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.verticalLine} />
+
+                    <View style={styles.detailColumn}>
+                      <View style={styles.detailRow}>
+                        <View style={styles.detailIconBox}>
+                          <Ionicons
+                            name="people-outline"
+                            size={17}
+                            color="#F58220"
+                          />
+                        </View>
+
+                        <Text style={styles.detailText}>
+                          {driver.seats} seats available
+                        </Text>
+                      </View>
+
+                      <View style={styles.line} />
+
+                      <View style={styles.detailRow}>
+                        <View style={styles.detailIconBox}>
+                          <Ionicons
+                            name="bag-outline"
+                            size={17}
+                            color="#F58220"
+                          />
+                        </View>
+
+                        <Text style={styles.price}>{driver.price} ₪</Text>
                       </View>
                     </View>
                   </View>
 
-                  <View style={styles.ratingBox}>
-                    <Ionicons name="star" size={16} color="#B45309" />
-                    <Text style={styles.ratingText}>{driver.rating}</Text>
-                    <Text style={styles.reviewsText}>({driver.reviews})</Text>
-                  </View>
-                </View>
-
-                <View style={styles.destinationBox}>
-                  <Text style={styles.destinationIcon}>
-                    {DESTINATION_ICONS[driver.destination] || "📍"}
-                  </Text>
-
-                  <Text style={styles.destinationText}>
-                    {driver.destinationLabel}
-                  </Text>
-                </View>
-
-                <View style={styles.detailsGrid}>
-                  <View style={styles.detail}>
-                    <Ionicons
-                      name="calendar-outline"
-                      size={16}
-                      color="#F58220"
-                    />
-                    <Text style={styles.detailText}>
-                      {driver.date} ({driver.day})
-                    </Text>
-                  </View>
-
-                  <View style={styles.detail}>
-                    <Ionicons name="people-outline" size={16} color="#F58220" />
-                    <Text style={styles.detailText}>
-                      {driver.seats} seats available
-                    </Text>
-                  </View>
-
-                  <View style={styles.detail}>
-                    <Ionicons name="time-outline" size={16} color="#F58220" />
-                    <Text style={styles.detailText}>
-                      🚗 {driver.departureTime} → 🏠 {driver.returnTime}
-                    </Text>
-                  </View>
-
-                  <View style={styles.detail}>
-                    <Ionicons name="bag-outline" size={16} color="#F58220" />
-                    <Text style={styles.price}>{driver.price} ₪</Text>
-                  </View>
-                </View>
-
-                <View style={styles.phoneLangRow}>
-                  <View style={styles.phoneRow}>
-                    <Ionicons name="call-outline" size={16} color="#F58220" />
-                    <Text style={styles.phoneText}>{driver.phone}</Text>
-                  </View>
-
-                  <View style={styles.languagesRow}>
+                  <View style={styles.badgesRow}>
                     {driver.languages.map((lang) => (
                       <View key={lang} style={styles.languageBadge}>
+                        <Ionicons
+                          name="language-outline"
+                          size={15}
+                          color="#178C7B"
+                        />
                         <Text style={styles.languageText}>
                           {LANGUAGES_MAP[lang] || lang}
                         </Text>
                       </View>
                     ))}
+
+                    <View
+                      style={[
+                        styles.petBadge,
+                        driver.allowsPets
+                          ? styles.petAllowedBadge
+                          : styles.petNotAllowedBadge,
+                      ]}
+                    >
+                      <Ionicons
+                        name={
+                          driver.allowsPets ? "paw-outline" : "close-outline"
+                        }
+                        size={15}
+                        color={driver.allowsPets ? "#F58220" : "#7A5C4B"}
+                      />
+
+                      <Text
+                        style={[
+                          styles.petText,
+                          driver.allowsPets
+                            ? styles.petAllowedText
+                            : styles.petNotAllowedText,
+                        ]}
+                      >
+                        {driver.allowsPets ? "Pets allowed" : "No pets"}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.kidsBadge,
+                        driver.canTakeKids
+                          ? styles.kidsAllowedBadge
+                          : styles.kidsNotAllowedBadge,
+                      ]}
+                    >
+                      <Ionicons
+                        name={
+                          driver.canTakeKids
+                            ? "people-outline"
+                            : "close-outline"
+                        }
+                        size={15}
+                        color={driver.canTakeKids ? "#2563EB" : "#7A5C4B"}
+                      />
+
+                      <Text
+                        style={[
+                          styles.kidsText,
+                          driver.canTakeKids
+                            ? styles.kidsAllowedText
+                            : styles.kidsNotAllowedText,
+                        ]}
+                      >
+                        {driver.canTakeKids ? "Kids allowed" : "No kids"}
+                      </Text>
+                    </View>
                   </View>
-                </View>
 
-                <Pressable
-                  style={styles.commentsButton}
-                  onPress={() =>
-                    setExpandedDriver(
-                      expandedDriver === driver.id ? null : driver.id,
-                    )
-                  }
-                >
-                  <Ionicons name="chatbox-outline" size={15} color="#F58220" />
+                  <View style={styles.divider} />
 
-                  <Text style={styles.commentsText}>
-                    Comments ({driver.comments.length})
-                  </Text>
-
-                  <Ionicons
-                    name={
-                      expandedDriver === driver.id
-                        ? "chevron-up"
-                        : "chevron-down"
+                  <Pressable
+                    style={styles.commentsButton}
+                    onPress={() =>
+                      setExpandedDriver(isExpanded ? null : driver.id)
                     }
-                    size={15}
-                    color="#F58220"
-                  />
-                </Pressable>
+                  >
+                    <View style={styles.commentsLeft}>
+                      <Ionicons
+                        name="chatbubble-ellipses-outline"
+                        size={18}
+                        color="#F58220"
+                      />
 
-                {expandedDriver === driver.id && (
-                  <View style={styles.commentsBox}>
-                    {driver.comments.length === 0 ? (
-                      <Text style={styles.commentText}>No comments yet.</Text>
-                    ) : (
-                      driver.comments.map((comment, index) => (
-                        <View key={index} style={styles.commentItem}>
-                          <View style={styles.commentHeader}>
-                            <Text style={styles.commentUser}>
-                              {comment.user}
-                            </Text>
+                      <Text style={styles.commentsText}>
+                        Comments ({driver.comments.length})
+                      </Text>
+                    </View>
 
-                            <Text style={styles.commentStars}>
-                              {"★".repeat(comment.stars)}
-                            </Text>
+                    <Ionicons
+                      name={isExpanded ? "chevron-up" : "chevron-down"}
+                      size={20}
+                      color="#7A5C4B"
+                    />
+                  </Pressable>
+
+                  {isExpanded && (
+                    <View style={styles.commentsBox}>
+                      {driver.comments.length === 0 ? (
+                        <View style={styles.noCommentsRow}>
+                          <View style={styles.noCommentsIcon}>
+                            <Ionicons
+                              name="chatbox-outline"
+                              size={18}
+                              color="#7A5C4B"
+                            />
                           </View>
 
-                          <Text style={styles.commentText}>{comment.text}</Text>
+                          <Text style={styles.commentText}>
+                            No comments yet.
+                          </Text>
                         </View>
-                      ))
-                    )}
-                  </View>
-                )}
+                      ) : (
+                        driver.comments.map((comment, index) => (
+                          <View key={index} style={styles.commentItem}>
+                            <View style={styles.commentHeader}>
+                              <Text style={styles.commentUser}>
+                                {comment.user}
+                              </Text>
 
-                <Pressable
-                  style={styles.bookButton}
-                  onPress={() => handleSelectDriver(driver)}
-                >
-                  <Text style={styles.bookButtonText}>Select & Book</Text>
-                </Pressable>
-              </View>
-            ))}
+                              <Text style={styles.commentStars}>
+                                {"★".repeat(comment.stars)}
+                              </Text>
+                            </View>
+
+                            <Text style={styles.commentText}>
+                              {comment.text}
+                            </Text>
+                          </View>
+                        ))
+                      )}
+                    </View>
+                  )}
+
+                  <Pressable
+                    style={styles.bookButton}
+                    onPress={() => handleSelectDriver(driver)}
+                  >
+                    <Text style={styles.bookButtonText}>Select & Book</Text>
+
+                    <View style={styles.bookArrowCircle}>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={22}
+                        color="#F58220"
+                      />
+                    </View>
+                  </Pressable>
+                </View>
+              );
+            })}
           </View>
         )}
       </ScrollView>
@@ -371,24 +501,40 @@ const styles = StyleSheet.create({
     width: 45,
     height: 40,
     justifyContent: "center",
-    marginBottom: 10,
+    marginBottom: 18,
+  },
+  pageHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    marginBottom: 28,
+  },
+  headerIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#FFF3E6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerEmoji: {
+    fontSize: 28,
   },
   title: {
-    fontSize: 30,
+    fontSize: 34,
     fontWeight: "900",
     color: "#111827",
-    marginBottom: 10,
+    marginBottom: 3,
   },
   subtitle: {
     fontSize: 16,
     color: "#7A5C4B",
-    marginBottom: 26,
   },
   emptyCard: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E4DDD7",
-    borderRadius: 14,
+    borderRadius: 22,
     padding: 28,
     alignItems: "center",
   },
@@ -405,20 +551,28 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   list: {
-    gap: 16,
+    gap: 18,
   },
   card: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E4DDD7",
-    borderRadius: 14,
+    borderRadius: 24,
     padding: 18,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+    shadowRadius: 14,
+    elevation: 2,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 14,
+    marginBottom: 16,
   },
   profileRow: {
     flexDirection: "row",
@@ -427,9 +581,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     backgroundColor: "#FFF3E6",
     alignItems: "center",
     justifyContent: "center",
@@ -438,7 +592,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "900",
     color: "#111827",
     marginBottom: 5,
@@ -450,57 +604,72 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   infoText: {
-    fontSize: 13,
+    fontSize: 14,
     color: "#7A5C4B",
+  },
+  dot: {
+    color: "#7A5C4B",
+    fontWeight: "900",
   },
   ratingBox: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#FFF3E6",
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 15,
     gap: 4,
   },
   ratingText: {
-    fontSize: 14,
+    fontSize: 16,
     color: "#111827",
     fontWeight: "900",
   },
   reviewsText: {
-    fontSize: 12,
+    fontSize: 13,
     color: "#7A5C4B",
   },
   destinationBox: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    backgroundColor: "#F5F1ED",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 14,
+    gap: 12,
+    backgroundColor: "#FFF8F0",
+    borderWidth: 1,
+    borderColor: "#FFE2C5",
+    borderRadius: 17,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 16,
   },
   destinationIcon: {
-    fontSize: 22,
+    fontSize: 23,
   },
   destinationText: {
-    fontSize: 15,
-    fontWeight: "800",
+    fontSize: 20,
+    fontWeight: "900",
     color: "#111827",
   },
-  detailsGrid: {
+  detailsBox: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    rowGap: 12,
-    marginBottom: 14,
+    marginBottom: 16,
   },
-  detail: {
-    width: "50%",
+  detailColumn: {
+    flex: 1,
+    gap: 10,
+  },
+  detailRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingRight: 6,
+    gap: 8,
+    minHeight: 35,
+  },
+  detailIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "#FFF3E6",
+    alignItems: "center",
+    justifyContent: "center",
   },
   detailText: {
     fontSize: 14,
@@ -508,59 +677,136 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   price: {
-    fontSize: 14,
+    fontSize: 16,
     color: "#111827",
     fontWeight: "900",
   },
-  phoneLangRow: {
+  line: {
+    height: 1,
+    backgroundColor: "#F0E5DC",
+    marginRight: 10,
+  },
+  verticalLine: {
+    width: 1,
+    backgroundColor: "#F0E5DC",
+    marginHorizontal: 12,
+  },
+  badgesRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 9,
+    marginBottom: 16,
+  },
+  languageBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#EAF8F5",
+    borderWidth: 1,
+    borderColor: "#9DDDD2",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+  },
+  languageText: {
+    color: "#178C7B",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  petBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  petAllowedBadge: {
+    backgroundColor: "#FFF3E6",
+    borderColor: "#FDBA74",
+  },
+  petNotAllowedBadge: {
+    backgroundColor: "#F5F1ED",
+    borderColor: "#E4DDD7",
+  },
+  petText: {
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  petAllowedText: {
+    color: "#F58220",
+  },
+  petNotAllowedText: {
+    color: "#7A5C4B",
+  },
+  kidsBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  kidsAllowedBadge: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#93C5FD",
+  },
+  kidsNotAllowedBadge: {
+    backgroundColor: "#F5F1ED",
+    borderColor: "#E4DDD7",
+  },
+  kidsText: {
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  kidsAllowedText: {
+    color: "#2563EB",
+  },
+  kidsNotAllowedText: {
+    color: "#7A5C4B",
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#F0E5DC",
+    marginBottom: 14,
+  },
+  commentsButton: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 14,
-    gap: 10,
   },
-  phoneRow: {
+  commentsLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-  },
-  phoneText: {
-    fontSize: 14,
-    color: "#111827",
-  },
-  languagesRow: {
-    flexDirection: "row",
-    gap: 6,
-    flexWrap: "wrap",
-  },
-  languageBadge: {
-    backgroundColor: "#2F9B95",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
-  },
-  languageText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  commentsButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    marginBottom: 14,
+    gap: 7,
   },
   commentsText: {
-    color: "#F58220",
-    fontSize: 14,
-    fontWeight: "700",
+    color: "#3C2319",
+    fontSize: 15,
+    fontWeight: "900",
   },
   commentsBox: {
-    backgroundColor: "#F5F1ED",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 14,
+    backgroundColor: "#F8F4EF",
+    borderRadius: 16,
+    padding: 13,
+    marginBottom: 16,
     gap: 10,
+  },
+  noCommentsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  noCommentsIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#EFE6DD",
+    alignItems: "center",
+    justifyContent: "center",
   },
   commentItem: {
     gap: 4,
@@ -580,18 +826,31 @@ const styles = StyleSheet.create({
     color: "#F58220",
   },
   commentText: {
-    fontSize: 13,
+    fontSize: 14,
     color: "#7A5C4B",
   },
   bookButton: {
     backgroundColor: "#F58220",
-    borderRadius: 10,
-    paddingVertical: 14,
+    borderRadius: 18,
+    paddingVertical: 16,
     alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    position: "relative",
   },
   bookButtonText: {
     color: "#FFFFFF",
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: "900",
+  },
+  bookArrowCircle: {
+    position: "absolute",
+    right: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
