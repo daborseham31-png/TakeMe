@@ -2,15 +2,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
-    Alert,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
+
+import { TimeInput } from "../../driver/create/DateInput";
 
 const LANGUAGES_LIST = [
   { key: "ar", label: "العربية" },
@@ -27,10 +29,6 @@ const getTodayDate = () => {
   const day = String(today.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
-};
-
-const getDigitsOnly = (value: string) => {
-  return value.replace(/\D/g, "");
 };
 
 const normalizeTime = (value: string) => {
@@ -53,9 +51,11 @@ const normalizeTime = (value: string) => {
 export default function SchoolQuickBookingScreen() {
   const [pickupLocation, setPickupLocation] = useState("");
   const [schoolLocation, setSchoolLocation] = useState("");
-  const [childName, setChildName] = useState("");
-  const [parentPhone, setParentPhone] = useState("");
+  const [seatsNeeded, setSeatsNeeded] = useState(1);
+
   const [tripTime, setTripTime] = useState("07:30");
+  const [showTripTimePicker, setShowTripTimePicker] = useState(false);
+
   const [needReturn, setNeedReturn] = useState(false);
 
   const [genderPref, setGenderPref] = useState<"any" | "male" | "female">(
@@ -73,18 +73,13 @@ export default function SchoolQuickBookingScreen() {
   };
 
   const handleSearch = () => {
-    if (!pickupLocation || !schoolLocation || !childName || !parentPhone) {
+    if (!pickupLocation || !schoolLocation) {
       Alert.alert("Missing details", "Please fill in all required fields.");
       return;
     }
 
-    const cleanPhone = getDigitsOnly(parentPhone);
-
-    if (cleanPhone.length !== 10) {
-      Alert.alert(
-        "Invalid phone number",
-        "Phone number must be exactly 10 digits.",
-      );
+    if (seatsNeeded < 1 || seatsNeeded > 8) {
+      Alert.alert("Invalid seats", "Seats needed must be between 1 and 8.");
       return;
     }
 
@@ -93,7 +88,7 @@ export default function SchoolQuickBookingScreen() {
     if (!cleanTime) {
       Alert.alert(
         "Invalid time",
-        "Please enter a valid time between 00:00 and 23:59.",
+        "Please choose a valid time between 00:00 and 23:59.",
       );
       return;
     }
@@ -106,10 +101,11 @@ export default function SchoolQuickBookingScreen() {
         to: schoolLocation,
         genderPref,
         languages: selectedLanguages.join(","),
-        seats: "1",
+        seats: String(seatsNeeded),
         time: cleanTime,
         tripDate: getTodayDate(),
         bookingType: "quick",
+        needReturn: String(needReturn),
       },
     } as any);
   };
@@ -149,49 +145,32 @@ export default function SchoolQuickBookingScreen() {
             />
           </View>
 
-          <Text style={styles.label}>Child Name</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="person-outline" size={18} color="#F58220" />
-            <TextInput
-              style={styles.input}
-              placeholder="Name of the child going to school"
-              placeholderTextColor="#8B7B6B"
-              value={childName}
-              onChangeText={setChildName}
-            />
+          <Text style={styles.label}>Seats</Text>
+          <View style={styles.seatsRow}>
+            <Pressable
+              style={styles.seatButton}
+              onPress={() => setSeatsNeeded(Math.max(1, seatsNeeded - 1))}
+            >
+              <Ionicons name="remove" size={20} color="#111827" />
+            </Pressable>
+
+            <Text style={styles.seatsNumber}>{seatsNeeded}</Text>
+
+            <Pressable
+              style={styles.seatButton}
+              onPress={() => setSeatsNeeded(Math.min(8, seatsNeeded + 1))}
+            >
+              <Ionicons name="add" size={20} color="#111827" />
+            </Pressable>
           </View>
 
-          <Text style={styles.label}>Parent Phone Number</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="call-outline" size={18} color="#F58220" />
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. 0501234567"
-              placeholderTextColor="#8B7B6B"
-              keyboardType="phone-pad"
-              maxLength={10}
-              value={parentPhone}
-              onChangeText={(text) =>
-                setParentPhone(getDigitsOnly(text).slice(0, 10))
-              }
-            />
-          </View>
-
-          <Text style={styles.label}>Trip Time</Text>
-          <View style={styles.timeRow}>
-            <TextInput
-              style={styles.timeInput}
-              placeholder="07:30"
-              placeholderTextColor="#8B7B6B"
-              keyboardType="numbers-and-punctuation"
-              maxLength={5}
-              value={tripTime}
-              onChangeText={(text) =>
-                setTripTime(text.replace(/[^\d:]/g, "").slice(0, 5))
-              }
-            />
-            <Ionicons name="time-outline" size={18} color="#111827" />
-          </View>
+          <TimeInput
+            label="Trip Time"
+            value={tripTime}
+            onChange={setTripTime}
+            showPicker={showTripTimePicker}
+            setShowPicker={setShowTripTimePicker}
+          />
 
           <Text style={styles.label}>Need a return trip?</Text>
           <View style={styles.optionRow}>
@@ -388,22 +367,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     color: "#111827",
   },
-  timeRow: {
-    width: 135,
+
+  // نفس حجم وشكل Seats من صفحة Weekly
+  seatsRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 14,
+    marginBottom: 8,
+  },
+  seatButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "#E2D8CF",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    backgroundColor: "#FFFDFC",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
   },
-  timeInput: {
-    flex: 1,
-    paddingVertical: 12,
+  seatsNumber: {
+    fontSize: 22,
+    fontWeight: "900",
     color: "#111827",
-    fontWeight: "700",
+    minWidth: 28,
+    textAlign: "center",
   },
+
   optionRow: {
     flexDirection: "row",
     gap: 8,

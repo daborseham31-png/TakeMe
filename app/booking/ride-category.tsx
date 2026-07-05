@@ -61,9 +61,9 @@ export default function RideCategoryScreen() {
     const routes: Record<string, string> = {
 school: "/booking/school",
 workErrands: "/booking/work-errand",
-      personal: "/personal-ride",
-      delivery: "/item-delivery",
-      help: "/roadside-help",
+      personal: "/booking/personal-ride",
+      delivery: "/booking/item-delivery",
+      help: "/booking/roadside-help",
     };
 
     router.push(routes[key] as any);
