@@ -132,21 +132,16 @@ export default function AddDriverRouteScreen() {
                 >
                   <Ionicons
                     name={category.icon}
-                    size={32}
+                    size={34}
                     color={category.color}
                   />
                 </View>
 
-                <View>
+                <View style={styles.cardTextBox}>
                   <Text style={styles.cardTitle}>{category.label}</Text>
                   <Text style={styles.cardDescription}>
                     {category.description}
                   </Text>
-                </View>
-
-                <View style={styles.cardFooter}>
-                  <Text style={styles.startText}>Start</Text>
-                  <Ionicons name="chevron-forward" size={17} color="#F58220" />
                 </View>
               </Pressable>
             );
@@ -199,7 +194,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E7DCD1",
     padding: 16,
-    justifyContent: "space-between",
+    alignItems: "center",
+    justifyContent: "center",
 
     shadowColor: "#000",
     shadowOpacity: 0.06,
@@ -211,34 +207,28 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   iconBox: {
-    width: 60,
-    height: 60,
+    width: 64,
+    height: 64,
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 14,
+  },
+  cardTextBox: {
+    alignItems: "center",
   },
   cardTitle: {
     fontSize: 17,
     fontWeight: "900",
     color: "#111827",
     marginBottom: 6,
+    textAlign: "center",
   },
   cardDescription: {
     fontSize: 12,
     color: "#7C5F46",
     fontWeight: "700",
     lineHeight: 17,
-  },
-  cardFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 14,
-  },
-  startText: {
-    fontSize: 13,
-    fontWeight: "900",
-    color: "#F58220",
+    textAlign: "center",
   },
 });

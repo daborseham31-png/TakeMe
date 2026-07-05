@@ -40,7 +40,6 @@ type DriverRoute = {
   carColor?: string;
   carPlate?: string;
 
-  hasChildSeat?: boolean;
   allowsPets?: boolean;
 
   category?: string;
@@ -603,38 +602,6 @@ export default function DriverResultsScreen() {
                         </Text>
                       </View>
                     )}
-
-                    {typeof driver.hasChildSeat === "boolean" && (
-                      <View
-                        style={[
-                          styles.childSeatBadge,
-                          driver.hasChildSeat
-                            ? styles.childSeatAllowedBadge
-                            : styles.childSeatNotAllowedBadge,
-                        ]}
-                      >
-                        <Ionicons
-                          name={
-                            driver.hasChildSeat
-                              ? "shield-checkmark-outline"
-                              : "close-outline"
-                          }
-                          size={15}
-                          color={driver.hasChildSeat ? "#2563EB" : "#7C5F46"}
-                        />
-
-                        <Text
-                          style={[
-                            styles.childSeatText,
-                            driver.hasChildSeat
-                              ? styles.childSeatAllowedText
-                              : styles.childSeatNotAllowedText,
-                          ]}
-                        >
-                          {driver.hasChildSeat ? "Child seat" : "No child seat"}
-                        </Text>
-                      </View>
-                    )}
                   </View>
 
                   <View style={styles.divider} />
@@ -983,33 +950,6 @@ const styles = StyleSheet.create({
     color: "#F58220",
   },
   petNotAllowedText: {
-    color: "#7C5F46",
-  },
-  childSeatBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 18,
-    borderWidth: 1,
-  },
-  childSeatAllowedBadge: {
-    backgroundColor: "#EFF6FF",
-    borderColor: "#93C5FD",
-  },
-  childSeatNotAllowedBadge: {
-    backgroundColor: "#F5F1ED",
-    borderColor: "#E4DDD7",
-  },
-  childSeatText: {
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  childSeatAllowedText: {
-    color: "#2563EB",
-  },
-  childSeatNotAllowedText: {
     color: "#7C5F46",
   },
   divider: {

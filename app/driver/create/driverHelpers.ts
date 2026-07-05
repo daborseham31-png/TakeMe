@@ -596,4 +596,56 @@ export const styles = StyleSheet.create({
     fontWeight: "900",
     fontSize: 16,
   },
+  daySettingsBox: {
+    marginTop: 4,
+  },
+  dayItem: {
+    paddingVertical: 12,
+  },
+  dayItemDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1E7DD",
+  },
+  dayTitle: {
+    fontSize: 17,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 4,
+  },
+  dayFieldsRow: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  dayFieldColumn: {
+    flex: 1,
+  },
+  weeklySeatsRow: {
+    height: 50,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    backgroundColor: "#FFFDFC",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
+  },
+  weeklySeatButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  weeklySeatsNumber: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#111827",
+    minWidth: 24,
+    textAlign: "center",
+  },
 });
