@@ -425,6 +425,10 @@ export default function DriverResultsScreen() {
           {from || "Any location"} → {to || "Any destination"}
         </Text>
 
+        {requestedDate ? (
+          <Text style={styles.routeText}>📅 {requestedDate}</Text>
+        ) : null}
+
         {drivers.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="car-outline" size={42} color="#8B7B6B" />

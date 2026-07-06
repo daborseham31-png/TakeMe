@@ -31,6 +31,10 @@ const getTodayDate = () => {
   return `${year}-${month}-${day}`;
 };
 
+const getDigitsOnly = (value: string) => {
+  return value.replace(/\D/g, "");
+};
+
 const cleanTimeInput = (value: string) => {
   return value.replace(/[^\d:]/g, "").slice(0, 5);
 };
@@ -52,11 +56,13 @@ const normalizeTime = (value: string) => {
   )}`;
 };
 
-export default function RidePersonScreen() {
+export default function DeliverItemScreen() {
   const [fromLocation, setFromLocation] = useState("");
   const [toLocation, setToLocation] = useState("");
   const [tripTime, setTripTime] = useState("09:00");
-  const [seats, setSeats] = useState(1);
+
+  const [recipientPhone, setRecipientPhone] = useState("");
+  const [itemDescription, setItemDescription] = useState("");
 
   const [weeklyBooking, setWeeklyBooking] = useState(false);
 
@@ -90,13 +96,31 @@ export default function RidePersonScreen() {
       return;
     }
 
+    const cleanPhone = getDigitsOnly(recipientPhone);
+
+    if (cleanPhone.length !== 10) {
+      Alert.alert(
+        "Invalid phone number",
+        "Recipient phone number must be exactly 10 digits.",
+      );
+      return;
+    }
+
+    if (!itemDescription.trim()) {
+      Alert.alert("Missing item", "Please describe the item you want to send.");
+      return;
+    }
+
     const baseParams: Record<string, string> = {
-      category: "personal",
+      category: "delivery",
       from: fromLocation.trim(),
       to: toLocation.trim(),
       genderPref,
       languages: selectedLanguages.join(","),
-      seats: String(seats),
+      seats: "1",
+      recipientPhone: cleanPhone,
+      itemDescription: itemDescription.trim(),
+      deliveryType: "person",
     };
 
     if (weeklyBooking) {
@@ -136,36 +160,12 @@ export default function RidePersonScreen() {
         </Pressable>
 
         <View style={styles.header}>
-          <Text style={styles.headerEmoji}>🚗</Text>
-          <Text style={styles.title}>Personal Ride</Text>
+          <Text style={styles.headerEmoji}>📦</Text>
+          <Text style={styles.title}>Deliver Item</Text>
         </View>
-        <Text style={styles.subtitle}>Personal trips & visits</Text>
-
-        {/* Ride Type */}
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Ride Type</Text>
-
-          <View style={styles.rideTypeRow}>
-            <Pressable style={[styles.rideTypeBox, styles.rideTypeBoxActive]}>
-              <Ionicons name="person-outline" size={22} color="#F58220" />
-              <Text style={styles.rideTypeTitle}>Ride (Person)</Text>
-              <Text style={styles.rideTypeDesc}>
-                Get a ride to your destination
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={styles.rideTypeBox}
-              onPress={() =>
-                router.replace("/personal-ride/deliver-item" as any)
-              }
-            >
-              <Ionicons name="cube-outline" size={22} color="#8B7B6B" />
-              <Text style={styles.rideTypeTitle}>Deliver Item</Text>
-              <Text style={styles.rideTypeDesc}>Send an item to someone</Text>
-            </Pressable>
-          </View>
-        </View>
+        <Text style={styles.subtitle}>
+          Send an item from one person to another
+        </Text>
 
         {/* Trip details */}
         <View style={styles.card}>
@@ -199,58 +199,63 @@ export default function RidePersonScreen() {
             </View>
           </View>
 
-          <View style={styles.twoColumns}>
-            <View style={styles.column}>
-              <Text style={styles.labelOrange}>
-                <Text>🕐 </Text>Trip Time
-              </Text>
-              <View style={styles.timeRow}>
-                <TextInput
-                  style={styles.timeInput}
-                  placeholder="09:00"
-                  placeholderTextColor="#8B7B6B"
-                  keyboardType="numbers-and-punctuation"
-                  maxLength={5}
-                  value={tripTime}
-                  onChangeText={(text) => setTripTime(cleanTimeInput(text))}
-                />
-                <Ionicons name="time-outline" size={18} color="#111827" />
-              </View>
-            </View>
-
-            <View style={styles.column}>
-              <Text style={styles.label}>Seats</Text>
-              <View style={styles.seatsRow}>
-                <Pressable
-                  style={styles.seatButton}
-                  onPress={() => setSeats(Math.max(1, seats - 1))}
-                >
-                  <Ionicons name="remove" size={20} color="#111827" />
-                </Pressable>
-
-                <Text style={styles.seatsNumber}>{seats}</Text>
-
-                <Pressable
-                  style={styles.seatButton}
-                  onPress={() => setSeats(Math.min(8, seats + 1))}
-                >
-                  <Ionicons name="add" size={20} color="#111827" />
-                </Pressable>
-              </View>
-            </View>
+          <Text style={styles.labelOrange}>
+            <Text>🕐 </Text>Delivery Time
+          </Text>
+          <View style={styles.timeRowFull}>
+            <TextInput
+              style={styles.timeInput}
+              placeholder="09:00"
+              placeholderTextColor="#8B7B6B"
+              keyboardType="numbers-and-punctuation"
+              maxLength={5}
+              value={tripTime}
+              onChangeText={(text) => setTripTime(cleanTimeInput(text))}
+            />
+            <Ionicons name="time-outline" size={18} color="#111827" />
           </View>
+
+          <Text style={styles.label}>📦 Recipient Phone Number</Text>
+          <View style={styles.inputRow}>
+            <Ionicons name="call-outline" size={18} color="#F58220" />
+            <TextInput
+              style={styles.rowInput}
+              placeholder="05X-XXXXXXX"
+              placeholderTextColor="#8B7B6B"
+              keyboardType="phone-pad"
+              maxLength={10}
+              value={recipientPhone}
+              onChangeText={(text) =>
+                setRecipientPhone(getDigitsOnly(text).slice(0, 10))
+              }
+            />
+          </View>
+
+          <Text style={styles.label}>📦 Item Description</Text>
+          <TextInput
+            style={styles.textArea}
+            placeholder="Describe the item you want to send..."
+            placeholderTextColor="#8B7B6B"
+            multiline
+            numberOfLines={4}
+            textAlignVertical="top"
+            value={itemDescription}
+            onChangeText={setItemDescription}
+          />
 
           <Pressable
             style={styles.weeklyRow}
             onPress={() => setWeeklyBooking(!weeklyBooking)}
           >
             <Ionicons
-              name={weeklyBooking ? "radio-button-on" : "radio-button-off"}
+              name={weeklyBooking ? "checkbox" : "square-outline"}
               size={20}
               color={weeklyBooking ? "#F58220" : "#8B7B6B"}
             />
             <Ionicons name="calendar-outline" size={16} color="#7C5F46" />
-            <Text style={styles.weeklyText}>Book for the whole week</Text>
+            <Text style={styles.weeklyText}>
+              Book for the whole week (optional)
+            </Text>
           </Pressable>
         </View>
 
@@ -406,37 +411,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
-  rideTypeRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 6,
-  },
-  rideTypeBox: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#E2D8CF",
-    borderRadius: 14,
-    padding: 16,
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  rideTypeBoxActive: {
-    borderColor: "#F58220",
-    backgroundColor: "#FFF3E8",
-  },
-  rideTypeTitle: {
-    fontSize: 15,
-    fontWeight: "900",
-    color: "#111827",
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  rideTypeDesc: {
-    fontSize: 12,
-    color: "#7C5F46",
-    textAlign: "center",
-    lineHeight: 16,
-  },
   twoColumns: {
     flexDirection: "row",
     gap: 12,
@@ -473,7 +447,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     color: "#111827",
   },
-  timeRow: {
+  textArea: {
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 10,
+    padding: 14,
+    minHeight: 90,
+    backgroundColor: "#FFFDFC",
+    color: "#111827",
+  },
+  timeRowFull: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
@@ -487,34 +470,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     color: "#111827",
     fontWeight: "700",
-  },
-  seatsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: "#E2D8CF",
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    backgroundColor: "#FFFDFC",
-  },
-  seatButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E2D8CF",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  seatsNumber: {
-    fontSize: 20,
-    fontWeight: "900",
-    color: "#111827",
-    minWidth: 28,
-    textAlign: "center",
   },
   weeklyRow: {
     flexDirection: "row",
