@@ -8,12 +8,13 @@ import {
   SafeAreaView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import MapView, { Marker, Polyline, Region } from "react-native-maps";
 
-type Phase = "waiting" | "arrived" | "rating";
+// The passenger only watches the helper come/work. Completing the roadside
+// help is the driver's responsibility (from their Help Requests page).
+type Phase = "waiting" | "arrived";
 
 type LatLng = { latitude: number; longitude: number };
 
@@ -46,9 +47,6 @@ export default function RoadsideHelpMapScreen() {
   const [eta, setEta] = useState<{ duration: number; distance: number } | null>(
     null,
   );
-
-  const [rating, setRating] = useState(0);
-  const [comment, setComment] = useState("");
 
   const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -122,54 +120,6 @@ export default function RoadsideHelpMapScreen() {
       { text: "Call", onPress: () => Linking.openURL("tel:100") },
     ]);
   };
-
-  const handleSubmitRating = () => {
-    Alert.alert("Thank you!", "Your feedback has been submitted.");
-    router.replace("/booking/ride-category" as any);
-  };
-
-  // Rating screen
-  if (phase === "rating") {
-    return (
-      <SafeAreaView style={styles.page}>
-        <View style={styles.ratingWrapper}>
-          <View style={styles.ratingCard}>
-            <View style={styles.checkCircle}>
-              <Ionicons name="checkmark-circle" size={40} color="#F58220" />
-            </View>
-            <Text style={styles.ratingTitle}>Help completed</Text>
-            <Text style={styles.ratingSubtitle}>Rate your helper</Text>
-
-            <View style={styles.starsRow}>
-              {[1, 2, 3, 4, 5].map((i) => (
-                <Pressable key={i} onPress={() => setRating(i)}>
-                  <Ionicons
-                    name={i <= rating ? "star" : "star-outline"}
-                    size={40}
-                    color="#F58220"
-                  />
-                </Pressable>
-              ))}
-            </View>
-
-            <TextInput
-              style={styles.textArea}
-              placeholder="Leave a comment..."
-              placeholderTextColor="#8B7B6B"
-              multiline
-              textAlignVertical="top"
-              value={comment}
-              onChangeText={setComment}
-            />
-
-            <Pressable style={styles.primaryButton} onPress={handleSubmitRating}>
-              <Text style={styles.primaryButtonText}>Submit</Text>
-            </Pressable>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.page}>
@@ -249,13 +199,13 @@ export default function RoadsideHelpMapScreen() {
               <Text style={styles.primaryButtonText}>Helper arrived</Text>
             </Pressable>
           ) : (
-            <Pressable
-              style={styles.primaryButton}
-              onPress={() => setPhase("rating")}
-            >
-              <Ionicons name="construct" size={20} color="#FFFFFF" />
-              <Text style={styles.primaryButtonText}>Help finished</Text>
-            </Pressable>
+            <View style={styles.infoNote}>
+              <Ionicons name="construct" size={18} color="#B86115" />
+              <Text style={styles.infoNoteText}>
+                Your helper is assisting you. It will appear in My Bookings once
+                the driver marks it finished.
+              </Text>
+            </View>
           )}
         </View>
       </View>
@@ -376,6 +326,22 @@ const styles = StyleSheet.create({
   },
   greenButton: {
     backgroundColor: "#16A34A",
+  },
+  infoNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#FFF2E8",
+    borderRadius: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+  },
+  infoNoteText: {
+    flex: 1,
+    color: "#B86115",
+    fontWeight: "700",
+    fontSize: 13,
+    lineHeight: 18,
   },
   primaryButtonText: {
     color: "#FFFFFF",

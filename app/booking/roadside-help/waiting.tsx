@@ -1,0 +1,503 @@
+import { Ionicons } from "@expo/vector-icons";
+import { router, useLocalSearchParams } from "expo-router";
+import {
+  collection,
+  onSnapshot,
+  query,
+  where,
+} from "firebase/firestore";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+
+import { db } from "../../../firebase";
+import { acceptOffer, rejectOffer } from "./roadsideLib";
+
+type Offer = {
+  id: string;
+  driverId: string;
+  driverName?: string;
+  driverGender?: string;
+  driverPhone?: string;
+  driverRating?: number;
+  price?: number;
+  etaMinutes?: number;
+  status?: string;
+  createdAt?: { seconds?: number } | null;
+};
+
+const genderLabel = (value?: string) => {
+  const gender = String(value || "").toLowerCase();
+  if (gender === "female") return "Female ♀";
+  if (gender === "male") return "Male ♂";
+  return "";
+};
+
+export default function RoadsideWaitingScreen() {
+  const params = useLocalSearchParams();
+
+  const requestId = String(params.requestId || "");
+  const matchedCount = Number(params.matchedCount || 0);
+  const problemLabel = String(params.problemLabel || "Roadside Help");
+  const address = String(params.address || "");
+  const lat = String(params.lat || "");
+  const lng = String(params.lng || "");
+
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
+
+  // Listen to offers for this request in real time (sorted client-side so no
+  // Firestore composite index is required).
+  useEffect(() => {
+    if (!requestId) {
+      setLoading(false);
+      return;
+    }
+
+    const q = query(
+      collection(db, "roadsideOffers"),
+      where("requestId", "==", requestId),
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => {
+        const list: Offer[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<Offer, "id">),
+        }));
+        setOffers(list);
+        setLoading(false);
+      },
+      () => setLoading(false),
+    );
+
+    return unsubscribe;
+  }, [requestId]);
+
+  // Only show offers still open to the passenger.
+  const visibleOffers = useMemo(
+    () =>
+      offers
+        .filter((o) => o.status === "sent" || o.status === "accepted_by_passenger")
+        .sort(
+          (a, b) =>
+            (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0),
+        ),
+    [offers],
+  );
+
+  const handleAccept = async (offer: Offer) => {
+    if (busyOfferId) return;
+
+    try {
+      setBusyOfferId(offer.id);
+
+      await acceptOffer(requestId, {
+        id: offer.id,
+        driverId: offer.driverId,
+        driverName: offer.driverName,
+        price: offer.price,
+        etaMinutes: offer.etaMinutes,
+      });
+
+      // Continue to the live tracking screen (reuses the existing map screen).
+      router.replace({
+        pathname: "/booking/roadside-help/map",
+        params: {
+          problemLabel,
+          address,
+          lat,
+          lng,
+          helperName: offer.driverName || "Your helper",
+          helperEta: String(offer.etaMinutes || ""),
+        },
+      } as any);
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not accept the offer.");
+      setBusyOfferId(null);
+    }
+  };
+
+  const handleReject = async (offer: Offer) => {
+    if (busyOfferId) return;
+
+    try {
+      setBusyOfferId(offer.id);
+      await rejectOffer(offer.id);
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not reject the offer.");
+    } finally {
+      setBusyOfferId(null);
+    }
+  };
+
+  const callDriver = (phone?: string) => {
+    if (!phone) return;
+    Linking.openURL(`tel:${phone}`).catch(() =>
+      Alert.alert("Error", "Could not start the call."),
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.page}>
+      <ScrollView contentContainerStyle={styles.scroll}>
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
+          <Text style={styles.backText}>Back</Text>
+        </Pressable>
+
+        <View style={styles.header}>
+          <Text style={styles.headerEmoji}>🔧</Text>
+          <Text style={styles.title}>Finding Help</Text>
+        </View>
+
+        <Text style={styles.routeText}>
+          {problemLabel}
+          {address ? ` • ${address}` : ""}
+        </Text>
+
+        {/* Status banner */}
+        <View style={styles.statusCard}>
+          <ActivityIndicator color="#F58220" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.statusTitle}>
+              {visibleOffers.length > 0
+                ? "Offers are coming in"
+                : "Waiting for nearby drivers…"}
+            </Text>
+            <Text style={styles.statusSub}>
+              {matchedCount > 0
+                ? `We notified ${matchedCount} nearby driver${
+                    matchedCount === 1 ? "" : "s"
+                  }.`
+                : "Your request was sent. Drivers near you will be notified."}
+            </Text>
+          </View>
+        </View>
+
+        {loading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color="#F58220" />
+          </View>
+        ) : visibleOffers.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="time-outline" size={40} color="#8B7B6B" />
+            <Text style={styles.emptyTitle}>No offers yet</Text>
+            <Text style={styles.emptyText}>
+              Hang tight — offers from nearby drivers will appear here
+              automatically.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.list}>
+            {visibleOffers.map((offer) => {
+              const busy = busyOfferId === offer.id;
+              const gender = genderLabel(offer.driverGender);
+
+              return (
+                <View key={offer.id} style={styles.card}>
+                  <View style={styles.topRow}>
+                    <View style={styles.driverInfoRow}>
+                      <View style={styles.avatar}>
+                        <Ionicons name="construct" size={24} color="#F58220" />
+                      </View>
+
+                      <View style={styles.driverTextBox}>
+                        <Text style={styles.driverName}>
+                          {offer.driverName || "Driver"}
+                        </Text>
+                        {gender ? (
+                          <Text style={styles.driverMeta}>{gender}</Text>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    <View style={styles.ratingBox}>
+                      <Ionicons name="star" size={15} color="#B86115" />
+                      <Text style={styles.ratingText}>
+                        {offer.driverRating ?? 4.8}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.metaRow}>
+                    <View style={styles.metaItem}>
+                      <Ionicons name="cash-outline" size={17} color="#F58220" />
+                      <Text style={styles.metaText}>{offer.price ?? "--"} ₪</Text>
+                    </View>
+                    <View style={styles.metaItem}>
+                      <Ionicons name="time-outline" size={17} color="#F58220" />
+                      <Text style={styles.metaText}>
+                        {offer.etaMinutes ?? "--"} min
+                      </Text>
+                    </View>
+                  </View>
+
+                  {offer.driverPhone ? (
+                    <Pressable
+                      style={styles.phoneRow}
+                      onPress={() => callDriver(offer.driverPhone)}
+                    >
+                      <Ionicons name="call-outline" size={16} color="#F58220" />
+                      <Text style={styles.phoneText}>{offer.driverPhone}</Text>
+                    </Pressable>
+                  ) : null}
+
+                  <View style={styles.actionsRow}>
+                    <Pressable
+                      style={[styles.rejectButton, busy && styles.buttonDisabled]}
+                      onPress={() => handleReject(offer)}
+                      disabled={busy}
+                    >
+                      <Text style={styles.rejectText}>Reject</Text>
+                    </Pressable>
+
+                    <Pressable
+                      style={[styles.acceptButton, busy && styles.buttonDisabled]}
+                      onPress={() => handleAccept(offer)}
+                      disabled={busy}
+                    >
+                      {busy ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.acceptText}>Accept Help</Text>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  page: {
+    flex: 1,
+    backgroundColor: "#FBF7F1",
+  },
+  scroll: {
+    padding: 20,
+    paddingTop: 50,
+    paddingBottom: 40,
+  },
+  backButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 16,
+  },
+  backText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 15,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 6,
+  },
+  headerEmoji: {
+    fontSize: 24,
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  routeText: {
+    color: "#7C5F46",
+    fontWeight: "700",
+    marginBottom: 20,
+  },
+  statusCard: {
+    backgroundColor: "#FFF2E8",
+    borderWidth: 1,
+    borderColor: "#F7D3B4",
+    borderRadius: 18,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    marginBottom: 22,
+  },
+  statusTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 3,
+  },
+  statusSub: {
+    color: "#7C5F46",
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  loadingBox: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  emptyCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    padding: 30,
+    alignItems: "center",
+  },
+  emptyTitle: {
+    fontSize: 19,
+    fontWeight: "900",
+    color: "#111827",
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  emptyText: {
+    color: "#7C5F46",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  list: {
+    gap: 16,
+  },
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    borderRadius: 22,
+    padding: 18,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  topRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  driverInfoRow: {
+    flexDirection: "row",
+    flex: 1,
+    gap: 12,
+    alignItems: "center",
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#FFF2E8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  driverTextBox: {
+    flex: 1,
+  },
+  driverName: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  driverMeta: {
+    color: "#7C5F46",
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  ratingBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FFF2E8",
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 15,
+  },
+  ratingText: {
+    fontWeight: "900",
+    color: "#111827",
+    fontSize: 14,
+  },
+  metaRow: {
+    flexDirection: "row",
+    gap: 24,
+    marginBottom: 16,
+  },
+  metaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  metaText: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  phoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FFF8F2",
+    borderWidth: 1,
+    borderColor: "#F7D3B4",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 16,
+  },
+  phoneText: {
+    color: "#F58220",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  actionsRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  rejectButton: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: "#E4DDD7",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    backgroundColor: "#FFFDFC",
+  },
+  rejectText: {
+    color: "#7C5F46",
+    fontWeight: "900",
+    fontSize: 15,
+  },
+  acceptButton: {
+    flex: 1.4,
+    backgroundColor: "#F58220",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  acceptText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 15,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+});

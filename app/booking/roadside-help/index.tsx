@@ -3,6 +3,7 @@ import * as Location from "expo-location";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Pressable,
   SafeAreaView,
@@ -13,6 +14,8 @@ import {
   View,
 } from "react-native";
 import MapView, { Marker, Region } from "react-native-maps";
+
+import { createRoadsideRequest } from "./roadsideLib";
 
 // Default map region (Nazareth area) used until the user moves the pin.
 const DEFAULT_REGION: Region = {
@@ -65,6 +68,7 @@ export default function RoadsideHelpScreen() {
   const [description, setDescription] = useState("");
   const [locating, setLocating] = useState(true);
   const [address, setAddress] = useState("");
+  const [sending, setSending] = useState(false);
 
   const toggleProblem = (key: string) => {
     setProblemTypes((prev) =>
@@ -135,7 +139,7 @@ export default function RoadsideHelpScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleFindHelp = () => {
+  const handleFindHelp = async () => {
     if (problemTypes.length === 0) {
       Alert.alert(
         "Select a problem",
@@ -144,20 +148,48 @@ export default function RoadsideHelpScreen() {
       return;
     }
 
-    const problemLabel = PROBLEMS.filter((p) => problemTypes.includes(p.key))
-      .map((p) => p.title)
-      .join(", ");
+    if (sending) return;
 
-    router.push({
-      pathname: "/booking/roadside-help/results",
-      params: {
-        problemLabel,
+    const problemTitles = PROBLEMS.filter((p) => problemTypes.includes(p.key)).map(
+      (p) => p.title,
+    );
+    const problemLabel = problemTitles.join(", ");
+
+    try {
+      setSending(true);
+
+      // Save the request in Firestore and notify nearby drivers.
+      const { requestId, matchedCount } = await createRoadsideRequest({
+        problemKeys: problemTypes,
+        problemTitles,
         description: description.trim(),
-        address: addressLabel,
-        lat: String(marker.latitude),
-        lng: String(marker.longitude),
-      },
-    } as any);
+        location: {
+          latitude: marker.latitude,
+          longitude: marker.longitude,
+          address: addressLabel,
+        },
+      });
+
+      // Go to the waiting screen where offers arrive in real time.
+      router.push({
+        pathname: "/booking/roadside-help/waiting",
+        params: {
+          requestId,
+          matchedCount: String(matchedCount),
+          problemLabel,
+          address: addressLabel,
+          lat: String(marker.latitude),
+          lng: String(marker.longitude),
+        },
+      } as any);
+    } catch (error: any) {
+      Alert.alert(
+        "Could not send request",
+        error?.message || "Please try again.",
+      );
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -269,13 +301,19 @@ export default function RoadsideHelpScreen() {
         <Pressable
           style={[
             styles.searchButton,
-            problemTypes.length === 0 && styles.searchButtonDisabled,
+            (problemTypes.length === 0 || sending) && styles.searchButtonDisabled,
           ]}
           onPress={handleFindHelp}
-          disabled={problemTypes.length === 0}
+          disabled={problemTypes.length === 0 || sending}
         >
-          <Ionicons name="search-outline" size={20} color="#FFFFFF" />
-          <Text style={styles.searchText}>Find Nearby Help</Text>
+          {sending ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <>
+              <Ionicons name="search-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.searchText}>Find Nearby Help</Text>
+            </>
+          )}
         </Pressable>
       </ScrollView>
     </SafeAreaView>

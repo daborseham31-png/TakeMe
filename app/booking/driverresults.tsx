@@ -14,6 +14,7 @@ import {
 } from "react-native";
 
 import { db } from "../../firebase";
+import { createPassengerBooking } from "./bookingsLib";
 
 type DriverProfile = {
   name?: string;
@@ -358,15 +359,45 @@ export default function DriverResultsScreen() {
     }
   };
 
-  const handleBookDriver = (driver: DriverRoute) => {
-    Alert.alert(
-      "Booking Confirmed",
-      `You selected ${getDriverName(
-        driver,
-      )}. The booking will be added to My Bookings.`,
-    );
+  const [bookingBusy, setBookingBusy] = useState(false);
 
-    router.push("/(tabs)/bookings" as any);
+  const handleBookDriver = async (driver: DriverRoute) => {
+    if (bookingBusy) return;
+
+    const isDelivery = driver.category === "delivery";
+    const totalPrice = Number(driver.price || 0) * (isDelivery ? 1 : seats);
+
+    try {
+      setBookingBusy(true);
+
+      // Save the passenger booking so it shows up under My Bookings > Passenger.
+      await createPassengerBooking({
+        driverId: driver.driverId,
+        driverName: getDriverName(driver),
+        routeId: driver.id,
+        category: driver.category || category,
+        from: driver.from || from,
+        to: driver.to || to,
+        date: driver.tripDate || driver.deliveryDate || requestedDate || "",
+        time: driver.time || requestedTime || "",
+        days: driver.availableDays || [],
+        seats: isDelivery ? null : seats,
+        price: totalPrice,
+      });
+
+      Alert.alert(
+        "Booking Confirmed",
+        `You selected ${getDriverName(
+          driver,
+        )}. It was added to My Bookings.`,
+      );
+
+      router.push("/(tabs)/bookings" as any);
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not create the booking.");
+    } finally {
+      setBookingBusy(false);
+    }
   };
 
   if (loading) {
@@ -679,8 +710,9 @@ export default function DriverResultsScreen() {
                   )}
 
                   <Pressable
-                    style={styles.bookButton}
+                    style={[styles.bookButton, bookingBusy && { opacity: 0.6 }]}
                     onPress={() => handleBookDriver(driver)}
+                    disabled={bookingBusy}
                   >
                     <Text style={styles.bookButtonText}>Book This Driver</Text>
 
