@@ -38,6 +38,11 @@ export const CATEGORY_META: Record<
 > = {
   school: { label: "School", icon: "school-outline", color: "#3B82F6" },
   personal: { label: "Personal Ride", icon: "person-outline", color: "#EC4899" },
+  personal_ride: {
+    label: "Personal Ride",
+    icon: "person-outline",
+    color: "#EC4899",
+  },
   delivery: { label: "Delivery", icon: "cube-outline", color: "#A855F7" },
   errands: { label: "Errand", icon: "location-outline", color: "#F58220" },
   workErrands: {

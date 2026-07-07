@@ -24,13 +24,22 @@ import {
 
 import { auth, db } from "../firebase";
 
+type BookingTab = "passenger" | "driver";
+
 type Notification = {
   id: string;
   type?: string;
   title?: string;
   message?: string;
+
   applicationId?: string | null;
+  bookingId?: string | null;
+
   kind?: "work" | "errand" | null;
+
+  // إذا موجود بالفايربيس بنستخدمه، وإذا مش موجود بنخمن من type
+  openBookingTab?: BookingTab | null;
+
   read?: boolean;
   deleted?: boolean;
   createdAt?: { seconds?: number } | null;
@@ -45,6 +54,11 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
   arrived: "location-outline",
   completed: "trophy-outline",
   cancelled: "ban-outline",
+
+  personal_ride_booking: "car-sport-outline",
+  ride_on_the_way: "car-outline",
+  ride_arrived: "location-outline",
+  ride_completed: "trophy-outline",
 };
 
 export default function NotificationsScreen() {
@@ -59,17 +73,19 @@ export default function NotificationsScreen() {
     });
   }, []);
 
-  // Single equality filter → no composite index needed. Deleted + sort handled
-  // client-side.
   useEffect(() => {
     if (!uid) return;
+
     setLoading(true);
 
     const unsub = onSnapshot(
       query(collection(db, "notifications"), where("userId", "==", uid)),
       (snap) => {
         setItems(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Notification, "id">) })),
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Omit<Notification, "id">),
+          })),
         );
         setLoading(false);
       },
@@ -89,10 +105,44 @@ export default function NotificationsScreen() {
     [items],
   );
 
-  // Errand acceptance is the only notification that sends the recipient to pay
-  // (work is paid by the employer, not the applicant).
   const needsPayment = (n: Notification) =>
     n.type === "request_accepted" && n.kind === "errand";
+
+  const getBookingTabFromNotification = (n: Notification): BookingTab => {
+    if (n.openBookingTab === "driver" || n.openBookingTab === "passenger") {
+      return n.openBookingTab;
+    }
+
+    // إشعارات عادة بتوصل للسائق
+    const driverTypes = [
+      "request_received",
+      "payment_confirmed",
+      "personal_ride_booking",
+      "ride_completed",
+    ];
+
+    if (driverTypes.includes(n.type || "")) {
+      return "driver";
+    }
+
+    // إشعارات عادة بتوصل للمسافر
+    const passengerTypes = [
+      "request_accepted",
+      "request_rejected",
+      "on_the_way",
+      "arrived",
+      "completed",
+      "cancelled",
+      "ride_on_the_way",
+      "ride_arrived",
+    ];
+
+    if (passengerTypes.includes(n.type || "")) {
+      return "passenger";
+    }
+
+    return "passenger";
+  };
 
   const onPressNotification = (n: Notification) => {
     if (!n.read) {
@@ -102,22 +152,37 @@ export default function NotificationsScreen() {
     if (needsPayment(n) && n.applicationId && n.kind) {
       router.push({
         pathname: "/booking/payment",
-        params: { kind: n.kind, id: n.applicationId },
+        params: {
+          kind: n.kind,
+          id: n.applicationId,
+        },
       } as any);
       return;
     }
 
-    router.push("/(tabs)/bookings" as any);
+    const tab = getBookingTabFromNotification(n);
+
+    router.push({
+      pathname: "/(tabs)/bookings",
+      params: {
+        tab,
+        bookingId: n.bookingId || "",
+        applicationId: n.applicationId || "",
+        type: n.type || "",
+        kind: n.kind || "",
+      },
+    } as any);
   };
 
-  // Deleting only hides the notification for this user – the underlying
-  // application / booking is untouched.
   const deleteOne = (n: Notification) => {
-    updateDoc(doc(db, "notifications", n.id), { deleted: true }).catch(() => {});
+    updateDoc(doc(db, "notifications", n.id), { deleted: true }).catch(
+      () => {},
+    );
   };
 
   const clearAll = () => {
     if (visible.length === 0) return;
+
     Alert.alert("Clear all", "Hide all notifications?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -126,9 +191,11 @@ export default function NotificationsScreen() {
         onPress: async () => {
           try {
             const batch = writeBatch(db);
+
             visible.forEach((n) =>
               batch.update(doc(db, "notifications", n.id), { deleted: true }),
             );
+
             await batch.commit();
           } catch (error: any) {
             Alert.alert("Error", error?.message || "Could not clear.");
@@ -151,12 +218,14 @@ export default function NotificationsScreen() {
             <Ionicons name="notifications" size={26} color="#F58220" />
             <Text style={styles.title}>Notifications</Text>
           </View>
+
           {visible.length > 0 ? (
             <Pressable onPress={clearAll} hitSlop={8}>
               <Text style={styles.clearAll}>Clear all</Text>
             </Pressable>
           ) : null}
         </View>
+
         <Text style={styles.subtitle}>Requests & booking updates</Text>
 
         {loading ? (
@@ -166,8 +235,13 @@ export default function NotificationsScreen() {
         ) : visible.length === 0 ? (
           <View style={styles.emptyCard}>
             <View style={styles.emptyIcon}>
-              <Ionicons name="notifications-off-outline" size={38} color="#8B7B6B" />
+              <Ionicons
+                name="notifications-off-outline"
+                size={38}
+                color="#8B7B6B"
+              />
             </View>
+
             <Text style={styles.emptyTitle}>No notifications yet</Text>
             <Text style={styles.emptyText}>
               Requests, payments and booking updates will appear here.
@@ -191,18 +265,28 @@ export default function NotificationsScreen() {
                       color="#F58220"
                     />
                   </View>
+
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cardTitle}>{n.title || "Update"}</Text>
+
                     {n.message ? (
                       <Text style={styles.cardMessage}>{n.message}</Text>
                     ) : null}
+
                     {needsPayment(n) ? (
                       <View style={styles.payPill}>
-                        <Ionicons name="card-outline" size={13} color="#FFFFFF" />
-                        <Text style={styles.payPillText}>Continue to Payment</Text>
+                        <Ionicons
+                          name="card-outline"
+                          size={13}
+                          color="#FFFFFF"
+                        />
+                        <Text style={styles.payPillText}>
+                          Continue to Payment
+                        </Text>
                       </View>
                     ) : null}
                   </View>
+
                   {!n.read ? <View style={styles.dot} /> : null}
                 </Pressable>
 

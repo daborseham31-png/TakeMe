@@ -110,6 +110,10 @@ export const formatDateToYMD = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+export const getTodayYMD = () => {
+  return formatDateToYMD(new Date());
+};
+
 export const parseDateInput = (dateText: string) => {
   const value = dateText.trim();
 
@@ -238,6 +242,81 @@ export const parseTimeToDate = (value: string) => {
   }
 
   return date;
+};
+
+// ---------------------------------------------------------------------------
+// Date + time validation helpers
+// ---------------------------------------------------------------------------
+
+export const isTimeAvailableForDate = (dateText: string, timeText: string) => {
+  const cleanDate = normalizeDateToYMD(dateText);
+  const cleanTime = normalizeTime(timeText);
+
+  if (!cleanDate || !cleanTime) return false;
+
+  const today = getTodayYMD();
+
+  // تاريخ قديم
+  if (cleanDate < today) return false;
+
+  // تاريخ بالمستقبل، أي ساعة مسموحة
+  if (cleanDate > today) return true;
+
+  // نفس اليوم، لازم الساعة تكون قدام الوقت الحالي
+  const selectedMinutes = timeToMinutes(cleanTime);
+
+  if (selectedMinutes === null) return false;
+
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  return selectedMinutes > currentMinutes;
+};
+
+export const validateDateAndTimeNotPassed = (
+  dateText: string,
+  timeText: string,
+  labels?: {
+    dateLabel?: string;
+    timeLabel?: string;
+  },
+) => {
+  const dateLabel = labels?.dateLabel || "date";
+  const timeLabel = labels?.timeLabel || "time";
+
+  const cleanDate = normalizeDateToYMD(dateText);
+
+  if (!cleanDate) {
+    Alert.alert(
+      "Invalid date",
+      `Please choose a valid ${dateLabel} today or in the future.`,
+    );
+    return null;
+  }
+
+  const cleanTime = normalizeTime(timeText);
+
+  if (!cleanTime) {
+    Alert.alert(
+      "Invalid time",
+      `Please choose a valid ${timeLabel} between 00:00 and 23:59.`,
+    );
+    return null;
+  }
+
+  if (!isTimeAvailableForDate(cleanDate, cleanTime)) {
+    Alert.alert(
+      "Invalid time",
+      `You cannot choose a ${timeLabel} that already passed today.`,
+    );
+    return null;
+  }
+
+  return {
+    cleanDate,
+    cleanTime,
+    day: getDayFromDateText(cleanDate),
+  };
 };
 
 // ---------------------------------------------------------------------------

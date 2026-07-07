@@ -2,23 +2,23 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    Alert,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 import DateInput, { TimeInput } from "../driver/create/DateInput";
 import {
-    dayNames,
-    getDayFromDateText,
-    normalizeDateToYMD,
-    normalizeTime,
-    styles as weeklyStyles,
+  dayNames,
+  getDayFromDateText,
+  normalizeDateToYMD,
+  normalizeTime,
+  styles as weeklyStyles,
 } from "../driver/create/driverHelpers";
 
 const LANGUAGES_LIST = [
@@ -36,6 +36,38 @@ const getTodayDate = () => {
   const day = String(today.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
+};
+
+const getTimeMinutes = (timeText: string) => {
+  const cleanTime = normalizeTime(timeText);
+
+  if (!cleanTime) return null;
+
+  const [hours, minutes] = cleanTime.split(":").map(Number);
+
+  return hours * 60 + minutes;
+};
+
+const isTimeAvailableForDate = (dateText: string, timeText: string) => {
+  const cleanDate = normalizeDateToYMD(dateText);
+  const cleanTime = normalizeTime(timeText);
+
+  if (!cleanDate || !cleanTime) return false;
+
+  const today = getTodayDate();
+
+  if (cleanDate < today) return false;
+
+  if (cleanDate > today) return true;
+
+  const selectedMinutes = getTimeMinutes(cleanTime);
+
+  if (selectedMinutes === null) return false;
+
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  return selectedMinutes > currentMinutes;
 };
 
 export default function PersonalRideScreen() {
@@ -116,8 +148,6 @@ export default function PersonalRideScreen() {
     setDaySeats((prev) => ({ ...prev, [day]: 1 }));
   };
 
-  // The chosen Start Date's own day is always part of the weekly plan, so the
-  // rider sets a time + seats for that day too.
   useEffect(() => {
     if (!weeklyBooking) return;
 
@@ -172,6 +202,11 @@ export default function PersonalRideScreen() {
       return;
     }
 
+    if (cleanDate < getTodayDate()) {
+      Alert.alert("Invalid date", "Please choose today or a future date.");
+      return;
+    }
+
     const tripDay = getDayFromDateText(cleanDate);
 
     const baseParams: Record<string, string> = {
@@ -198,6 +233,18 @@ export default function PersonalRideScreen() {
           Alert.alert(
             "Invalid time",
             `Please choose a valid time for ${day} between 00:00 and 23:59.`,
+          );
+          return;
+        }
+
+        if (
+          cleanDate === getTodayDate() &&
+          day === tripDay &&
+          !isTimeAvailableForDate(cleanDate, cleanTime)
+        ) {
+          Alert.alert(
+            "Invalid time",
+            `You cannot book a time that already passed for ${day}.`,
           );
           return;
         }
@@ -248,6 +295,14 @@ export default function PersonalRideScreen() {
       return;
     }
 
+    if (!isTimeAvailableForDate(cleanDate, cleanTime)) {
+      Alert.alert(
+        "Invalid time",
+        "You cannot book a time that already passed.",
+      );
+      return;
+    }
+
     if (seats < 1 || seats > 8) {
       Alert.alert("Invalid seats", "Seats must be between 1 and 8.");
       return;
@@ -280,7 +335,6 @@ export default function PersonalRideScreen() {
         </View>
         <Text style={styles.subtitle}>Personal trips & visits</Text>
 
-        {/* Trip details */}
         <View style={styles.card}>
           <View style={styles.twoColumns}>
             <View style={styles.column}>
@@ -356,9 +410,7 @@ export default function PersonalRideScreen() {
               color={weeklyBooking ? "#F58220" : "#8B7B6B"}
             />
             <Ionicons name="calendar-outline" size={16} color="#7C5F46" />
-            <Text style={styles.weeklyText}>
-              Book for the whole week (optional)
-            </Text>
+            <Text style={styles.weeklyText}>Book for the whole week</Text>
           </Pressable>
 
           {weeklyBooking && (
@@ -466,7 +518,6 @@ export default function PersonalRideScreen() {
           )}
         </View>
 
-        {/* Driver Preferences */}
         <View style={styles.card}>
           <View style={styles.prefTitleRow}>
             <Ionicons name="person-outline" size={18} color="#F58220" />

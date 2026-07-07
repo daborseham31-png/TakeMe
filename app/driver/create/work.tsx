@@ -16,15 +16,14 @@ import { auth, db } from "../../../firebase";
 import DateInput, { TimeInput } from "./DateInput";
 
 import {
-  getDayFromDateText,
   getDigitsOnly,
   normalize,
-  normalizeDateToYMD,
   normalizeTime,
   styles,
   timeToMinutes,
   useDriverAccount,
   validateAccountInfo,
+  validateDateAndTimeNotPassed,
 } from "./driverHelpers";
 
 export default function WorkJobScreen() {
@@ -83,22 +82,27 @@ export default function WorkJobScreen() {
       return;
     }
 
-    const cleanJobDate = normalizeDateToYMD(jobDate);
+    const dateTimeValidation = validateDateAndTimeNotPassed(
+      jobDate,
+      startTime,
+      {
+        dateLabel: "work date",
+        timeLabel: "start time",
+      },
+    );
 
-    if (!cleanJobDate) {
-      Alert.alert("Invalid date", "Work date must be today or a future date.");
-      return;
-    }
+    if (!dateTimeValidation) return;
 
-    const jobDay = getDayFromDateText(cleanJobDate);
+    const cleanJobDate = dateTimeValidation.cleanDate;
+    const cleanStartTime = dateTimeValidation.cleanTime;
+    const jobDay = dateTimeValidation.day;
 
-    const cleanStartTime = normalizeTime(startTime);
     const cleanEndTime = normalizeTime(endTime);
 
-    if (!cleanStartTime || !cleanEndTime) {
+    if (!cleanEndTime) {
       Alert.alert(
         "Invalid time",
-        "Please choose valid start and end time between 00:00 and 23:59.",
+        "Please choose a valid end time between 00:00 and 23:59.",
       );
       return;
     }
@@ -141,13 +145,10 @@ export default function WorkJobScreen() {
       await addDoc(collection(db, "workJobs"), {
         employerId: user.uid,
 
-        // fallback فقط
-        // صفحة المسافر بتقرأ الأساسي من users/{employerId}
         employerName: driverName,
         phone: accountInfo.cleanPhone,
         driverAge: accountInfo.cleanDriverAge,
 
-        // اللغة جاية لحالها من بروفايل المستخدم
         languages,
 
         jobTitle,
@@ -246,7 +247,13 @@ export default function WorkJobScreen() {
                 value={startTime}
                 onChange={setStartTime}
                 showPicker={showStartTimePicker}
-                setShowPicker={setShowStartTimePicker}
+                setShowPicker={(value) => {
+                  setShowStartTimePicker(value);
+
+                  if (value) {
+                    setShowEndTimePicker(false);
+                  }
+                }}
               />
             </View>
 
@@ -256,7 +263,13 @@ export default function WorkJobScreen() {
                 value={endTime}
                 onChange={setEndTime}
                 showPicker={showEndTimePicker}
-                setShowPicker={setShowEndTimePicker}
+                setShowPicker={(value) => {
+                  setShowEndTimePicker(value);
+
+                  if (value) {
+                    setShowStartTimePicker(false);
+                  }
+                }}
               />
             </View>
           </View>
