@@ -55,7 +55,7 @@ const makeStore = (): StoreEntry => {
   return { id: `store-${storeCounter}`, name: "", items: "" };
 };
 
-export default function ItemDeliveryScreen() {
+export default function StoreDeliveryScreen() {
   const [region, setRegion] = useState<Region>(DEFAULT_REGION);
   const [marker, setMarker] = useState({
     latitude: DEFAULT_REGION.latitude,
@@ -136,6 +136,7 @@ export default function ItemDeliveryScreen() {
             items: store.items.trim(),
           })),
         ),
+        deliveryType: "store",
         bookingType: "delivery",
       },
     } as any);
@@ -150,7 +151,7 @@ export default function ItemDeliveryScreen() {
 
         <View style={styles.header}>
           <Text style={styles.headerEmoji}>📦</Text>
-          <Text style={styles.title}>Item Delivery</Text>
+          <Text style={styles.title}>Store Delivery</Text>
         </View>
         <Text style={styles.subtitle}>
           Get items delivered from any store near you
@@ -184,9 +185,7 @@ export default function ItemDeliveryScreen() {
               <Marker
                 draggable
                 coordinate={marker}
-                onDragEnd={(event) =>
-                  setMarker(event.nativeEvent.coordinate)
-                }
+                onDragEnd={(event) => setMarker(event.nativeEvent.coordinate)}
               />
             </MapView>
 

@@ -387,9 +387,7 @@ export default function DriverResultsScreen() {
 
       Alert.alert(
         "Booking Confirmed",
-        `You selected ${getDriverName(
-          driver,
-        )}. It was added to My Bookings.`,
+        `You selected ${getDriverName(driver)}. It was added to My Bookings.`,
       );
 
       router.push("/(tabs)/bookings" as any);
@@ -424,6 +422,10 @@ export default function DriverResultsScreen() {
         <Text style={styles.routeText}>
           {from || "Any location"} → {to || "Any destination"}
         </Text>
+
+        {requestedDate ? (
+          <Text style={styles.routeText}>📅 {requestedDate}</Text>
+        ) : null}
 
         {drivers.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -715,14 +717,6 @@ export default function DriverResultsScreen() {
                     disabled={bookingBusy}
                   >
                     <Text style={styles.bookButtonText}>Book This Driver</Text>
-
-                    <View style={styles.bookArrowCircle}>
-                      <Ionicons
-                        name="chevron-forward"
-                        size={22}
-                        color="#F58220"
-                      />
-                    </View>
                   </Pressable>
                 </View>
               );
@@ -1059,15 +1053,5 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 17,
     fontWeight: "900",
-  },
-  bookArrowCircle: {
-    position: "absolute",
-    right: 14,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
   },
 });

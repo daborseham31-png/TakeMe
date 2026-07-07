@@ -120,6 +120,7 @@ export default function DeliverItemScreen() {
       seats: "1",
       recipientPhone: cleanPhone,
       itemDescription: itemDescription.trim(),
+      deliveryType: "person",
     };
 
     if (weeklyBooking) {
@@ -159,36 +160,12 @@ export default function DeliverItemScreen() {
         </Pressable>
 
         <View style={styles.header}>
-          <Text style={styles.headerEmoji}>🚗</Text>
-          <Text style={styles.title}>Personal Ride</Text>
+          <Text style={styles.headerEmoji}>📦</Text>
+          <Text style={styles.title}>Deliver Item</Text>
         </View>
-        <Text style={styles.subtitle}>Personal trips & visits</Text>
-
-        {/* Ride Type */}
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Ride Type</Text>
-
-          <View style={styles.rideTypeRow}>
-            <Pressable
-              style={styles.rideTypeBox}
-              onPress={() =>
-                router.replace("/personal-ride/ride-person" as any)
-              }
-            >
-              <Ionicons name="person-outline" size={22} color="#8B7B6B" />
-              <Text style={styles.rideTypeTitle}>Ride (Person)</Text>
-              <Text style={styles.rideTypeDesc}>
-                Get a ride to your destination
-              </Text>
-            </Pressable>
-
-            <Pressable style={[styles.rideTypeBox, styles.rideTypeBoxActive]}>
-              <Ionicons name="cube-outline" size={22} color="#F58220" />
-              <Text style={styles.rideTypeTitle}>Deliver Item</Text>
-              <Text style={styles.rideTypeDesc}>Send an item to someone</Text>
-            </Pressable>
-          </View>
-        </View>
+        <Text style={styles.subtitle}>
+          Send an item from one person to another
+        </Text>
 
         {/* Trip details */}
         <View style={styles.card}>
@@ -223,7 +200,7 @@ export default function DeliverItemScreen() {
           </View>
 
           <Text style={styles.labelOrange}>
-            <Text>🕐 </Text>Trip Time
+            <Text>🕐 </Text>Delivery Time
           </Text>
           <View style={styles.timeRowFull}>
             <TextInput
@@ -271,12 +248,14 @@ export default function DeliverItemScreen() {
             onPress={() => setWeeklyBooking(!weeklyBooking)}
           >
             <Ionicons
-              name={weeklyBooking ? "radio-button-on" : "radio-button-off"}
+              name={weeklyBooking ? "checkbox" : "square-outline"}
               size={20}
               color={weeklyBooking ? "#F58220" : "#8B7B6B"}
             />
             <Ionicons name="calendar-outline" size={16} color="#7C5F46" />
-            <Text style={styles.weeklyText}>Book for the whole week</Text>
+            <Text style={styles.weeklyText}>
+              Book for the whole week (optional)
+            </Text>
           </Pressable>
         </View>
 
@@ -431,37 +410,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-  },
-  rideTypeRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 6,
-  },
-  rideTypeBox: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#E2D8CF",
-    borderRadius: 14,
-    padding: 16,
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  rideTypeBoxActive: {
-    borderColor: "#F58220",
-    backgroundColor: "#FFF3E8",
-  },
-  rideTypeTitle: {
-    fontSize: 15,
-    fontWeight: "900",
-    color: "#111827",
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  rideTypeDesc: {
-    fontSize: 12,
-    color: "#7C5F46",
-    textAlign: "center",
-    lineHeight: 16,
   },
   twoColumns: {
     flexDirection: "row",
