@@ -14,8 +14,15 @@ import {
   View,
 } from "react-native";
 
+import {
+  createApplication,
+  detectCurrentLocation,
+  GeoPoint,
+} from "../workErrandLib";
+
 type Driver = {
-  id: number;
+  id: string;
+  ownerId: string;
   name: string;
   gender: "male" | "female";
   age: number;
@@ -50,26 +57,28 @@ const DESTINATION_ICONS: Record<string, string> = {
   mall: "🏬",
   gym: "💪",
   pharmacy: "💊",
+  errands: "📍",
 };
 
 const defaultDriver: Driver = {
-  id: 1,
-  name: "Layla Mansour",
+  id: "",
+  ownerId: "",
+  name: "Person",
   gender: "female",
-  age: 28,
-  phone: "050-1234567",
-  languages: ["ar", "he"],
-  rating: 4.9,
-  reviews: 53,
-  price: 20,
-  destination: "shopping",
-  destinationLabel: "Shopping at Big Mall",
-  departureTime: "10:00",
-  returnTime: "13:00",
-  date: "2026-03-14",
-  day: "Sat",
-  location: "Nazareth",
-  seats: 3,
+  age: 0,
+  phone: "",
+  languages: [],
+  rating: 4.8,
+  reviews: 0,
+  price: 0,
+  destination: "errands",
+  destinationLabel: "Errand",
+  departureTime: "",
+  returnTime: "",
+  date: "",
+  day: "",
+  location: "",
+  seats: 1,
 };
 
 export default function ErrandsBookScreen() {
@@ -88,31 +97,76 @@ export default function ErrandsBookScreen() {
   }, [params.driver]);
 
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const [fullName, setFullName] = useState("");
-  const [familyName, setFamilyName] = useState("");
-  const [age, setAge] = useState("");
-  const [location, setLocation] = useState("");
+  const [city, setCity] = useState("");
+  const [neighborhood, setNeighborhood] = useState("");
+  const [notes, setNotes] = useState("");
+  const [location, setLocation] = useState<GeoPoint | null>(null);
+  const [locating, setLocating] = useState(false);
 
-  const handleSubmit = () => {
-    const cleanFullName = fullName.trim();
-    const cleanFamilyName = familyName.trim();
-    const cleanAge = age.trim();
-    const cleanLocation = location.trim();
+  const detectLocation = async () => {
+    try {
+      setLocating(true);
+      const loc = await detectCurrentLocation();
+      setLocation(loc);
+    } catch (error: any) {
+      Alert.alert(
+        "Location",
+        error?.message || "Could not detect your location.",
+      );
+    } finally {
+      setLocating(false);
+    }
+  };
 
-    if (!cleanFullName || !cleanFamilyName || !cleanAge || !cleanLocation) {
-      Alert.alert("Missing details", "Please fill all fields.");
+  const handleSubmit = async () => {
+    const cleanCity = city.trim();
+    const cleanNeighborhood = neighborhood.trim();
+
+    if (!cleanCity || !cleanNeighborhood) {
+      Alert.alert("Missing details", "Please fill City / Village and Neighborhood.");
       return;
     }
 
-    const ageNumber = Number(cleanAge);
-
-    if (!Number.isInteger(ageNumber) || ageNumber < 10 || ageNumber > 99) {
-      Alert.alert("Invalid age", "Age must be between 10 and 99.");
+    if (!location || location.latitude === null || location.longitude === null) {
+      Alert.alert(
+        "Location needed",
+        "Please detect your current location so the driver can reach you.",
+      );
       return;
     }
 
-    setSubmitted(true);
+    try {
+      setSubmitting(true);
+
+      await createApplication(
+        "errand",
+        {
+          sourceId: driver.id,
+          providerId: driver.ownerId,
+          providerName: driver.name,
+          title: driver.destinationLabel,
+          date: driver.date,
+          startTime: driver.departureTime,
+          endTime: driver.returnTime,
+          price: driver.price || null,
+          seats: driver.seats || null,
+        },
+        {
+          city: cleanCity,
+          neighborhood: cleanNeighborhood,
+          notes: notes.trim(),
+          location,
+        },
+      );
+
+      setSubmitted(true);
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not send the request.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (submitted) {
@@ -125,8 +179,8 @@ export default function ErrandsBookScreen() {
 
           <Text style={styles.successText}>
             Your request has been sent to{" "}
-            <Text style={styles.boldText}>{driver.name}</Text>. They will
-            contact you soon.
+            <Text style={styles.boldText}>{driver.name}</Text>. Once accepted,
+            you&apos;ll continue to payment. Track it under My Bookings.
           </Text>
 
           <View style={styles.successButtonsRow}>
@@ -137,6 +191,13 @@ export default function ErrandsBookScreen() {
               }
             >
               <Text style={styles.outlineButtonText}>Browse More</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.successButton}
+              onPress={() => router.replace("/(tabs)/bookings" as any)}
+            >
+              <Text style={styles.successButtonText}>My Bookings</Text>
             </Pressable>
           </View>
         </View>
@@ -230,66 +291,79 @@ export default function ErrandsBookScreen() {
           <View style={styles.formCard}>
             <Text style={styles.formTitle}>✈️ Your Details</Text>
 
+            <Text style={styles.hint}>
+              Your name, age and phone are taken from your profile
+              automatically.
+            </Text>
+
+            <Text style={styles.label}>Your Location</Text>
+            <Pressable
+              style={styles.locationBox}
+              onPress={detectLocation}
+              disabled={locating}
+            >
+              <Ionicons
+                name={location ? "location" : "locate-outline"}
+                size={20}
+                color="#F58220"
+              />
+              <Text style={styles.locationText} numberOfLines={2}>
+                {locating
+                  ? "Detecting your location..."
+                  : location
+                    ? location.address || "Current location detected"
+                    : "Tap to detect my current location"}
+              </Text>
+              {location ? (
+                <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
+              ) : null}
+            </Pressable>
+
             <View style={styles.row}>
               <View style={styles.halfField}>
-                <Text style={styles.label}>First Name</Text>
+                <Text style={styles.label}>City / Village</Text>
                 <TextInput
                   style={styles.input}
-                  value={fullName}
-                  onChangeText={setFullName}
-                  placeholder="e.g. Ahmad"
+                  value={city}
+                  onChangeText={setCity}
+                  placeholder="e.g. Nazareth"
                   placeholderTextColor="#9B7A68"
-                  maxLength={50}
+                  maxLength={100}
                 />
               </View>
 
               <View style={styles.halfField}>
-                <Text style={styles.label}>Family Name</Text>
+                <Text style={styles.label}>Neighborhood</Text>
                 <TextInput
                   style={styles.input}
-                  value={familyName}
-                  onChangeText={setFamilyName}
-                  placeholder="e.g. Hassan"
+                  value={neighborhood}
+                  onChangeText={setNeighborhood}
+                  placeholder="e.g. Al- Maidan"
                   placeholderTextColor="#9B7A68"
-                  maxLength={50}
+                  maxLength={100}
                 />
               </View>
             </View>
 
-            <View style={styles.row}>
-              <View style={styles.halfField}>
-                <Text style={styles.label}>Age</Text>
-                <TextInput
-                  style={styles.input}
-                  value={age}
-                  onChangeText={setAge}
-                  placeholder="e.g. 25"
-                  placeholderTextColor="#9B7A68"
-                  keyboardType="number-pad"
-                />
-              </View>
+            <Text style={styles.label}>Notes (optional)</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={notes}
+              onChangeText={setNotes}
+              placeholder="Anything the driver should know"
+              placeholderTextColor="#9B7A68"
+              multiline
+            />
 
-              <View style={styles.halfField}>
-                <Text style={styles.label}>Your Location</Text>
-
-                <View style={styles.locationInputBox}>
-                  <Ionicons name="location-outline" size={17} color="#7A665C" />
-
-                  <TextInput
-                    style={styles.locationInput}
-                    value={location}
-                    onChangeText={setLocation}
-                    placeholder="e.g. Nazareth"
-                    placeholderTextColor="#9B7A68"
-                    maxLength={100}
-                  />
-                </View>
-              </View>
-            </View>
-
-            <Pressable style={styles.sendButton} onPress={handleSubmit}>
+            <Pressable
+              style={[styles.sendButton, submitting && styles.sendDisabled]}
+              onPress={handleSubmit}
+              disabled={submitting}
+            >
               <Ionicons name="paper-plane-outline" size={19} color="#FFFFFF" />
-              <Text style={styles.sendButtonText}>Send Request</Text>
+              <Text style={styles.sendButtonText}>
+                {submitting ? "Sending..." : "Send Request"}
+              </Text>
             </Pressable>
           </View>
         </ScrollView>
@@ -430,7 +504,31 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "900",
     color: "#111827",
-    marginBottom: 18,
+    marginBottom: 10,
+  },
+  hint: {
+    fontSize: 13,
+    color: "#7A5C4B",
+    marginBottom: 14,
+    lineHeight: 18,
+  },
+  locationBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#FFF8F2",
+    borderWidth: 1.5,
+    borderColor: "#FFE2C5",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 6,
+  },
+  locationText: {
+    flex: 1,
+    color: "#3C2319",
+    fontSize: 14,
+    fontWeight: "700",
   },
   row: {
     flexDirection: "row",
@@ -447,32 +545,20 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   input: {
-    height: 46,
+    minHeight: 46,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E4DDD7",
     borderRadius: 10,
     paddingHorizontal: 14,
+    paddingVertical: 10,
     fontSize: 15,
     color: "#111827",
     marginBottom: 10,
   },
-  locationInputBox: {
-    height: 46,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E4DDD7",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    marginBottom: 10,
-  },
-  locationInput: {
-    flex: 1,
-    fontSize: 15,
-    color: "#111827",
+  textArea: {
+    minHeight: 90,
+    textAlignVertical: "top",
   },
   sendButton: {
     backgroundColor: "#F58220",
@@ -483,6 +569,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     marginTop: 6,
+  },
+  sendDisabled: {
+    opacity: 0.6,
   },
   sendButtonText: {
     color: "#FFFFFF",

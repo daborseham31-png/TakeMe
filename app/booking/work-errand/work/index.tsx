@@ -17,6 +17,7 @@ import { db } from "../../../../firebase";
 
 type JobListing = {
   id: string;
+  employerId: string;
   name: string;
   gender: "male" | "female";
   jobTypeEn: string;
@@ -79,6 +80,7 @@ export default function FindWorkScreen() {
 
           return {
             id: docSnap.id,
+            employerId: data.employerId || "",
             name: data.employerName || "Employer",
             gender: (data.gender === "female" ? "female" : "male") as
               | "male"

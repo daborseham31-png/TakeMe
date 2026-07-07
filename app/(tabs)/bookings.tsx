@@ -26,6 +26,20 @@ import {
   normalizeBooking,
   normalizeDriverTrip,
 } from "../booking/bookingsLib";
+import {
+  acceptRequest,
+  arriveJob,
+  cancelApplication,
+  cancelBlockedReason,
+  finishJob,
+  isAwaitingPayment,
+  NormalizedApplication,
+  normalizeApplication,
+  rejectRequest,
+  startJob,
+  startState,
+  STATUS_LABEL,
+} from "../booking/work-errand/workErrandLib";
 
 type Tab = "passenger" | "driver";
 
@@ -56,6 +70,13 @@ export default function BookingsScreen() {
   const [routes, setRoutes] = useState<DriverTripItem[]>([]);
   const [workJobs, setWorkJobs] = useState<DriverTripItem[]>([]);
   const [errandJobs, setErrandJobs] = useState<DriverTripItem[]>([]);
+
+  // Work / errand applications (the request → pay → complete flow).
+  const [myWorkApps, setMyWorkApps] = useState<NormalizedApplication[]>([]);
+  const [myErrandApps, setMyErrandApps] = useState<NormalizedApplication[]>([]);
+  const [asProviderWork, setAsProviderWork] = useState<NormalizedApplication[]>([]);
+  const [asProviderErrand, setAsProviderErrand] = useState<NormalizedApplication[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   // "Book Again" modal
   const [rebook, setRebook] = useState<BookingItem | null>(null);
@@ -125,14 +146,79 @@ export default function BookingsScreen() {
     const unsubWork = subscribe("workJobs", "employerId", setWorkJobs);
     const unsubErrands = subscribe("errandJobs", "ownerId", setErrandJobs);
 
+    // Work / errand applications. Each uses a single equality filter → no
+    // composite index needed; results are sorted client-side.
+    const subscribeApps = (
+      collectionName: "workApplications" | "errandApplications",
+      field: string,
+      kind: "work" | "errand",
+      setter: (items: NormalizedApplication[]) => void,
+    ) =>
+      onSnapshot(
+        query(collection(db, collectionName), where(field, "==", uid)),
+        (snap) => {
+          setter(
+            snap.docs.map((d) => normalizeApplication(d.id, d.data(), kind)),
+          );
+          setLoading(false);
+        },
+        () => setLoading(false),
+      );
+
+    const unsubMyWork = subscribeApps(
+      "workApplications",
+      "applicantId",
+      "work",
+      setMyWorkApps,
+    );
+    const unsubMyErrand = subscribeApps(
+      "errandApplications",
+      "passengerId",
+      "errand",
+      setMyErrandApps,
+    );
+    const unsubProvWork = subscribeApps(
+      "workApplications",
+      "employerId",
+      "work",
+      setAsProviderWork,
+    );
+    const unsubProvErrand = subscribeApps(
+      "errandApplications",
+      "driverId",
+      "errand",
+      setAsProviderErrand,
+    );
+
     return () => {
       unsubBookings();
       unsubDriverRoadside();
       unsubRoutes();
       unsubWork();
       unsubErrands();
+      unsubMyWork();
+      unsubMyErrand();
+      unsubProvWork();
+      unsubProvErrand();
     };
   }, [uid]);
+
+  // Combined + sorted application lists for each tab.
+  const passengerApps = useMemo(
+    () =>
+      [...myWorkApps, ...myErrandApps].sort(
+        (a, b) => b.createdAtSeconds - a.createdAtSeconds,
+      ),
+    [myWorkApps, myErrandApps],
+  );
+
+  const driverApps = useMemo(
+    () =>
+      [...asProviderWork, ...asProviderErrand].sort(
+        (a, b) => b.createdAtSeconds - a.createdAtSeconds,
+      ),
+    [asProviderWork, asProviderErrand],
+  );
 
   const driverTrips = useMemo(
     () =>
@@ -181,6 +267,96 @@ export default function BookingsScreen() {
     () => (q ? driverRows.filter((r) => r.searchText.includes(q)) : driverRows),
     [driverRows, q],
   );
+
+  const filteredPassengerApps = useMemo(
+    () => (q ? passengerApps.filter((a) => a.searchText.includes(q)) : passengerApps),
+    [passengerApps, q],
+  );
+
+  const filteredDriverApps = useMemo(
+    () => (q ? driverApps.filter((a) => a.searchText.includes(q)) : driverApps),
+    [driverApps, q],
+  );
+
+  // Shared runner for the work/errand application actions.
+  const runApp = async (id: string, fn: () => Promise<void>) => {
+    try {
+      setBusyId(id);
+      await fn();
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Something went wrong.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const goToPayment = (a: NormalizedApplication) =>
+    router.push({
+      pathname: "/booking/payment",
+      params: { kind: a.kind, id: a.id },
+    } as any);
+
+  const openNavigation = (a: NormalizedApplication) =>
+    router.push({
+      pathname: "/driver/job-navigation",
+      params: { kind: a.kind, id: a.id },
+    } as any);
+
+  const handleAppStart = (a: NormalizedApplication) => {
+    if (startState(a.date) === "future") {
+      Alert.alert("Not yet", "Start will be available on the job date.");
+      return;
+    }
+    runApp(a.id, async () => {
+      await startJob(a.kind, a.id, a);
+      openNavigation(a);
+    });
+  };
+
+  const handleAppArrive = (a: NormalizedApplication) =>
+    runApp(a.id, () => arriveJob(a.kind, a.id, a));
+
+  const handleAppFinish = (a: NormalizedApplication) =>
+    Alert.alert(
+      a.kind === "work" ? "Finish Work" : "Finish Errand",
+      "Mark this as completed?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Yes, finish",
+          onPress: () => runApp(a.id, () => finishJob(a.kind, a.id, a)),
+        },
+      ],
+    );
+
+  const handleAppCancel = (a: NormalizedApplication, by: "passenger" | "driver") => {
+    const blocked = cancelBlockedReason(a);
+    if (blocked) {
+      Alert.alert("Cannot cancel", blocked);
+      return;
+    }
+    Alert.alert("Cancel booking", "Cancel this booking?", [
+      { text: "No", style: "cancel" },
+      {
+        text: "Yes, cancel",
+        style: "destructive",
+        onPress: () => runApp(a.id, () => cancelApplication(a.kind, a.id, a, by)),
+      },
+    ]);
+  };
+
+  const handleAppAccept = (a: NormalizedApplication) =>
+    runApp(a.id, () => acceptRequest(a.kind, a.id, a));
+
+  const handleAppReject = (a: NormalizedApplication) =>
+    Alert.alert("Reject request", "Reject this request?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Reject",
+        style: "destructive",
+        onPress: () => runApp(a.id, () => rejectRequest(a.kind, a.id, a)),
+      },
+    ]);
 
   const confirmComplete = (
     collectionName: string,
@@ -472,10 +648,255 @@ export default function BookingsScreen() {
     );
   };
 
+  // Work / errand application card, rendered in both tabs.
+  const renderApplicationCard = (
+    a: NormalizedApplication,
+    viewer: Tab,
+  ) => {
+    const meta = getCategoryMeta(a.category);
+    const done = a.status === "completed";
+    const dead = a.status === "cancelled" || a.status === "rejected";
+    const busy = busyId === a.id;
+
+    const statusStyle =
+      a.status === "completed"
+        ? styles.statusDone
+        : dead
+          ? styles.statusDead
+          : styles.statusOngoing;
+    const statusTextStyle =
+      a.status === "completed"
+        ? styles.statusTextDone
+        : dead
+          ? styles.statusTextDead
+          : styles.statusTextOngoing;
+
+    const otherName =
+      viewer === "passenger" ? a.providerName : a.customerName;
+
+    const future = startState(a.date) === "future";
+    const cancelBlocked = cancelBlockedReason(a);
+
+    return (
+      <View
+        key={`${a.kind}-app-${a.id}`}
+        style={[styles.card, (done || dead) && styles.cardDone]}
+      >
+        <View style={styles.cardTop}>
+          <View style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}>
+            <Ionicons name={meta.icon} size={15} color={meta.color} />
+            <Text style={[styles.catText, { color: meta.color }]}>
+              {meta.label}
+            </Text>
+          </View>
+          <View style={[styles.statusPill, statusStyle]}>
+            <Text style={[styles.statusText, statusTextStyle]}>
+              {STATUS_LABEL[a.status]}
+            </Text>
+          </View>
+        </View>
+
+        {a.title ? <Text style={styles.tripTitle}>{a.title}</Text> : null}
+
+        {a.date ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="calendar-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>
+              {a.date}
+              {a.startTime ? `  ${a.startTime}` : ""}
+              {a.endTime ? ` - ${a.endTime}` : ""}
+            </Text>
+          </View>
+        ) : null}
+
+        <View style={styles.infoRow}>
+          <Ionicons name="person-outline" size={15} color="#7C5F46" />
+          <Text style={styles.infoText}>{otherName}</Text>
+        </View>
+
+        {viewer === "driver" ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="business-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>
+              {a.city}
+              {a.neighborhood ? ` · ${a.neighborhood}` : ""}
+            </Text>
+          </View>
+        ) : null}
+
+        <View style={styles.metaRow}>
+          {a.price !== null ? (
+            <View style={styles.metaItem}>
+              <Ionicons name="cash-outline" size={15} color="#F58220" />
+              <Text style={styles.metaText}>{a.price} ₪</Text>
+            </View>
+          ) : null}
+          {a.hourlyPay !== null ? (
+            <View style={styles.metaItem}>
+              <Ionicons name="cash-outline" size={15} color="#F58220" />
+              <Text style={styles.metaText}>{a.hourlyPay} ₪/hr</Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Payment info */}
+        <View style={styles.payRow}>
+          <Ionicons name="card-outline" size={14} color="#7C5F46" />
+          <Text style={styles.payText}>
+            {a.paymentMethod
+              ? `${a.paymentMethod === "cash" ? "Cash" : "Card"} · ${
+                  a.paymentStatus
+                }`
+              : "Payment: unpaid"}
+            {a.cardLast4 ? ` (•••• ${a.cardLast4})` : ""}
+          </Text>
+        </View>
+
+        {/* Action buttons */}
+        {viewer === "passenger" ? (
+          <>
+            {/* Errand: the passenger pays. */}
+            {a.kind === "errand" && a.status === "payment_pending_passenger" ? (
+              <Pressable
+                style={styles.primaryButton}
+                onPress={() => goToPayment(a)}
+              >
+                <Ionicons name="card" size={16} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>Continue to Payment</Text>
+              </Pressable>
+            ) : null}
+
+            {/* Work: the employer pays – the applicant just waits. */}
+            {a.kind === "work" && a.status === "payment_pending_driver" ? (
+              <View style={styles.waitBanner}>
+                <Ionicons name="time-outline" size={16} color="#B86115" />
+                <Text style={styles.waitText}>Waiting for employer payment</Text>
+              </View>
+            ) : null}
+
+            {!cancelBlocked &&
+            (a.status === "accepted" || isAwaitingPayment(a.status)) ? (
+              <Pressable
+                style={styles.cancelLink}
+                onPress={() => handleAppCancel(a, "passenger")}
+              >
+                <Text style={styles.cancelLinkText}>Cancel booking</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : (
+          <>
+            {/* Provider still needs to accept/reject the request. */}
+            {a.status === "pending" ? (
+              <View style={styles.appActionsRow}>
+                <Pressable
+                  style={styles.rejectButton}
+                  onPress={() => handleAppReject(a)}
+                  disabled={busy}
+                >
+                  <Text style={styles.rejectButtonText}>Reject</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.startButton}
+                  onPress={() => handleAppAccept(a)}
+                  disabled={busy}
+                >
+                  <Text style={styles.startButtonText}>Accept</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {/* Work: the employer/driver completes payment to confirm. */}
+            {a.kind === "work" && a.status === "payment_pending_driver" ? (
+              <Pressable
+                style={styles.primaryButton}
+                onPress={() => goToPayment(a)}
+              >
+                <Ionicons name="card" size={16} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>
+                  Complete payment to confirm worker
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {/* Errand: the driver waits for the customer to pay. */}
+            {a.kind === "errand" && a.status === "payment_pending_passenger" ? (
+              <View style={styles.waitBanner}>
+                <Ionicons name="time-outline" size={16} color="#B86115" />
+                <Text style={styles.waitText}>Waiting for customer payment</Text>
+              </View>
+            ) : null}
+
+            {a.status === "accepted" ? (
+              <>
+                <Pressable
+                  style={[styles.startButton, future && styles.startDisabled]}
+                  onPress={() => handleAppStart(a)}
+                  disabled={future || busy}
+                >
+                  <Ionicons name="play" size={16} color="#FFFFFF" />
+                  <Text style={styles.startButtonText}>Start</Text>
+                </Pressable>
+                {future ? (
+                  <Text style={styles.appHint}>
+                    Start will be available on the{" "}
+                    {a.kind === "work" ? "job" : "errand"} date.
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
+
+            {a.status === "on_the_way" ? (
+              <View style={styles.appActionsRow}>
+                <Pressable
+                  style={styles.completeButton}
+                  onPress={() => openNavigation(a)}
+                >
+                  <Ionicons name="navigate-outline" size={16} color="#166534" />
+                  <Text style={styles.completeButtonText}>Open Map</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.startButton}
+                  onPress={() => handleAppArrive(a)}
+                  disabled={busy}
+                >
+                  <Text style={styles.startButtonText}>I arrived</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {a.status === "arrived" ? (
+              <Pressable
+                style={styles.startButton}
+                onPress={() => handleAppFinish(a)}
+                disabled={busy}
+              >
+                <Ionicons name="checkmark-done" size={16} color="#FFFFFF" />
+                <Text style={styles.startButtonText}>
+                  {a.kind === "work" ? "Finish Work" : "Finish Errand"}
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {!cancelBlocked &&
+            (a.status === "accepted" || isAwaitingPayment(a.status)) ? (
+              <Pressable
+                style={styles.cancelLink}
+                onPress={() => handleAppCancel(a, "driver")}
+              >
+                <Text style={styles.cancelLinkText}>Cancel booking</Text>
+              </Pressable>
+            ) : null}
+          </>
+        )}
+      </View>
+    );
+  };
+
   const isEmpty =
     tab === "passenger"
-      ? filteredBookings.length === 0
-      : filteredDriverRows.length === 0;
+      ? filteredBookings.length === 0 && filteredPassengerApps.length === 0
+      : filteredDriverRows.length === 0 && filteredDriverApps.length === 0;
 
   return (
     <SafeAreaView style={styles.page}>
@@ -570,17 +991,29 @@ export default function BookingsScreen() {
           </View>
         ) : (
           <View style={styles.list}>
-            {tab === "passenger"
-              ? filteredBookings.map((b) =>
+            {tab === "passenger" ? (
+              <>
+                {filteredPassengerApps.map((a) =>
+                  renderApplicationCard(a, "passenger"),
+                )}
+                {filteredBookings.map((b) =>
                   b.category === "roadside"
                     ? renderRoadsideCard(b, "passenger")
                     : renderBookingCard(b),
-                )
-              : filteredDriverRows.map((r) =>
+                )}
+              </>
+            ) : (
+              <>
+                {filteredDriverApps.map((a) =>
+                  renderApplicationCard(a, "driver"),
+                )}
+                {filteredDriverRows.map((r) =>
                   r.kind === "trip"
                     ? renderTripCard(r.trip)
                     : renderRoadsideCard(r.booking, "driver"),
                 )}
+              </>
+            )}
           </View>
         )}
       </ScrollView>
@@ -910,6 +1343,91 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "900",
     fontSize: 15,
+  },
+  // Work / errand application extras
+  statusDead: {
+    backgroundColor: "#F1E7E7",
+  },
+  statusTextDead: {
+    color: "#B91C1C",
+  },
+  payRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 14,
+  },
+  payText: {
+    color: "#7C5F46",
+    fontSize: 13,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  startButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#F58220",
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  startDisabled: {
+    backgroundColor: "#D8C9BC",
+  },
+  startButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 15,
+  },
+  appHint: {
+    color: "#7C5F46",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 8,
+  },
+  appActionsRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  rejectButton: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: "#E4DDD7",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFDFC",
+  },
+  rejectButtonText: {
+    color: "#7C5F46",
+    fontWeight: "900",
+    fontSize: 15,
+  },
+  waitBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FFF2E8",
+    borderRadius: 12,
+    padding: 14,
+  },
+  waitText: {
+    color: "#B86115",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  cancelLink: {
+    alignItems: "center",
+    marginTop: 12,
+  },
+  cancelLinkText: {
+    color: "#B91C1C",
+    fontWeight: "800",
+    fontSize: 14,
   },
   // Modal
   modalBackdrop: {
