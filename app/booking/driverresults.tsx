@@ -1,6 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -24,6 +31,15 @@ type DriverProfile = {
   gender?: string;
   language?: string;
   languages?: string[];
+  ratingAverage?: number;
+  ratingCount?: number;
+};
+
+type DriverComment = {
+  user: string;
+  text: string;
+  stars: number;
+  createdAtSeconds: number;
 };
 
 type DriverRoute = {
@@ -66,11 +82,7 @@ type DriverRoute = {
   eta?: number;
   active?: boolean;
 
-  comments?: {
-    user: string;
-    text: string;
-    stars: number;
-  }[];
+  comments?: DriverComment[];
 };
 
 const LANGUAGES: Record<string, string> = {
@@ -197,6 +209,61 @@ const getDriverName = (driver: DriverRoute) => {
   return driver.profile?.name || driver.driverName || "Driver";
 };
 
+const getDriverPhone = (driver: DriverRoute) => {
+  return driver.profile?.phone || driver.phone || "";
+};
+
+const getReviewCreatedAtSeconds = (createdAt: any) => {
+  if (!createdAt) return 0;
+  if (typeof createdAt.seconds === "number") return createdAt.seconds;
+  return 0;
+};
+
+const getDriverReviews = async (driverId: string) => {
+  const reviewsSnap = await getDocs(
+    query(collection(db, "driverReviews"), where("driverId", "==", driverId)),
+  );
+
+  return reviewsSnap.docs
+    .map((reviewDoc) => {
+      const data = reviewDoc.data();
+
+      return {
+        user:
+          String(
+            data.passengerName || data.user || data.userName || "",
+          ).trim() || "Passenger",
+        text: String(
+          data.comment || data.reviewComment || data.text || "",
+        ).trim(),
+        stars: Number(data.rating || data.stars || 0),
+        createdAtSeconds: getReviewCreatedAtSeconds(data.createdAt),
+      };
+    })
+    .filter((review) => review.stars > 0)
+    .sort((a, b) => b.createdAtSeconds - a.createdAtSeconds);
+};
+
+const getDriverRating = (
+  driver: DriverRoute,
+): { average: number; count: number } | null => {
+  const profileCount = Number(driver.profile?.ratingCount) || 0;
+  const profileAverage = Number(driver.profile?.ratingAverage) || 0;
+
+  if (profileCount > 0 && profileAverage > 0) {
+    return { average: profileAverage, count: profileCount };
+  }
+
+  const comments = driver.comments || [];
+
+  if (comments.length === 0) return null;
+
+  const total = comments.reduce((sum, comment) => sum + comment.stars, 0);
+  const average = total / comments.length;
+
+  return { average, count: comments.length };
+};
+
 const getDateText = (driver: DriverRoute) => {
   return driver.tripDate || driver.deliveryDate || "";
 };
@@ -215,6 +282,7 @@ export default function DriverResultsScreen() {
   const [drivers, setDrivers] = useState<DriverRoute[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedDriver, setExpandedDriver] = useState<string | null>(null);
+  const [bookingBusy, setBookingBusy] = useState(false);
 
   const from = String(params.from || "");
   const to = String(params.to || "");
@@ -224,6 +292,7 @@ export default function DriverResultsScreen() {
 
   const requestedTime = String(params.time || "");
   const requestedDate = String(params.tripDate || "");
+  const requestedDay = String(params.tripDay || "");
 
   const selectedLanguages = String(params.languages || "")
     .split(",")
@@ -262,30 +331,38 @@ export default function DriverResultsScreen() {
         },
       );
 
-      const routesWithProfiles: DriverRoute[] = await Promise.all(
+      const routesWithProfilesAndReviews: DriverRoute[] = await Promise.all(
         routesWithoutProfiles.map(async (driver) => {
           if (!driver.driverId) {
-            return driver;
+            return {
+              ...driver,
+              comments: [],
+            };
           }
 
           try {
-            const profileSnap = await getDoc(doc(db, "users", driver.driverId));
-
-            if (!profileSnap.exists()) {
-              return driver;
-            }
+            const [profileSnap, comments] = await Promise.all([
+              getDoc(doc(db, "users", driver.driverId)),
+              getDriverReviews(driver.driverId),
+            ]);
 
             return {
               ...driver,
-              profile: profileSnap.data() as DriverProfile,
+              profile: profileSnap.exists()
+                ? (profileSnap.data() as DriverProfile)
+                : undefined,
+              comments,
             };
           } catch {
-            return driver;
+            return {
+              ...driver,
+              comments: [],
+            };
           }
         }),
       );
 
-      const filtered = routesWithProfiles.filter((driver) => {
+      const filtered = routesWithProfilesAndReviews.filter((driver) => {
         const driverFrom =
           driver.fromNormalized || normalize(driver.from || "");
         const driverTo = driver.toNormalized || normalize(driver.to || "");
@@ -359,18 +436,41 @@ export default function DriverResultsScreen() {
     }
   };
 
-  const [bookingBusy, setBookingBusy] = useState(false);
-
   const handleBookDriver = async (driver: DriverRoute) => {
     if (bookingBusy) return;
 
     const isDelivery = driver.category === "delivery";
+    const isPersonal = (driver.category || category) === "personal";
     const totalPrice = Number(driver.price || 0) * (isDelivery ? 1 : seats);
+
+    if (isPersonal) {
+      router.push({
+        pathname: "/booking/ride-payment",
+        params: {
+          driverId: driver.driverId || "",
+          driverName: getDriverName(driver),
+          driverPhone: getDriverPhone(driver),
+          routeId: driver.id,
+          from: driver.from || from,
+          to: driver.to || to,
+          date: driver.tripDate || requestedDate || "",
+          day: driver.day || requestedDay || "",
+          time: driver.time || requestedTime || "",
+          seats: String(seats),
+          price: String(totalPrice),
+          driverCar: driver.car || "",
+          driverCarColor: driver.carColor || "",
+          driverCarPlateLast3: (driver.carPlate || "")
+            .replace(/\D/g, "")
+            .slice(-3),
+        },
+      } as any);
+      return;
+    }
 
     try {
       setBookingBusy(true);
 
-      // Save the passenger booking so it shows up under My Bookings > Passenger.
       await createPassengerBooking({
         driverId: driver.driverId,
         driverName: getDriverName(driver),
@@ -449,6 +549,7 @@ export default function DriverResultsScreen() {
               const dateText = getDateText(driver);
               const daysText = getDaysText(driver);
               const driverGender = getDriverGender(driver);
+              const rating = getDriverRating(driver);
 
               return (
                 <View key={driver.id} style={styles.card}>
@@ -492,12 +593,18 @@ export default function DriverResultsScreen() {
 
                     <View style={styles.ratingBox}>
                       <Ionicons name="star" size={16} color="#B86115" />
-                      <Text style={styles.ratingText}>
-                        {driver.rating || 4.8}
-                      </Text>
-                      <Text style={styles.reviewCount}>
-                        ({driver.reviews || 0})
-                      </Text>
+                      {rating ? (
+                        <>
+                          <Text style={styles.ratingText}>
+                            {rating.average.toFixed(1)}
+                          </Text>
+                          <Text style={styles.reviewCount}>
+                            ({rating.count})
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={styles.reviewCount}>New</Text>
+                      )}
                     </View>
                   </View>
 
@@ -689,21 +796,23 @@ export default function DriverResultsScreen() {
                               </Text>
 
                               <View style={styles.starsRow}>
-                                {Array.from({ length: comment.stars }).map(
-                                  (_, i) => (
-                                    <Ionicons
-                                      key={i}
-                                      name="star"
-                                      size={12}
-                                      color="#F58220"
-                                    />
-                                  ),
-                                )}
+                                {Array.from({ length: 5 }).map((_, i) => (
+                                  <Ionicons
+                                    key={i}
+                                    name={
+                                      i < comment.stars
+                                        ? "star"
+                                        : "star-outline"
+                                    }
+                                    size={13}
+                                    color="#F58220"
+                                  />
+                                ))}
                               </View>
                             </View>
 
                             <Text style={styles.commentText}>
-                              {comment.text}
+                              {comment.text || "No comment."}
                             </Text>
                           </View>
                         ))

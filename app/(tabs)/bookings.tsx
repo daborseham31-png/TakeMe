@@ -1,11 +1,21 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+} from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   Pressable,
   SafeAreaView,
@@ -17,7 +27,6 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../firebase";
-import DateInput, { TimeInput } from "../driver/create/DateInput";
 import {
   BookingItem,
   DriverTripItem,
@@ -27,21 +36,105 @@ import {
   normalizeDriverTrip,
 } from "../booking/bookingsLib";
 import {
+  arriveRide,
+  completeRideWithReview,
+  hideRideBookingForDriver,
+  hideRideBookingForPassenger,
+  normalizeRideBooking,
+  RIDE_CATEGORY,
+  RIDE_STATUS_LABEL,
+  RideBooking,
+  RideStatus,
+  startRide,
+} from "../booking/rideBookingLib";
+import {
   acceptRequest,
   arriveJob,
   cancelApplication,
   cancelBlockedReason,
   finishJob,
   isAwaitingPayment,
-  NormalizedApplication,
   normalizeApplication,
+  NormalizedApplication,
   rejectRequest,
   startJob,
   startState,
   STATUS_LABEL,
 } from "../booking/work-errand/workErrandLib";
+import DateInput, { TimeInput } from "../driver/create/DateInput";
 
 type Tab = "passenger" | "driver";
+
+const getParamString = (value: string | string[] | undefined) => {
+  if (Array.isArray(value)) return value[0];
+  return value;
+};
+
+const getLast3Digits = (value: string) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length >= 3 ? digits.slice(-3) : digits;
+};
+
+const formatPhoneForDisplay = (phone?: string | null) => {
+  const digits = String(phone || "").replace(/\D/g, "");
+
+  if (!digits) return "";
+
+  if (digits.startsWith("00972")) {
+    return "0" + digits.slice(5);
+  }
+
+  if (digits.startsWith("9720")) {
+    return "0" + digits.slice(4);
+  }
+
+  if (digits.startsWith("972")) {
+    return "0" + digits.slice(3);
+  }
+
+  return digits;
+};
+
+const formatPhoneForCall = (phone?: string | null) => {
+  const displayPhone = formatPhoneForDisplay(phone);
+
+  if (!displayPhone) return "";
+
+  if (displayPhone.startsWith("0")) {
+    return "+972" + displayPhone.slice(1);
+  }
+
+  return displayPhone;
+};
+
+const enrichRideWithRouteDetails = async (ride: RideBooking) => {
+  if (!ride.routeId) return ride;
+
+  const alreadyHasCarDetails =
+    !!ride.driverCar && !!ride.driverCarColor && !!ride.driverCarPlateLast3;
+
+  if (alreadyHasCarDetails && !!ride.driverPhone) return ride;
+
+  try {
+    const routeSnap = await getDoc(doc(db, "driverRoutes", ride.routeId));
+
+    if (!routeSnap.exists()) return ride;
+
+    const route = routeSnap.data();
+
+    return {
+      ...ride,
+      driverPhone: ride.driverPhone || route.phone || "",
+      driverCar: ride.driverCar || route.car || "",
+      driverCarColor: ride.driverCarColor || route.carColor || "",
+      driverCarPlateLast3:
+        ride.driverCarPlateLast3 ||
+        getLast3Digits(route.driverCarPlateLast3 || route.carPlate || ""),
+    };
+  } catch {
+    return ride;
+  }
+};
 
 type DriverRow =
   | {
@@ -60,6 +153,14 @@ type DriverRow =
     };
 
 export default function BookingsScreen() {
+  const params = useLocalSearchParams<{
+    tab?: string | string[];
+    bookingId?: string | string[];
+    applicationId?: string | string[];
+    type?: string | string[];
+    kind?: string | string[];
+  }>();
+
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [tab, setTab] = useState<Tab>("passenger");
   const [search, setSearch] = useState("");
@@ -67,19 +168,37 @@ export default function BookingsScreen() {
 
   const [bookings, setBookings] = useState<BookingItem[]>([]);
   const [driverRoadside, setDriverRoadside] = useState<BookingItem[]>([]);
+
+  const [passengerRides, setPassengerRides] = useState<RideBooking[]>([]);
+  const [driverRides, setDriverRides] = useState<RideBooking[]>([]);
+
+  const [ratingBooking, setRatingBooking] = useState<RideBooking | null>(null);
+  const [ratingStars, setRatingStars] = useState(0);
+  const [ratingComment, setRatingComment] = useState("");
+  const [ratingBusy, setRatingBusy] = useState(false);
+
   const [routes, setRoutes] = useState<DriverTripItem[]>([]);
   const [workJobs, setWorkJobs] = useState<DriverTripItem[]>([]);
   const [errandJobs, setErrandJobs] = useState<DriverTripItem[]>([]);
 
-  // Work / errand applications (the request → pay → complete flow).
   const [myWorkApps, setMyWorkApps] = useState<NormalizedApplication[]>([]);
   const [myErrandApps, setMyErrandApps] = useState<NormalizedApplication[]>([]);
-  const [asProviderWork, setAsProviderWork] = useState<NormalizedApplication[]>([]);
-  const [asProviderErrand, setAsProviderErrand] = useState<NormalizedApplication[]>([]);
+  const [asProviderWork, setAsProviderWork] = useState<NormalizedApplication[]>(
+    [],
+  );
+  const [asProviderErrand, setAsProviderErrand] = useState<
+    NormalizedApplication[]
+  >([]);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // "Book Again" modal
-  const [rebook, setRebook] = useState<BookingItem | null>(null);
+  const [rebook, setRebook] = useState<{
+    category: string;
+    from: string;
+    to: string;
+    date: string;
+    time: string;
+    seats: number | null;
+  } | null>(null);
   const [rebookDate, setRebookDate] = useState("");
   const [rebookTime, setRebookTime] = useState("");
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -92,8 +211,18 @@ export default function BookingsScreen() {
     });
   }, []);
 
-  // Real-time listeners. Each uses a single equality filter (no composite
-  // index needed); results are sorted client-side.
+  useEffect(() => {
+    const requestedTab = getParamString(params.tab);
+
+    if (requestedTab === "driver") {
+      setTab("driver");
+    }
+
+    if (requestedTab === "passenger") {
+      setTab("passenger");
+    }
+  }, [params.tab]);
+
   useEffect(() => {
     if (!uid) return;
 
@@ -119,24 +248,97 @@ export default function BookingsScreen() {
 
     const unsubBookings = onSnapshot(
       query(collection(db, "bookings"), where("passengerId", "==", uid)),
-      (snap) => {
-        setBookings(snap.docs.map((d) => normalizeBooking(d.id, d.data())));
+      async (snap) => {
+        const passengerRideItems = snap.docs
+          .filter(
+            (d) =>
+              d.data().category === RIDE_CATEGORY &&
+              d.data().deletedForPassenger !== true,
+          )
+          .map((d) => normalizeRideBooking(d.id, d.data()));
+
+        const passengerRideItemsWithDetails = await Promise.all(
+          passengerRideItems.map(enrichRideWithRouteDetails),
+        );
+
+        setPassengerRides(
+          snap.docs
+            .filter((d) => {
+              const data = d.data();
+
+              return (
+                data.category === RIDE_CATEGORY &&
+                data.deletedForPassenger !== true &&
+                data.passengerId === uid
+              );
+            })
+            .map((d) => normalizeRideBooking(d.id, d.data())),
+        );
+
+        setBookings(
+          snap.docs
+            .filter((d) => {
+              const data = d.data();
+
+              return (
+                data.category !== RIDE_CATEGORY &&
+                data.deletedForPassenger !== true &&
+                data.passengerId === uid
+              );
+            })
+            .map((d) => normalizeBooking(d.id, d.data())),
+        );
+
         setLoading(false);
       },
       () => setLoading(false),
     );
 
-    // Completed roadside help the current user provided as a driver. Filtered to
-    // category "roadside" so normal passenger bookings never leak into the
-    // driver tab.
     const unsubDriverRoadside = onSnapshot(
       query(collection(db, "bookings"), where("driverId", "==", uid)),
-      (snap) => {
+      async (snap) => {
         setDriverRoadside(
           snap.docs
-            .filter((d) => d.data().category === "roadside")
+            .filter((d) => {
+              const data = d.data();
+
+              return (
+                data.category === "roadside" &&
+                data.deletedForDriver !== true &&
+                data.driverId === uid &&
+                data.passengerId !== uid
+              );
+            })
             .map((d) => normalizeBooking(d.id, d.data())),
         );
+
+        const driverRideItems = snap.docs
+          .filter(
+            (d) =>
+              d.data().category === RIDE_CATEGORY &&
+              d.data().deletedForDriver !== true,
+          )
+          .map((d) => normalizeRideBooking(d.id, d.data()));
+
+        const driverRideItemsWithDetails = await Promise.all(
+          driverRideItems.map(enrichRideWithRouteDetails),
+        );
+
+        setDriverRides(
+          snap.docs
+            .filter((d) => {
+              const data = d.data();
+
+              return (
+                data.category === RIDE_CATEGORY &&
+                data.deletedForDriver !== true &&
+                data.driverId === uid &&
+                data.passengerId !== uid
+              );
+            })
+            .map((d) => normalizeRideBooking(d.id, d.data())),
+        );
+
         setLoading(false);
       },
       () => setLoading(false),
@@ -146,20 +348,25 @@ export default function BookingsScreen() {
     const unsubWork = subscribe("workJobs", "employerId", setWorkJobs);
     const unsubErrands = subscribe("errandJobs", "ownerId", setErrandJobs);
 
-    // Work / errand applications. Each uses a single equality filter → no
-    // composite index needed; results are sorted client-side.
     const subscribeApps = (
       collectionName: "workApplications" | "errandApplications",
       field: string,
       kind: "work" | "errand",
+      viewer: Tab,
       setter: (items: NormalizedApplication[]) => void,
     ) =>
       onSnapshot(
         query(collection(db, collectionName), where(field, "==", uid)),
         (snap) => {
+          const deleteField =
+            viewer === "passenger" ? "deletedForPassenger" : "deletedForDriver";
+
           setter(
-            snap.docs.map((d) => normalizeApplication(d.id, d.data(), kind)),
+            snap.docs
+              .filter((d) => d.data()[deleteField] !== true)
+              .map((d) => normalizeApplication(d.id, d.data(), kind)),
           );
+
           setLoading(false);
         },
         () => setLoading(false),
@@ -169,24 +376,31 @@ export default function BookingsScreen() {
       "workApplications",
       "applicantId",
       "work",
+      "passenger",
       setMyWorkApps,
     );
+
     const unsubMyErrand = subscribeApps(
       "errandApplications",
       "passengerId",
       "errand",
+      "passenger",
       setMyErrandApps,
     );
+
     const unsubProvWork = subscribeApps(
       "workApplications",
       "employerId",
       "work",
+      "driver",
       setAsProviderWork,
     );
+
     const unsubProvErrand = subscribeApps(
       "errandApplications",
       "driverId",
       "errand",
+      "driver",
       setAsProviderErrand,
     );
 
@@ -203,7 +417,6 @@ export default function BookingsScreen() {
     };
   }, [uid]);
 
-  // Combined + sorted application lists for each tab.
   const passengerApps = useMemo(
     () =>
       [...myWorkApps, ...myErrandApps].sort(
@@ -228,7 +441,6 @@ export default function BookingsScreen() {
     [routes, workJobs, errandJobs],
   );
 
-  // The driver tab mixes created trips/jobs with completed roadside bookings.
   const driverRows = useMemo<DriverRow[]>(() => {
     const rows: DriverRow[] = [
       ...driverTrips.map((t) => ({
@@ -251,15 +463,17 @@ export default function BookingsScreen() {
   }, [driverTrips, driverRoadside]);
 
   const sortedBookings = useMemo(
-    () =>
-      [...bookings].sort((a, b) => b.createdAtSeconds - a.createdAtSeconds),
+    () => [...bookings].sort((a, b) => b.createdAtSeconds - a.createdAtSeconds),
     [bookings],
   );
 
   const q = search.trim().toLowerCase();
 
   const filteredBookings = useMemo(
-    () => (q ? sortedBookings.filter((b) => b.searchText.includes(q)) : sortedBookings),
+    () =>
+      q
+        ? sortedBookings.filter((b) => b.searchText.includes(q))
+        : sortedBookings,
     [sortedBookings, q],
   );
 
@@ -268,8 +482,39 @@ export default function BookingsScreen() {
     [driverRows, q],
   );
 
+  const sortedPassengerRides = useMemo(
+    () =>
+      [...passengerRides].sort(
+        (a, b) => b.createdAtSeconds - a.createdAtSeconds,
+      ),
+    [passengerRides],
+  );
+
+  const sortedDriverRides = useMemo(
+    () =>
+      [...driverRides].sort((a, b) => b.createdAtSeconds - a.createdAtSeconds),
+    [driverRides],
+  );
+
+  const filteredPassengerRides = useMemo(
+    () =>
+      q
+        ? sortedPassengerRides.filter((r) => r.searchText.includes(q))
+        : sortedPassengerRides,
+    [sortedPassengerRides, q],
+  );
+
+  const filteredDriverRides = useMemo(
+    () =>
+      q
+        ? sortedDriverRides.filter((r) => r.searchText.includes(q))
+        : sortedDriverRides,
+    [sortedDriverRides, q],
+  );
+
   const filteredPassengerApps = useMemo(
-    () => (q ? passengerApps.filter((a) => a.searchText.includes(q)) : passengerApps),
+    () =>
+      q ? passengerApps.filter((a) => a.searchText.includes(q)) : passengerApps,
     [passengerApps, q],
   );
 
@@ -278,7 +523,6 @@ export default function BookingsScreen() {
     [driverApps, q],
   );
 
-  // Shared runner for the work/errand application actions.
   const runApp = async (id: string, fn: () => Promise<void>) => {
     try {
       setBusyId(id);
@@ -288,6 +532,85 @@ export default function BookingsScreen() {
     } finally {
       setBusyId(null);
     }
+  };
+
+  const callPhone = (phone?: string | null) => {
+    const callNumber = formatPhoneForCall(phone);
+
+    if (!callNumber) {
+      Alert.alert("No phone", "No phone number is saved for this driver.");
+      return;
+    }
+
+    Linking.openURL(`tel:${callNumber}`).catch(() =>
+      Alert.alert("Error", "Could not open the phone app."),
+    );
+  };
+
+  const confirmHideRideBooking = (ride: RideBooking, viewer: Tab) => {
+    Alert.alert("Remove booking", "Remove this booking from your list?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () =>
+          runApp(ride.id, () =>
+            viewer === "passenger"
+              ? hideRideBookingForPassenger(ride.id)
+              : hideRideBookingForDriver(ride.id),
+          ),
+      },
+    ]);
+  };
+
+  const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
+    await updateDoc(doc(db, "bookings", bookingId), {
+      [viewer === "passenger" ? "deletedForPassenger" : "deletedForDriver"]:
+        true,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const confirmHideGeneralBooking = (
+    bookingId: string,
+    viewer: Tab,
+    label = "booking",
+  ) => {
+    Alert.alert("Remove booking", `Remove this ${label} from your list?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () =>
+          runApp(bookingId, () => hideGeneralBooking(bookingId, viewer)),
+      },
+    ]);
+  };
+
+  const hideApplicationFromList = async (
+    app: NormalizedApplication,
+    viewer: Tab,
+  ) => {
+    const collectionName =
+      app.kind === "work" ? "workApplications" : "errandApplications";
+
+    await updateDoc(doc(db, collectionName, app.id), {
+      [viewer === "passenger" ? "deletedForPassenger" : "deletedForDriver"]:
+        true,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const confirmHideApplication = (app: NormalizedApplication, viewer: Tab) => {
+    Alert.alert("Remove booking", "Remove this booking from your list?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () =>
+          runApp(app.id, () => hideApplicationFromList(app, viewer)),
+      },
+    ]);
   };
 
   const goToPayment = (a: NormalizedApplication) =>
@@ -307,6 +630,7 @@ export default function BookingsScreen() {
       Alert.alert("Not yet", "Start will be available on the job date.");
       return;
     }
+
     runApp(a.id, async () => {
       await startJob(a.kind, a.id, a);
       openNavigation(a);
@@ -329,18 +653,24 @@ export default function BookingsScreen() {
       ],
     );
 
-  const handleAppCancel = (a: NormalizedApplication, by: "passenger" | "driver") => {
+  const handleAppCancel = (
+    a: NormalizedApplication,
+    by: "passenger" | "driver",
+  ) => {
     const blocked = cancelBlockedReason(a);
+
     if (blocked) {
       Alert.alert("Cannot cancel", blocked);
       return;
     }
+
     Alert.alert("Cancel booking", "Cancel this booking?", [
       { text: "No", style: "cancel" },
       {
         text: "Yes, cancel",
         style: "destructive",
-        onPress: () => runApp(a.id, () => cancelApplication(a.kind, a.id, a, by)),
+        onPress: () =>
+          runApp(a.id, () => cancelApplication(a.kind, a.id, a, by)),
       },
     ]);
   };
@@ -376,13 +706,40 @@ export default function BookingsScreen() {
   };
 
   const openRebook = (booking: BookingItem) => {
-    setRebook(booking);
+    setRebook({
+      category: booking.category,
+      from: booking.from,
+      to: booking.to,
+      date: booking.date || "",
+      time: booking.time || "",
+      seats: booking.seats ?? 1,
+    });
+
     setRebookDate(booking.date || "");
     setRebookTime(booking.time || "");
   };
 
+  const openRideRebook = (ride: RideBooking) => {
+    setRebook({
+      category: "personal",
+      from: ride.from,
+      to: ride.to,
+      date: ride.date || "",
+      time: ride.time || "",
+      seats: ride.seats ?? 1,
+    });
+
+    setRebookDate(ride.date || "");
+    setRebookTime(ride.time || "");
+  };
+
   const submitRebook = () => {
     if (!rebook) return;
+
+    if (!rebookDate || !rebookTime) {
+      Alert.alert("Missing details", "Please choose a new date and time.");
+      return;
+    }
 
     router.push({
       pathname: "/booking/driverresults",
@@ -393,13 +750,299 @@ export default function BookingsScreen() {
         seats: String(rebook.seats || 1),
         tripDate: rebookDate,
         time: rebookTime,
+        bookingType: "quick",
+        bookForWholeWeek: "false",
       },
     } as any);
 
     setRebook(null);
   };
 
-  // ------------------------------------------------------------------ render
+  const handleRideStart = (r: RideBooking) =>
+    runApp(r.id, async () => {
+      await startRide(r.id, r);
+      router.push({
+        pathname: "/driver/ride-navigation",
+        params: { id: r.id },
+      } as any);
+    });
+
+  const handleRideOpenMap = (r: RideBooking) =>
+    router.push({
+      pathname: "/driver/ride-navigation",
+      params: { id: r.id },
+    } as any);
+
+  const handleRideArrived = (r: RideBooking) =>
+    runApp(r.id, () => arriveRide(r.id, r));
+
+  const openRatingModal = (r: RideBooking) => {
+    setRatingBooking(r);
+    setRatingStars(0);
+    setRatingComment("");
+  };
+
+  const submitRating = async () => {
+    if (!ratingBooking || ratingStars < 1) return;
+
+    try {
+      setRatingBusy(true);
+      await completeRideWithReview(
+        ratingBooking.id,
+        ratingBooking,
+        ratingStars,
+        ratingComment,
+      );
+      setRatingBooking(null);
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not submit your rating.");
+    } finally {
+      setRatingBusy(false);
+    }
+  };
+
+  const renderDeleteButton = (onPress: () => void) => (
+    <Pressable style={styles.deleteButton} onPress={onPress} hitSlop={8}>
+      <Ionicons name="trash-outline" size={18} color="#B91C1C" />
+    </Pressable>
+  );
+
+  const renderPassengerDriverDetails = (r: RideBooking) => {
+    const hasCarDetails =
+      !!r.driverCar || !!r.driverCarColor || !!r.driverCarPlateLast3;
+    const hasPhone = !!r.driverPhone;
+
+    if (!hasCarDetails && !hasPhone) return null;
+
+    return (
+      <View style={styles.driverDetailsBox}>
+        <Text style={styles.driverDetailsTitle}>Driver details</Text>
+
+        {r.driverCar ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="car-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>Car: {r.driverCar}</Text>
+          </View>
+        ) : null}
+
+        {r.driverCarColor ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="color-palette-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>Color: {r.driverCarColor}</Text>
+          </View>
+        ) : null}
+
+        {r.driverCarPlateLast3 ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="barcode-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>
+              Plate: ***{r.driverCarPlateLast3}
+            </Text>
+          </View>
+        ) : null}
+
+        {hasPhone ? (
+          <Pressable
+            style={styles.phoneRow}
+            onPress={() => callPhone(r.driverPhone)}
+          >
+            <Ionicons name="call-outline" size={15} color="#F58220" />
+            <Text style={styles.phoneText}>
+              {formatPhoneForDisplay(r.driverPhone)}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  };
+
+  const renderRideStatus = (status: RideStatus) => {
+    const done = status === "completed";
+    const dead = status === "cancelled";
+    const pillStyle = done
+      ? styles.statusDone
+      : dead
+        ? styles.statusDead
+        : styles.statusOngoing;
+    const textStyle = done
+      ? styles.statusTextDone
+      : dead
+        ? styles.statusTextDead
+        : styles.statusTextOngoing;
+
+    return (
+      <View style={[styles.statusPill, pillStyle]}>
+        <Text style={[styles.statusText, textStyle]}>
+          {RIDE_STATUS_LABEL[status]}
+        </Text>
+      </View>
+    );
+  };
+
+  const renderRideCard = (r: RideBooking, viewer: Tab) => {
+    const meta = getCategoryMeta(RIDE_CATEGORY);
+    const otherName = viewer === "passenger" ? r.driverName : r.passengerName;
+    const busy = busyId === r.id;
+    const canFinish = r.status === "on_the_way" || r.status === "arrived";
+
+    return (
+      <View
+        key={`ride-${r.id}`}
+        style={[styles.card, r.status === "completed" && styles.cardDone]}
+      >
+        <View style={styles.cardTop}>
+          <View
+            style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}
+          >
+            <Ionicons name={meta.icon} size={15} color={meta.color} />
+            <Text style={[styles.catText, { color: meta.color }]}>
+              {meta.label}
+            </Text>
+          </View>
+
+          <View style={styles.cardTopActions}>
+            {renderRideStatus(r.status)}
+            {renderDeleteButton(() => confirmHideRideBooking(r, viewer))}
+          </View>
+        </View>
+
+        {renderRouteLine(r.from, r.to, "")}
+
+        {r.date ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="calendar-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>
+              {r.date}
+              {r.day ? ` (${r.day})` : ""}
+            </Text>
+          </View>
+        ) : null}
+
+        {r.time ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="time-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>{r.time}</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.infoRow}>
+          <Ionicons name="person-outline" size={15} color="#7C5F46" />
+          <Text style={styles.infoText}>{otherName}</Text>
+        </View>
+
+        {viewer === "passenger" ? renderPassengerDriverDetails(r) : null}
+
+        <View style={styles.metaRow}>
+          {typeof r.price === "number" ? (
+            <View style={styles.metaItem}>
+              <Ionicons name="cash-outline" size={15} color="#F58220" />
+              <Text style={styles.metaText}>{r.price} ₪</Text>
+            </View>
+          ) : null}
+
+          {typeof r.seats === "number" ? (
+            <View style={styles.metaItem}>
+              <Ionicons name="people-outline" size={15} color="#F58220" />
+              <Text style={styles.metaText}>{r.seats} seats</Text>
+            </View>
+          ) : null}
+        </View>
+
+        {r.paymentMethod ? (
+          <View style={styles.payRow}>
+            <Ionicons name="card-outline" size={14} color="#7C5F46" />
+            <Text style={styles.payText}>
+              {r.paymentMethod === "cash" ? "Cash" : "Card"}
+              {r.cardLast4 ? ` (•••• ${r.cardLast4})` : ""}
+            </Text>
+          </View>
+        ) : null}
+
+        {r.status === "completed" && typeof r.rating === "number" ? (
+          <View style={styles.ratingSummaryRow}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Ionicons
+                key={i}
+                name={i < (r.rating || 0) ? "star" : "star-outline"}
+                size={16}
+                color="#F58220"
+              />
+            ))}
+
+            {r.reviewComment ? (
+              <Text style={styles.ratingComment}>“{r.reviewComment}”</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {viewer === "passenger" ? (
+          <>
+            {canFinish ? (
+              <Pressable
+                style={styles.primaryButton}
+                onPress={() => openRatingModal(r)}
+              >
+                <Ionicons name="checkmark-done" size={17} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>Finish Trip</Text>
+              </Pressable>
+            ) : null}
+
+            {r.status === "completed" && typeof r.rating === "number" ? (
+              <Pressable
+                style={styles.primaryButton}
+                onPress={() => openRideRebook(r)}
+              >
+                <Ionicons name="refresh" size={17} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>Book Again</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : (
+          <>
+            {r.status === "booked" ? (
+              <Pressable
+                style={styles.startButton}
+                onPress={() => handleRideStart(r)}
+                disabled={busy}
+              >
+                <Ionicons name="play" size={16} color="#FFFFFF" />
+                <Text style={styles.startButtonText}>Start Ride</Text>
+              </Pressable>
+            ) : null}
+
+            {r.status === "on_the_way" ? (
+              <View style={styles.appActionsRow}>
+                <Pressable
+                  style={styles.completeButton}
+                  onPress={() => handleRideOpenMap(r)}
+                >
+                  <Ionicons name="navigate-outline" size={16} color="#166534" />
+                  <Text style={styles.completeButtonText}>Open Map</Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.startButton}
+                  onPress={() => handleRideArrived(r)}
+                  disabled={busy}
+                >
+                  <Text style={styles.startButtonText}>I arrived</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {r.status === "arrived" ? (
+              <View style={styles.waitBanner}>
+                <Ionicons name="time-outline" size={16} color="#B86115" />
+                <Text style={styles.waitText}>
+                  Arrived — waiting for passenger to finish the trip
+                </Text>
+              </View>
+            ) : null}
+          </>
+        )}
+      </View>
+    );
+  };
 
   const renderStatus = (status: string) => (
     <View
@@ -416,7 +1059,9 @@ export default function BookingsScreen() {
       <Text
         style={[
           styles.statusText,
-          status === "completed" ? styles.statusTextDone : styles.statusTextOngoing,
+          status === "completed"
+            ? styles.statusTextDone
+            : styles.statusTextOngoing,
         ]}
       >
         {status === "completed" ? "Completed" : "Ongoing"}
@@ -435,6 +1080,7 @@ export default function BookingsScreen() {
         </View>
       );
     }
+
     if (place) {
       return (
         <View style={styles.infoRow}>
@@ -443,6 +1089,7 @@ export default function BookingsScreen() {
         </View>
       );
     }
+
     return null;
   };
 
@@ -453,13 +1100,21 @@ export default function BookingsScreen() {
     return (
       <View key={b.id} style={[styles.card, done && styles.cardDone]}>
         <View style={styles.cardTop}>
-          <View style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}>
+          <View
+            style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}
+          >
             <Ionicons name={meta.icon} size={15} color={meta.color} />
             <Text style={[styles.catText, { color: meta.color }]}>
               {meta.label}
             </Text>
           </View>
-          {renderStatus(b.status)}
+
+          <View style={styles.cardTopActions}>
+            {renderStatus(b.status)}
+            {renderDeleteButton(() =>
+              confirmHideGeneralBooking(b.id, "passenger"),
+            )}
+          </View>
         </View>
 
         {renderRouteLine(b.from, b.to, "")}
@@ -490,6 +1145,7 @@ export default function BookingsScreen() {
               <Text style={styles.metaText}>{b.price} ₪</Text>
             </View>
           ) : null}
+
           {typeof b.seats === "number" ? (
             <View style={styles.metaItem}>
               <Ionicons name="people-outline" size={15} color="#F58220" />
@@ -522,14 +1178,20 @@ export default function BookingsScreen() {
     const daysText = t.days.length > 0 ? t.days.join(", ") : "";
 
     return (
-      <View key={`${t.collectionName}-${t.id}`} style={[styles.card, done && styles.cardDone]}>
+      <View
+        key={`${t.collectionName}-${t.id}`}
+        style={[styles.card, done && styles.cardDone]}
+      >
         <View style={styles.cardTop}>
-          <View style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}>
+          <View
+            style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}
+          >
             <Ionicons name={meta.icon} size={15} color={meta.color} />
             <Text style={[styles.catText, { color: meta.color }]}>
               {meta.label}
             </Text>
           </View>
+
           {renderStatus(t.status)}
         </View>
 
@@ -565,6 +1227,7 @@ export default function BookingsScreen() {
               <Text style={styles.metaText}>{t.price} ₪</Text>
             </View>
           ) : null}
+
           {typeof t.seats === "number" ? (
             <View style={styles.metaItem}>
               <Ionicons name="people-outline" size={15} color="#F58220" />
@@ -586,8 +1249,6 @@ export default function BookingsScreen() {
     );
   };
 
-  // Completed roadside help. Passenger view shows the driver name; driver view
-  // shows the passenger name. Phone numbers are intentionally not shown here.
   const renderRoadsideCard = (b: BookingItem, viewer: Tab) => {
     const meta = getCategoryMeta("roadside");
     const otherName = viewer === "passenger" ? b.driverName : b.passengerName;
@@ -595,13 +1256,21 @@ export default function BookingsScreen() {
     return (
       <View key={`roadside-${b.id}`} style={[styles.card, styles.cardDone]}>
         <View style={styles.cardTop}>
-          <View style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}>
+          <View
+            style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}
+          >
             <Ionicons name={meta.icon} size={15} color={meta.color} />
             <Text style={[styles.catText, { color: meta.color }]}>
               Roadside Help
             </Text>
           </View>
-          {renderStatus(b.status)}
+
+          <View style={styles.cardTopActions}>
+            {renderStatus(b.status)}
+            {renderDeleteButton(() =>
+              confirmHideGeneralBooking(b.id, viewer, "roadside help"),
+            )}
+          </View>
         </View>
 
         {b.problemTypes.length > 0 ? (
@@ -637,6 +1306,7 @@ export default function BookingsScreen() {
               <Text style={styles.metaText}>{b.price} ₪</Text>
             </View>
           ) : null}
+
           {typeof b.etaMinutes === "number" ? (
             <View style={styles.metaItem}>
               <Ionicons name="time-outline" size={15} color="#F58220" />
@@ -648,11 +1318,7 @@ export default function BookingsScreen() {
     );
   };
 
-  // Work / errand application card, rendered in both tabs.
-  const renderApplicationCard = (
-    a: NormalizedApplication,
-    viewer: Tab,
-  ) => {
+  const renderApplicationCard = (a: NormalizedApplication, viewer: Tab) => {
     const meta = getCategoryMeta(a.category);
     const done = a.status === "completed";
     const dead = a.status === "cancelled" || a.status === "rejected";
@@ -664,6 +1330,7 @@ export default function BookingsScreen() {
         : dead
           ? styles.statusDead
           : styles.statusOngoing;
+
     const statusTextStyle =
       a.status === "completed"
         ? styles.statusTextDone
@@ -671,8 +1338,7 @@ export default function BookingsScreen() {
           ? styles.statusTextDead
           : styles.statusTextOngoing;
 
-    const otherName =
-      viewer === "passenger" ? a.providerName : a.customerName;
+    const otherName = viewer === "passenger" ? a.providerName : a.customerName;
 
     const future = startState(a.date) === "future";
     const cancelBlocked = cancelBlockedReason(a);
@@ -683,16 +1349,23 @@ export default function BookingsScreen() {
         style={[styles.card, (done || dead) && styles.cardDone]}
       >
         <View style={styles.cardTop}>
-          <View style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}>
+          <View
+            style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}
+          >
             <Ionicons name={meta.icon} size={15} color={meta.color} />
             <Text style={[styles.catText, { color: meta.color }]}>
               {meta.label}
             </Text>
           </View>
-          <View style={[styles.statusPill, statusStyle]}>
-            <Text style={[styles.statusText, statusTextStyle]}>
-              {STATUS_LABEL[a.status]}
-            </Text>
+
+          <View style={styles.cardTopActions}>
+            <View style={[styles.statusPill, statusStyle]}>
+              <Text style={[styles.statusText, statusTextStyle]}>
+                {STATUS_LABEL[a.status]}
+              </Text>
+            </View>
+
+            {renderDeleteButton(() => confirmHideApplication(a, viewer))}
           </View>
         </View>
 
@@ -731,6 +1404,7 @@ export default function BookingsScreen() {
               <Text style={styles.metaText}>{a.price} ₪</Text>
             </View>
           ) : null}
+
           {a.hourlyPay !== null ? (
             <View style={styles.metaItem}>
               <Ionicons name="cash-outline" size={15} color="#F58220" />
@@ -739,7 +1413,6 @@ export default function BookingsScreen() {
           ) : null}
         </View>
 
-        {/* Payment info */}
         <View style={styles.payRow}>
           <Ionicons name="card-outline" size={14} color="#7C5F46" />
           <Text style={styles.payText}>
@@ -752,25 +1425,26 @@ export default function BookingsScreen() {
           </Text>
         </View>
 
-        {/* Action buttons */}
         {viewer === "passenger" ? (
           <>
-            {/* Errand: the passenger pays. */}
             {a.kind === "errand" && a.status === "payment_pending_passenger" ? (
               <Pressable
                 style={styles.primaryButton}
                 onPress={() => goToPayment(a)}
               >
                 <Ionicons name="card" size={16} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>Continue to Payment</Text>
+                <Text style={styles.primaryButtonText}>
+                  Continue to Payment
+                </Text>
               </Pressable>
             ) : null}
 
-            {/* Work: the employer pays – the applicant just waits. */}
             {a.kind === "work" && a.status === "payment_pending_driver" ? (
               <View style={styles.waitBanner}>
                 <Ionicons name="time-outline" size={16} color="#B86115" />
-                <Text style={styles.waitText}>Waiting for employer payment</Text>
+                <Text style={styles.waitText}>
+                  Waiting for employer payment
+                </Text>
               </View>
             ) : null}
 
@@ -786,7 +1460,6 @@ export default function BookingsScreen() {
           </>
         ) : (
           <>
-            {/* Provider still needs to accept/reject the request. */}
             {a.status === "pending" ? (
               <View style={styles.appActionsRow}>
                 <Pressable
@@ -796,6 +1469,7 @@ export default function BookingsScreen() {
                 >
                   <Text style={styles.rejectButtonText}>Reject</Text>
                 </Pressable>
+
                 <Pressable
                   style={styles.startButton}
                   onPress={() => handleAppAccept(a)}
@@ -806,7 +1480,6 @@ export default function BookingsScreen() {
               </View>
             ) : null}
 
-            {/* Work: the employer/driver completes payment to confirm. */}
             {a.kind === "work" && a.status === "payment_pending_driver" ? (
               <Pressable
                 style={styles.primaryButton}
@@ -819,11 +1492,12 @@ export default function BookingsScreen() {
               </Pressable>
             ) : null}
 
-            {/* Errand: the driver waits for the customer to pay. */}
             {a.kind === "errand" && a.status === "payment_pending_passenger" ? (
               <View style={styles.waitBanner}>
                 <Ionicons name="time-outline" size={16} color="#B86115" />
-                <Text style={styles.waitText}>Waiting for customer payment</Text>
+                <Text style={styles.waitText}>
+                  Waiting for customer payment
+                </Text>
               </View>
             ) : null}
 
@@ -837,6 +1511,7 @@ export default function BookingsScreen() {
                   <Ionicons name="play" size={16} color="#FFFFFF" />
                   <Text style={styles.startButtonText}>Start</Text>
                 </Pressable>
+
                 {future ? (
                   <Text style={styles.appHint}>
                     Start will be available on the{" "}
@@ -855,6 +1530,7 @@ export default function BookingsScreen() {
                   <Ionicons name="navigate-outline" size={16} color="#166534" />
                   <Text style={styles.completeButtonText}>Open Map</Text>
                 </Pressable>
+
                 <Pressable
                   style={styles.startButton}
                   onPress={() => handleAppArrive(a)}
@@ -895,18 +1571,24 @@ export default function BookingsScreen() {
 
   const isEmpty =
     tab === "passenger"
-      ? filteredBookings.length === 0 && filteredPassengerApps.length === 0
-      : filteredDriverRows.length === 0 && filteredDriverApps.length === 0;
+      ? filteredBookings.length === 0 &&
+        filteredPassengerApps.length === 0 &&
+        filteredPassengerRides.length === 0
+      : filteredDriverRows.length === 0 &&
+        filteredDriverApps.length === 0 &&
+        filteredDriverRides.length === 0;
 
   return (
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.title}>My Bookings</Text>
 
-        {/* Passenger / Driver toggle */}
         <View style={styles.toggle}>
           <Pressable
-            style={[styles.toggleBtn, tab === "passenger" && styles.toggleBtnActive]}
+            style={[
+              styles.toggleBtn,
+              tab === "passenger" && styles.toggleBtnActive,
+            ]}
             onPress={() => setTab("passenger")}
           >
             <Ionicons
@@ -925,7 +1607,10 @@ export default function BookingsScreen() {
           </Pressable>
 
           <Pressable
-            style={[styles.toggleBtn, tab === "driver" && styles.toggleBtnActive]}
+            style={[
+              styles.toggleBtn,
+              tab === "driver" && styles.toggleBtnActive,
+            ]}
             onPress={() => setTab("driver")}
           >
             <Ionicons
@@ -944,7 +1629,6 @@ export default function BookingsScreen() {
           </Pressable>
         </View>
 
-        {/* Search / filter */}
         <View style={styles.searchRow}>
           <Ionicons name="search-outline" size={18} color="#8B7B6B" />
           <TextInput
@@ -958,6 +1642,7 @@ export default function BookingsScreen() {
             value={search}
             onChangeText={setSearch}
           />
+
           {search ? (
             <Pressable onPress={() => setSearch("")} hitSlop={8}>
               <Ionicons name="close-circle" size={18} color="#8B7B6B" />
@@ -993,6 +1678,9 @@ export default function BookingsScreen() {
           <View style={styles.list}>
             {tab === "passenger" ? (
               <>
+                {filteredPassengerRides.map((r) =>
+                  renderRideCard(r, "passenger"),
+                )}
                 {filteredPassengerApps.map((a) =>
                   renderApplicationCard(a, "passenger"),
                 )}
@@ -1004,6 +1692,7 @@ export default function BookingsScreen() {
               </>
             ) : (
               <>
+                {filteredDriverRides.map((r) => renderRideCard(r, "driver"))}
                 {filteredDriverApps.map((a) =>
                   renderApplicationCard(a, "driver"),
                 )}
@@ -1018,7 +1707,6 @@ export default function BookingsScreen() {
         )}
       </ScrollView>
 
-      {/* Book Again modal */}
       <Modal
         visible={!!rebook}
         transparent
@@ -1039,11 +1727,15 @@ export default function BookingsScreen() {
               <View style={styles.modalSummary}>
                 {(() => {
                   const meta = getCategoryMeta(rebook.category);
+
                   return (
                     <View
                       style={[
                         styles.catChip,
-                        { backgroundColor: `${meta.color}18`, alignSelf: "flex-start" },
+                        {
+                          backgroundColor: `${meta.color}18`,
+                          alignSelf: "flex-start",
+                        },
                       ]}
                     >
                       <Ionicons name={meta.icon} size={15} color={meta.color} />
@@ -1053,12 +1745,14 @@ export default function BookingsScreen() {
                     </View>
                   );
                 })()}
+
                 <View style={styles.infoRow}>
                   <Ionicons name="location-outline" size={15} color="#7C5F46" />
                   <Text style={styles.infoText}>
                     {rebook.from || "?"} → {rebook.to || "?"}
                   </Text>
                 </View>
+
                 {typeof rebook.seats === "number" ? (
                   <View style={styles.infoRow}>
                     <Ionicons name="people-outline" size={15} color="#7C5F46" />
@@ -1091,11 +1785,81 @@ export default function BookingsScreen() {
               >
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </Pressable>
+
               <Pressable style={styles.modalSearch} onPress={submitRebook}>
                 <Ionicons name="search-outline" size={18} color="#FFFFFF" />
                 <Text style={styles.modalSearchText}>Search Drivers</Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!ratingBooking}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRatingBooking(null)}
+      >
+        <View style={styles.ratingBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setRatingBooking(null)}
+          />
+
+          <View style={styles.ratingCard}>
+            <View style={styles.ratingIconCircle}>
+              <Ionicons name="checkmark-circle" size={34} color="#F58220" />
+            </View>
+
+            <Text style={styles.ratingTitle}>You have arrived safely!</Text>
+            <Text style={styles.ratingSubtitle}>Rate Your Driver</Text>
+
+            <View style={styles.ratingStarsRow}>
+              {Array.from({ length: 5 }).map((_, i) => {
+                const value = i + 1;
+                const active = value <= ratingStars;
+
+                return (
+                  <Pressable
+                    key={value}
+                    onPress={() => setRatingStars(value)}
+                    hitSlop={6}
+                  >
+                    <Ionicons
+                      name={active ? "star" : "star-outline"}
+                      size={38}
+                      color={active ? "#F58220" : "#D8C9BC"}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <TextInput
+              style={styles.ratingInput}
+              value={ratingComment}
+              onChangeText={setRatingComment}
+              placeholder="Leave a comment (optional)"
+              placeholderTextColor="#9B7A68"
+              multiline
+              textAlignVertical="top"
+            />
+
+            <Pressable
+              style={[
+                styles.ratingSubmit,
+                (ratingStars < 1 || ratingBusy) && styles.ratingSubmitDisabled,
+              ]}
+              onPress={submitRating}
+              disabled={ratingStars < 1 || ratingBusy}
+            >
+              {ratingBusy ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.ratingSubmitText}>Submit Rating</Text>
+              )}
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -1217,7 +1981,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 10,
     marginBottom: 12,
+  },
+  cardTopActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  deleteButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFF1F1",
+    borderWidth: 1,
+    borderColor: "#F7C7C7",
   },
   catChip: {
     flexDirection: "row",
@@ -1344,12 +2124,38 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     fontSize: 15,
   },
-  // Work / errand application extras
   statusDead: {
     backgroundColor: "#F1E7E7",
   },
   statusTextDead: {
     color: "#B91C1C",
+  },
+  driverDetailsBox: {
+    backgroundColor: "#FFFDFC",
+    borderWidth: 1,
+    borderColor: "#EFE3D6",
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 2,
+    marginBottom: 14,
+  },
+  driverDetailsTitle: {
+    color: "#111827",
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  phoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 2,
+  },
+  phoneText: {
+    color: "#F58220",
+    fontSize: 14,
+    fontWeight: "900",
+    textDecorationLine: "underline",
   },
   payRow: {
     flexDirection: "row",
@@ -1429,7 +2235,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 14,
   },
-  // Modal
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.25)",
@@ -1504,5 +2309,99 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "900",
     fontSize: 15,
+  },
+  ratingSummaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    flexWrap: "wrap",
+    marginBottom: 6,
+  },
+  ratingComment: {
+    color: "#7C5F46",
+    fontSize: 13,
+    fontWeight: "700",
+    fontStyle: "italic",
+    marginLeft: 6,
+    flexShrink: 1,
+  },
+  ratingBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  ratingCard: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "#EFE3D6",
+    paddingHorizontal: 24,
+    paddingVertical: 26,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowOffset: { width: 0, height: 10 },
+    shadowRadius: 24,
+    elevation: 6,
+  },
+  ratingIconCircle: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: "#FFF2E8",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  ratingTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#111827",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+  ratingSubtitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#7C5F46",
+    textAlign: "center",
+    marginBottom: 18,
+  },
+  ratingStarsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 20,
+  },
+  ratingInput: {
+    width: "100%",
+    minHeight: 84,
+    backgroundColor: "#FBF7F1",
+    borderWidth: 1,
+    borderColor: "#E4DDD7",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: "#111827",
+    marginBottom: 18,
+  },
+  ratingSubmit: {
+    width: "100%",
+    backgroundColor: "#F58220",
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: "center",
+  },
+  ratingSubmitDisabled: {
+    opacity: 0.5,
+  },
+  ratingSubmitText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 16,
   },
 });

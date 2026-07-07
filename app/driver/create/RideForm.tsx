@@ -20,12 +20,15 @@ import {
   dayNames,
   getDayFromDateText,
   getDigitsOnly,
+  getTodayYMD,
+  isTimeAvailableForDate,
   normalize,
   normalizeDateToYMD,
   normalizeTime,
   styles,
   useDriverAccount,
   validateAccountInfo,
+  validateDateAndTimeNotPassed,
 } from "./driverHelpers";
 
 type RideCategory = "school" | "personal";
@@ -39,7 +42,6 @@ type Props = {
 export default function RideForm({ category, showPets, onBack }: Props) {
   const { driverName, phone, driverAge, languages } = useDriverAccount();
 
-  // نسمح بالتكرار للمدرسة و Ride Person
   const canRepeat = category === "school" || category === "personal";
 
   const [loading, setLoading] = useState(false);
@@ -59,7 +61,6 @@ export default function RideForm({ category, showPets, onBack }: Props) {
   const [isRecurring, setIsRecurring] = useState(false);
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
 
-  // Weekly (recurring): each selected day has its own time + seats
   const [dayTimes, setDayTimes] = useState<Record<string, string>>({});
   const [daySeats, setDaySeats] = useState<Record<string, number>>({});
   const [openDayTimePicker, setOpenDayTimePicker] = useState<string | null>(
@@ -107,8 +108,6 @@ export default function RideForm({ category, showPets, onBack }: Props) {
     setDaySeats((prev) => ({ ...prev, [day]: 1 }));
   };
 
-  // The chosen Start Date's own day is always included in the weekly plan,
-  // so the driver sets a time + seats for that date too.
   useEffect(() => {
     if (!(canRepeat && isRecurring)) return;
 
@@ -119,9 +118,11 @@ export default function RideForm({ category, showPets, onBack }: Props) {
     setSelectedDays((prev) =>
       prev.includes(startDay) ? prev : [...prev, startDay],
     );
+
     setDayTimes((prev) =>
       prev[startDay] ? prev : { ...prev, [startDay]: "09:00" },
     );
+
     setDaySeats((prev) => (prev[startDay] ? prev : { ...prev, [startDay]: 1 }));
   }, [tripDate, isRecurring, canRepeat]);
 
@@ -202,7 +203,6 @@ export default function RideForm({ category, showPets, onBack }: Props) {
       return;
     }
 
-    // Time + seats: per-day when recurring, otherwise a single value
     let cleanTime = "";
     let cleanSeats = 0;
     const cleanedDayTimes: Record<string, string> = {};
@@ -216,6 +216,18 @@ export default function RideForm({ category, showPets, onBack }: Props) {
           Alert.alert(
             "Invalid time",
             `Please choose a valid time for ${day} between 00:00 and 23:59.`,
+          );
+          return;
+        }
+
+        if (
+          cleanTripDate === getTodayYMD() &&
+          day === tripDay &&
+          !isTimeAvailableForDate(cleanTripDate, dayTime)
+        ) {
+          Alert.alert(
+            "Invalid time",
+            `You cannot choose a time that already passed today for ${day}.`,
           );
           return;
         }
@@ -234,21 +246,17 @@ export default function RideForm({ category, showPets, onBack }: Props) {
         cleanedDaySeats[day] = daySeatsValue;
       }
 
-      // fallback single values (used by the passenger search matching)
       cleanTime = cleanedDayTimes[selectedDays[0]];
       cleanSeats = Math.max(...Object.values(cleanedDaySeats));
     } else {
-      const normalizedTime = normalizeTime(time);
+      const validation = validateDateAndTimeNotPassed(tripDate, time, {
+        dateLabel: "travel date",
+        timeLabel: "departure time",
+      });
 
-      if (!normalizedTime) {
-        Alert.alert(
-          "Invalid time",
-          "Please choose a valid time between 00:00 and 23:59.",
-        );
-        return;
-      }
+      if (!validation) return;
 
-      cleanTime = normalizedTime;
+      cleanTime = validation.cleanTime;
       cleanSeats = Number(seats);
 
       if (Number.isNaN(cleanSeats) || cleanSeats < 1 || cleanSeats > 8) {
@@ -260,19 +268,18 @@ export default function RideForm({ category, showPets, onBack }: Props) {
     try {
       setLoading(true);
 
-      // Best-effort: store route coordinates so Roadside Help can match
-      // passengers to this route quickly. Falls back to city text if geocoding
-      // fails (Roadside Help geocodes the text at match time in that case).
       const routeCoords: Record<string, number> = {};
 
       try {
         const [fromGeo] = await Location.geocodeAsync(from);
+
         if (fromGeo) {
           routeCoords.fromLat = fromGeo.latitude;
           routeCoords.fromLng = fromGeo.longitude;
         }
 
         const [toGeo] = await Location.geocodeAsync(to);
+
         if (toGeo) {
           routeCoords.toLat = toGeo.latitude;
           routeCoords.toLng = toGeo.longitude;
@@ -284,12 +291,10 @@ export default function RideForm({ category, showPets, onBack }: Props) {
       await addDoc(collection(db, "driverRoutes"), {
         driverId: user.uid,
 
-        // fallback فقط. صفحة المسافر تقرأ الأساسي من users/{driverId}
         driverName,
         phone: accountInfo.cleanPhone,
         driverAge: accountInfo.cleanDriverAge,
 
-        // اللغة جاية لحالها من بروفايل السائق
         languages,
 
         category,
@@ -306,8 +311,6 @@ export default function RideForm({ category, showPets, onBack }: Props) {
         toNormalized: normalize(to),
         ...routeCoords,
 
-        // إذا مش مكرر: هذا هو تاريخ السفرة
-        // إذا مكرر: هذا هو تاريخ بداية التكرار
         tripDate: cleanTripDate,
         startDate: cleanTripDate,
         day: tripDay,

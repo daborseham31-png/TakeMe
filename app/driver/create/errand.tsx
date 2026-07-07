@@ -16,15 +16,14 @@ import { auth, db } from "../../../firebase";
 import DateInput, { TimeInput } from "./DateInput";
 import YesNoField from "./YesNoField";
 import {
-  getDayFromDateText,
   getDigitsOnly,
   normalize,
-  normalizeDateToYMD,
   normalizeTime,
   styles,
   timeToMinutes,
   useDriverAccount,
   validateAccountInfo,
+  validateDateAndTimeNotPassed,
 } from "./driverHelpers";
 
 export default function ErrandJobScreen() {
@@ -81,25 +80,27 @@ export default function ErrandJobScreen() {
       return;
     }
 
-    const cleanErrandDate = normalizeDateToYMD(errandDate);
+    const dateTimeValidation = validateDateAndTimeNotPassed(
+      errandDate,
+      errandStartTime,
+      {
+        dateLabel: "errand date",
+        timeLabel: "start time",
+      },
+    );
 
-    if (!cleanErrandDate) {
-      Alert.alert(
-        "Invalid date",
-        "Errand date must be today or a future date.",
-      );
-      return;
-    }
+    if (!dateTimeValidation) return;
 
-    const errandDay = getDayFromDateText(cleanErrandDate);
+    const cleanErrandDate = dateTimeValidation.cleanDate;
+    const cleanStartTime = dateTimeValidation.cleanTime;
+    const errandDay = dateTimeValidation.day;
 
-    const cleanStartTime = normalizeTime(errandStartTime);
     const cleanEndTime = normalizeTime(errandEndTime);
 
-    if (!cleanStartTime || !cleanEndTime) {
+    if (!cleanEndTime) {
       Alert.alert(
         "Invalid time",
-        "Please choose valid start and end time between 00:00 and 23:59.",
+        "Please choose a valid end time between 00:00 and 23:59.",
       );
       return;
     }
@@ -135,12 +136,10 @@ export default function ErrandJobScreen() {
       await addDoc(collection(db, "errandJobs"), {
         ownerId: user.uid,
 
-        // fallback فقط. صفحة المسافر تقرأ الأساسي من users/{ownerId}
         ownerName: driverName,
         phone: accountInfo.cleanPhone,
         driverAge: accountInfo.cleanDriverAge,
 
-        // اللغة جاية لحالها من بروفايل المستخدم
         languages,
 
         canTakeKids,
@@ -250,7 +249,13 @@ export default function ErrandJobScreen() {
                 value={errandStartTime}
                 onChange={setErrandStartTime}
                 showPicker={showStartTimePicker}
-                setShowPicker={setShowStartTimePicker}
+                setShowPicker={(value) => {
+                  setShowStartTimePicker(value);
+
+                  if (value) {
+                    setShowEndTimePicker(false);
+                  }
+                }}
               />
             </View>
 
@@ -260,7 +265,13 @@ export default function ErrandJobScreen() {
                 value={errandEndTime}
                 onChange={setErrandEndTime}
                 showPicker={showEndTimePicker}
-                setShowPicker={setShowEndTimePicker}
+                setShowPicker={(value) => {
+                  setShowEndTimePicker(value);
+
+                  if (value) {
+                    setShowStartTimePicker(false);
+                  }
+                }}
               />
             </View>
           </View>

@@ -15,14 +15,12 @@ import {
 import { auth, db } from "../../../firebase";
 import DateInput, { TimeInput } from "./DateInput";
 import {
-  getDayFromDateText,
   getDigitsOnly,
   normalize,
-  normalizeDateToYMD,
-  normalizeTime,
   styles,
   useDriverAccount,
   validateAccountInfo,
+  validateDateAndTimeNotPassed,
 } from "./driverHelpers";
 
 type Mode = "" | "person" | "store";
@@ -97,8 +95,13 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [showDeliveryDatePicker, setShowDeliveryDatePicker] = useState(false);
+
   const [time, setTime] = useState("");
   const [showTimePicker, setShowTimePicker] = useState(false);
+
   const [recipientPhone, setRecipientPhone] = useState("");
   const [itemDescription, setItemDescription] = useState("");
   const [price, setPrice] = useState("");
@@ -130,6 +133,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
       !carPlate ||
       !from ||
       !to ||
+      !deliveryDate ||
       !time ||
       !recipientPhone ||
       !itemDescription
@@ -138,15 +142,20 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
       return;
     }
 
-    const cleanTime = normalizeTime(time);
+    const dateTimeValidation = validateDateAndTimeNotPassed(
+      deliveryDate,
+      time,
+      {
+        dateLabel: "delivery date",
+        timeLabel: "arrival time",
+      },
+    );
 
-    if (!cleanTime) {
-      Alert.alert(
-        "Invalid time",
-        "Please choose a valid time between 00:00 and 23:59.",
-      );
-      return;
-    }
+    if (!dateTimeValidation) return;
+
+    const cleanDeliveryDate = dateTimeValidation.cleanDate;
+    const cleanTime = dateTimeValidation.cleanTime;
+    const deliveryDay = dateTimeValidation.day;
 
     const cleanRecipientPhone = getDigitsOnly(recipientPhone);
 
@@ -171,12 +180,10 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
       await addDoc(collection(db, "driverRoutes"), {
         driverId: user.uid,
 
-        // fallback فقط. صفحة المسافر تقرأ الأساسي من users/{driverId}
         driverName,
         phone: accountInfo.cleanPhone,
         driverAge: accountInfo.cleanDriverAge,
 
-        // اللغة جاية لحالها من بروفايل السائق
         languages,
 
         category: "delivery",
@@ -190,6 +197,11 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
         to,
         fromNormalized: normalize(from),
         toNormalized: normalize(to),
+
+        tripDate: cleanDeliveryDate,
+        deliveryDate: cleanDeliveryDate,
+        day: deliveryDay,
+        availableDays: [deliveryDay],
 
         time: cleanTime,
         recipientPhone: cleanRecipientPhone,
@@ -284,6 +296,14 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
               onChangeText={setTo}
             />
           </View>
+
+          <DateInput
+            label="Delivery Date"
+            value={deliveryDate}
+            onChange={setDeliveryDate}
+            showPicker={showDeliveryDatePicker}
+            setShowPicker={setShowDeliveryDatePicker}
+          />
 
           <TimeInput
             label="Arrival Time to the Area"
@@ -403,27 +423,20 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
       return;
     }
 
-    const cleanDeliveryDate = normalizeDateToYMD(deliveryDate);
+    const dateTimeValidation = validateDateAndTimeNotPassed(
+      deliveryDate,
+      time,
+      {
+        dateLabel: "delivery date",
+        timeLabel: "expected arrival time",
+      },
+    );
 
-    if (!cleanDeliveryDate) {
-      Alert.alert(
-        "Invalid date",
-        "Delivery date must be today or a future date.",
-      );
-      return;
-    }
+    if (!dateTimeValidation) return;
 
-    const deliveryDay = getDayFromDateText(cleanDeliveryDate);
-
-    const cleanTime = normalizeTime(time);
-
-    if (!cleanTime) {
-      Alert.alert(
-        "Invalid time",
-        "Please choose a valid time between 00:00 and 23:59.",
-      );
-      return;
-    }
+    const cleanDeliveryDate = dateTimeValidation.cleanDate;
+    const cleanTime = dateTimeValidation.cleanTime;
+    const deliveryDay = dateTimeValidation.day;
 
     const cleanPrice = price ? Number(price) : 0;
 
@@ -438,12 +451,10 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
       await addDoc(collection(db, "driverRoutes"), {
         driverId: user.uid,
 
-        // fallback فقط. صفحة المسافر تقرأ الأساسي من users/{driverId}
         driverName,
         phone: accountInfo.cleanPhone,
         driverAge: accountInfo.cleanDriverAge,
 
-        // اللغة جاية لحالها من بروفايل السائق
         languages,
 
         category: "delivery",
@@ -460,7 +471,6 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
 
         storeName,
 
-        // تاريخ التوصيل مثل باقي صفحات السائق
         tripDate: cleanDeliveryDate,
         deliveryDate: cleanDeliveryDate,
         day: deliveryDay,
@@ -588,7 +598,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             setShowPicker={setShowTimePicker}
           />
 
-          <Text style={styles.label}>Price (₪) </Text>
+          <Text style={styles.label}>Price (₪)</Text>
           <View style={styles.inputRow}>
             <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
             <TextInput
