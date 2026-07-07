@@ -23,6 +23,7 @@ type Comment = {
 
 type Driver = {
   id: string;
+  ownerId: string;
   name: string;
   gender: "male" | "female";
   phone: string;
@@ -101,6 +102,7 @@ export default function ErrandsScreen() {
 
           return {
             id: docSnap.id,
+            ownerId: data.ownerId || "",
             name: data.ownerName || "Person",
             gender: (data.gender === "female" ? "female" : "male") as
               | "male"

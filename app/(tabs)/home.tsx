@@ -18,9 +18,9 @@ const logoImg = require("../../assets/images/logo-new.jpg");
 
 export default function HomeScreen() {
   const [unreadHelp, setUnreadHelp] = useState(0);
-  // Future messages badge. No `messages` collection exists yet, so this stays 0
-  // for now – the listener can be added here the same way as unreadHelp.
-  const [unreadMessages] = useState(0);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+  // Unread chat messages across all of the user's conversations.
+  const [unreadChats, setUnreadChats] = useState(0);
 
   // Live count of unread roadside help notifications for the signed-in driver.
   // Single equality filter keeps this index-free; unread count is computed here.
@@ -61,10 +61,82 @@ export default function HomeScreen() {
     };
   }, []);
 
+  // Live unread notifications + unread chat messages for the signed-in user.
+  // Both use single-filter queries → index-free.
+  useEffect(() => {
+    let unsubNotifs: (() => void) | null = null;
+    let unsubChats: (() => void) | null = null;
+
+    const cleanup = () => {
+      unsubNotifs?.();
+      unsubChats?.();
+      unsubNotifs = unsubChats = null;
+    };
+
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      cleanup();
+
+      if (!user) {
+        setUnreadNotifs(0);
+        setUnreadChats(0);
+        return;
+      }
+
+      unsubNotifs = onSnapshot(
+        query(collection(db, "notifications"), where("userId", "==", user.uid)),
+        (snap) => {
+          setUnreadNotifs(
+            snap.docs.filter(
+              (d) => d.data().read === false && d.data().deleted !== true,
+            ).length,
+          );
+        },
+        () => setUnreadNotifs(0),
+      );
+
+      unsubChats = onSnapshot(
+        query(
+          collection(db, "conversations"),
+          where("participants", "array-contains", user.uid),
+        ),
+        (snap) => {
+          const total = snap.docs.reduce((sum, d) => {
+            const data = d.data();
+            const hidden: string[] = data.hiddenFor || [];
+            if (hidden.includes(user.uid)) return sum;
+            return sum + (data.unreadCount?.[user.uid] || 0);
+          }, 0);
+          setUnreadChats(total);
+        },
+        () => setUnreadChats(0),
+      );
+    });
+
+    return () => {
+      cleanup();
+      unsubAuth();
+    };
+  }, []);
+
   return (
     <SafeAreaView style={styles.page}>
       {/* Top notification icons (Instagram/Facebook style) */}
       <View style={styles.topBar}>
+        <Pressable
+          style={styles.iconButton}
+          onPress={() => router.push("/notifications" as any)}
+          hitSlop={8}
+        >
+          <Ionicons name="notifications-outline" size={26} color="#7C5F46" />
+          {unreadNotifs > 0 ? (
+            <View style={styles.iconBadge}>
+              <Text style={styles.iconBadgeText}>
+                {unreadNotifs > 99 ? "99+" : unreadNotifs}
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
+
         <Pressable
           style={styles.iconButton}
           onPress={() => router.push("/driver/help-requests" as any)}
@@ -82,14 +154,14 @@ export default function HomeScreen() {
 
         <Pressable
           style={styles.iconButton}
-          onPress={() => router.push("/driver/messages" as any)}
+          onPress={() => router.push("/messages" as any)}
           hitSlop={8}
         >
           <Ionicons name="chatbubble-ellipses-outline" size={26} color="#7C5F46" />
-          {unreadMessages > 0 ? (
+          {unreadChats > 0 ? (
             <View style={styles.iconBadge}>
               <Text style={styles.iconBadgeText}>
-                {unreadMessages > 99 ? "99+" : unreadMessages}
+                {unreadChats > 99 ? "99+" : unreadChats}
               </Text>
             </View>
           ) : null}

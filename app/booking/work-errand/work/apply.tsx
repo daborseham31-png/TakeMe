@@ -14,8 +14,15 @@ import {
   View,
 } from "react-native";
 
+import {
+  createApplication,
+  detectCurrentLocation,
+  GeoPoint,
+} from "../workErrandLib";
+
 type JobListing = {
-  id: number;
+  id: string;
+  employerId: string;
   name: string;
   gender: "male" | "female";
   jobTypeEn: string;
@@ -34,22 +41,23 @@ type JobListing = {
 };
 
 const defaultJob: JobListing = {
-  id: 1,
-  name: "Ahmad Jabarin",
+  id: "",
+  employerId: "",
+  name: "Employer",
   gender: "male",
-  jobTypeEn: "Carpenter",
-  descriptionEn: "Looking for a carpenter to help install a full kitchen",
-  hourlyRate: 80,
-  phone: "050-1234567",
-  workHoursFrom: "08:00",
-  workHoursTo: "16:00",
-  dayEn: "Sunday",
-  date: "2026-03-15",
-  workersNeeded: 2,
-  locationEn: "Nazareth",
+  jobTypeEn: "Work Job",
+  descriptionEn: "No description",
+  hourlyRate: 0,
+  phone: "",
+  workHoursFrom: "",
+  workHoursTo: "",
+  dayEn: "",
+  date: "",
+  workersNeeded: 1,
+  locationEn: "",
   rating: 4.8,
-  ratingCount: 23,
-  languages: ["ar", "he"],
+  ratingCount: 0,
+  languages: [],
 };
 
 export default function WorkApplyScreen() {
@@ -67,62 +75,76 @@ export default function WorkApplyScreen() {
     return defaultJob;
   }, [params.job]);
 
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [age, setAge] = useState("");
-  const [location, setLocation] = useState("");
-  const [phone, setPhone] = useState("");
+  const [city, setCity] = useState("");
+  const [neighborhood, setNeighborhood] = useState("");
+  const [notes, setNotes] = useState("");
+  const [location, setLocation] = useState<GeoPoint | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
 
-  const goToCategories = () => {
-    router.replace("/booking" as any);
+  const detectLocation = async () => {
+    try {
+      setLocating(true);
+      const loc = await detectCurrentLocation();
+      setLocation(loc);
+    } catch (error: any) {
+      Alert.alert(
+        "Location",
+        error?.message || "Could not detect your location.",
+      );
+    } finally {
+      setLocating(false);
+    }
   };
 
-  const handleSubmit = () => {
-    const cleanFirstName = firstName.trim();
-    const cleanLastName = lastName.trim();
-    const cleanAge = age.trim();
-    const cleanLocation = location.trim();
-    const cleanPhone = phone.replace(/\D/g, "");
+  const handleSubmit = async () => {
+    const cleanCity = city.trim();
+    const cleanNeighborhood = neighborhood.trim();
 
-    if (
-      !cleanFirstName ||
-      !cleanLastName ||
-      !cleanAge ||
-      !cleanLocation ||
-      !cleanPhone
-    ) {
-      Alert.alert("Missing details", "Please fill all fields.");
+    if (!cleanCity || !cleanNeighborhood) {
+      Alert.alert("Missing details", "Please fill City / Village and Neighborhood.");
       return;
     }
 
-    const ageNumber = Number(cleanAge);
-
-    if (!Number.isInteger(ageNumber) || ageNumber < 16 || ageNumber > 80) {
-      Alert.alert("Invalid age", "Age must be between 16 and 80.");
-      return;
-    }
-
-    if (!/^05\d{8}$/.test(cleanPhone)) {
+    if (!location || location.latitude === null || location.longitude === null) {
       Alert.alert(
-        "Invalid phone number",
-        "Phone number must start with 05 and contain 10 digits.",
+        "Location needed",
+        "Please detect your current location so the employer can reach you.",
       );
       return;
     }
 
-    setSent(true);
+    try {
+      setSubmitting(true);
 
-    setTimeout(() => {
-      const accepted = Math.random() > 0.3;
-
-      Alert.alert(
-        "Employer Response",
-        accepted
-          ? `Good news! ${job.name} accepted your application.`
-          : `${job.name} reviewed your application, but it was not accepted this time.`,
+      await createApplication(
+        "work",
+        {
+          sourceId: job.id,
+          providerId: job.employerId,
+          providerName: job.name,
+          title: job.jobTypeEn,
+          date: job.date,
+          startTime: job.workHoursFrom,
+          endTime: job.workHoursTo,
+          hourlyPay: job.hourlyRate || null,
+          price: null,
+        },
+        {
+          city: cleanCity,
+          neighborhood: cleanNeighborhood,
+          notes: notes.trim(),
+          location,
+        },
       );
-    }, 5000);
+
+      setSent(true);
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not send the request.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (sent) {
@@ -131,11 +153,19 @@ export default function WorkApplyScreen() {
         <View style={styles.successContainer}>
           <Ionicons name="checkmark-circle-outline" size={96} color="#F58220" />
 
-          <Text style={styles.successTitle}>Application Sent!</Text>
+          <Text style={styles.successTitle}>Request Sent!</Text>
 
           <Text style={styles.successText}>
-            The employer will review your application and get back to you.
+            {job.name} will review your request. Once accepted, you&apos;ll
+            continue to payment. Track it under My Bookings.
           </Text>
+
+          <Pressable
+            style={styles.successButton}
+            onPress={() => router.replace("/(tabs)/bookings" as any)}
+          >
+            <Text style={styles.successButtonText}>Go to My Bookings</Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     );
@@ -170,66 +200,114 @@ export default function WorkApplyScreen() {
 
             <Text style={styles.description}>{job.descriptionEn}</Text>
 
+            <View style={styles.detailsGrid}>
+              {job.locationEn ? (
+                <View style={styles.detail}>
+                  <Ionicons name="location-outline" size={15} color="#7A665C" />
+                  <Text style={styles.detailText}>{job.locationEn}</Text>
+                </View>
+              ) : null}
+
+              {job.date ? (
+                <View style={styles.detail}>
+                  <Ionicons name="calendar-outline" size={15} color="#7A665C" />
+                  <Text style={styles.detailText}>{job.date}</Text>
+                </View>
+              ) : null}
+
+              {job.workHoursFrom || job.workHoursTo ? (
+                <View style={styles.detail}>
+                  <Ionicons name="time-outline" size={15} color="#7A665C" />
+                  <Text style={styles.detailText}>
+                    {job.workHoursFrom} - {job.workHoursTo}
+                  </Text>
+                </View>
+              ) : null}
+
+              {job.workersNeeded ? (
+                <View style={styles.detail}>
+                  <Ionicons name="people-outline" size={15} color="#7A665C" />
+                  <Text style={styles.detailText}>
+                    {job.workersNeeded} workers
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+
             <Text style={styles.price}>₪{job.hourlyRate}/hr</Text>
           </View>
 
           <Text style={styles.sectionTitle}>Your Details</Text>
 
+          <Text style={styles.hint}>
+            Your name, age and phone are taken from your profile automatically.
+          </Text>
+
+          <Text style={styles.label}>Your Location</Text>
+          <Pressable
+            style={styles.locationBox}
+            onPress={detectLocation}
+            disabled={locating}
+          >
+            <Ionicons
+              name={location ? "location" : "locate-outline"}
+              size={20}
+              color="#F58220"
+            />
+            <Text style={styles.locationText} numberOfLines={2}>
+              {locating
+                ? "Detecting your location..."
+                : location
+                  ? location.address || "Current location detected"
+                  : "Tap to detect my current location"}
+            </Text>
+            {location ? (
+              <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
+            ) : null}
+          </Pressable>
+
           <View style={styles.row}>
             <View style={styles.halfField}>
-              <Text style={styles.label}>First Name</Text>
+              <Text style={styles.label}>City / Village</Text>
               <TextInput
                 style={styles.input}
-                value={firstName}
-                onChangeText={setFirstName}
-                placeholder="e.g. Ahmad"
+                value={city}
+                onChangeText={setCity}
+                placeholder="e.g. Nazareth"
                 placeholderTextColor="#9B7A68"
               />
             </View>
 
             <View style={styles.halfField}>
-              <Text style={styles.label}>Last Name</Text>
+              <Text style={styles.label}>Neighborhood</Text>
               <TextInput
                 style={styles.input}
-                value={lastName}
-                onChangeText={setLastName}
-                placeholder="e.g. Khatib"
+                value={neighborhood}
+                onChangeText={setNeighborhood}
+                placeholder="e.g. Al- Maidan"
                 placeholderTextColor="#9B7A68"
               />
             </View>
           </View>
 
-          <Text style={styles.label}>Age</Text>
+          <Text style={styles.label}>Notes (optional)</Text>
           <TextInput
-            style={styles.input}
-            value={age}
-            onChangeText={setAge}
-            keyboardType="number-pad"
-            placeholder="e.g. 22"
+            style={[styles.input, styles.textArea]}
+            value={notes}
+            onChangeText={setNotes}
+            placeholder="Anything the employer should know"
             placeholderTextColor="#9B7A68"
+            multiline
           />
 
-          <Text style={styles.label}>Your Location</Text>
-          <TextInput
-            style={styles.input}
-            value={location}
-            onChangeText={setLocation}
-            placeholder="e.g. Nazareth"
-            placeholderTextColor="#9B7A68"
-          />
-
-          <Text style={styles.label}>Phone Number</Text>
-          <TextInput
-            style={styles.input}
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-            placeholder="05X-XXXXXXX"
-            placeholderTextColor="#9B7A68"
-          />
-
-          <Pressable style={styles.submitButton} onPress={handleSubmit}>
-            <Text style={styles.submitText}>Send Application</Text>
+          <Pressable
+            style={[styles.submitButton, submitting && styles.submitDisabled]}
+            onPress={handleSubmit}
+            disabled={submitting}
+          >
+            <Text style={styles.submitText}>
+              {submitting ? "Sending..." : "Send Request"}
+            </Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -305,7 +383,25 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#7A5C4B",
     lineHeight: 22,
+    marginBottom: 12,
+  },
+  detailsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    rowGap: 8,
     marginBottom: 10,
+  },
+  detail: {
+    width: "50%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingRight: 6,
+  },
+  detailText: {
+    fontSize: 13,
+    color: "#7A5C4B",
+    flexShrink: 1,
   },
   price: {
     fontSize: 16,
@@ -316,7 +412,31 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "900",
     color: "#111827",
-    marginBottom: 18,
+    marginBottom: 10,
+  },
+  hint: {
+    fontSize: 13,
+    color: "#7A5C4B",
+    marginBottom: 14,
+    lineHeight: 18,
+  },
+  locationBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#FFF8F2",
+    borderWidth: 1.5,
+    borderColor: "#FFE2C5",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 6,
+  },
+  locationText: {
+    flex: 1,
+    color: "#3C2319",
+    fontSize: 14,
+    fontWeight: "700",
   },
   row: {
     flexDirection: "row",
@@ -333,15 +453,20 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   input: {
-    height: 46,
+    minHeight: 46,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E4DDD7",
     borderRadius: 10,
     paddingHorizontal: 14,
+    paddingVertical: 10,
     fontSize: 15,
     color: "#111827",
     marginBottom: 10,
+  },
+  textArea: {
+    minHeight: 90,
+    textAlignVertical: "top",
   },
   submitButton: {
     backgroundColor: "#F58220",
@@ -349,6 +474,9 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     alignItems: "center",
     marginTop: 8,
+  },
+  submitDisabled: {
+    opacity: 0.6,
   },
   submitText: {
     color: "#FFFFFF",
