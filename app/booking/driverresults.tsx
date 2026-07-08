@@ -45,26 +45,25 @@ type DriverComment = {
 type DriverRoute = {
   id: string;
   driverId?: string;
-
+  status?: string;
+  isBooked?: boolean;
+  available?: boolean;
+  bookingId?: string | null;
+  bookedBy?: string | null;
   driverName?: string;
   phone?: string;
   gender?: "male" | "female";
   languages?: string[];
-
   profile?: DriverProfile;
-
   car?: string;
   carColor?: string;
   carPlate?: string;
-
   allowsPets?: boolean;
-
   category?: string;
   from?: string;
   to?: string;
   fromNormalized?: string;
   toNormalized?: string;
-
   tripDate?: string;
   deliveryDate?: string;
   day?: string;
@@ -72,16 +71,13 @@ type DriverRoute = {
   time?: string;
   price?: number;
   seats?: number;
-
   storeName?: string;
   recipientPhone?: string;
   itemDescription?: string;
-
   rating?: number;
   reviews?: number;
   eta?: number;
   active?: boolean;
-
   comments?: DriverComment[];
 };
 
@@ -290,9 +286,25 @@ export default function DriverResultsScreen() {
   const genderPref = String(params.genderPref || "any");
   const seats = Number(params.seats || 1);
 
-  const requestedTime = String(params.time || "");
-  const requestedDate = String(params.tripDate || "");
-  const requestedDay = String(params.tripDay || "");
+const requestedTime = String(params.time || "");
+const requestedDate = String(params.tripDate || "");
+const requestedDay = String(params.tripDay || "");
+
+const bookingType = String(params.bookingType || "quick");
+
+let requestedWeeklyTrips: {
+  day: string;
+  date: string;
+  time: string;
+  seats: number;
+}[] = [];
+
+try {
+  const parsed = JSON.parse(String(params.weeklyTrips || "[]"));
+  requestedWeeklyTrips = Array.isArray(parsed) ? parsed : [];
+} catch {
+  requestedWeeklyTrips = [];
+}
 
   const selectedLanguages = String(params.languages || "")
     .split(",")
@@ -435,68 +447,106 @@ export default function DriverResultsScreen() {
       setLoading(false);
     }
   };
+const handleBookDriver = async (driver: DriverRoute) => {
+  if (bookingBusy) return;
 
-  const handleBookDriver = async (driver: DriverRoute) => {
-    if (bookingBusy) return;
+  const currentCategory = String(driver.category || category || "");
 
-    const isDelivery = driver.category === "delivery";
-    const isPersonal = (driver.category || category) === "personal";
-    const totalPrice = Number(driver.price || 0) * (isDelivery ? 1 : seats);
+  const isDelivery = currentCategory === "delivery";
+  const isPersonal =
+    currentCategory === "personal" || currentCategory === "personal_ride";
+  const isSchool = currentCategory === "school";
+  const isWeeklySchool = isSchool && bookingType === "weekly";
 
-    if (isPersonal) {
-      router.push({
-        pathname: "/booking/ride-payment",
-        params: {
-          driverId: driver.driverId || "",
-          driverName: getDriverName(driver),
-          driverPhone: getDriverPhone(driver),
-          routeId: driver.id,
-          from: driver.from || from,
-          to: driver.to || to,
-          date: driver.tripDate || requestedDate || "",
-          day: driver.day || requestedDay || "",
-          time: driver.time || requestedTime || "",
-          seats: String(seats),
-          price: String(totalPrice),
-          driverCar: driver.car || "",
-          driverCarColor: driver.carColor || "",
-          driverCarPlateLast3: (driver.carPlate || "")
-            .replace(/\D/g, "")
-            .slice(-3),
-        },
-      } as any);
-      return;
-    }
+  const driverPrice = Number(driver.price || 0);
 
-    try {
-      setBookingBusy(true);
+  const totalPrice = isWeeklySchool
+    ? requestedWeeklyTrips.reduce(
+        (sum, trip) => sum + driverPrice * Number(trip.seats || seats || 1),
+        0,
+      )
+    : driverPrice * (isDelivery ? 1 : seats);
 
-      await createPassengerBooking({
-        driverId: driver.driverId,
+  const selectedDate =
+    driver.tripDate || driver.deliveryDate || requestedDate || "";
+
+  const selectedDay = driver.day || requestedDay || "";
+
+  const selectedTime = driver.time || requestedTime || "";
+
+  // School + Personal يروحوا للدفع أولاً
+  // ممنوع نحفظ الحجز من صفحة النتائج
+  if (isSchool || isPersonal) {
+    router.push({
+      pathname: "/booking/ride-payment",
+      params: {
+        category: isSchool ? "school" : "personal",
+        bookingType,
+
+        driverId: driver.driverId || "",
         driverName: getDriverName(driver),
+        driverPhone: getDriverPhone(driver),
+
         routeId: driver.id,
-        category: driver.category || category,
+
         from: driver.from || from,
         to: driver.to || to,
-        date: driver.tripDate || driver.deliveryDate || requestedDate || "",
-        time: driver.time || requestedTime || "",
-        days: driver.availableDays || [],
-        seats: isDelivery ? null : seats,
-        price: totalPrice,
-      });
 
-      Alert.alert(
-        "Booking Confirmed",
-        `You selected ${getDriverName(driver)}. It was added to My Bookings.`,
-      );
+        date: selectedDate,
+        day: selectedDay,
+        time: selectedTime,
 
-      router.push("/(tabs)/bookings" as any);
-    } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not create the booking.");
-    } finally {
-      setBookingBusy(false);
-    }
-  };
+        seats: String(seats),
+        price: String(totalPrice),
+        unitPrice: String(driverPrice),
+
+        days: requestedDays.join(","),
+        dayTimes: String(params.dayTimes || "{}"),
+        daySeats: String(params.daySeats || "{}"),
+        dayDates: String(params.dayDates || "{}"),
+        weeklyTrips: JSON.stringify(requestedWeeklyTrips),
+
+        driverCar: driver.car || "",
+        driverCarColor: driver.carColor || "",
+        driverCarPlateLast3: (driver.carPlate || "")
+          .replace(/\D/g, "")
+          .slice(-3),
+      },
+    } as any);
+
+    return;
+  }
+
+  // باقي الأنواع القديمة نخليها زي ما كانت
+  try {
+    setBookingBusy(true);
+
+    await createPassengerBooking({
+      driverId: driver.driverId,
+      driverName: getDriverName(driver),
+      routeId: driver.id,
+      category: driver.category || category,
+      from: driver.from || from,
+      to: driver.to || to,
+      date: selectedDate,
+      time: selectedTime,
+      days: driver.availableDays || [],
+      seats: isDelivery ? null : seats,
+      price: totalPrice,
+    });
+
+    Alert.alert(
+      "Booking Confirmed",
+      `You selected ${getDriverName(driver)}. It was added to My Bookings.`,
+    );
+
+    router.push("/(tabs)/bookings" as any);
+  } catch (error: any) {
+    Alert.alert("Error", error?.message || "Could not create the booking.");
+  } finally {
+    setBookingBusy(false);
+  }
+};
 
   if (loading) {
     return (
@@ -508,7 +558,15 @@ export default function DriverResultsScreen() {
       </SafeAreaView>
     );
   }
-
+const availableDrivers = drivers.filter((driver: any) => {
+  return (
+    driver.status !== "booked" &&
+    driver.isBooked !== true &&
+    driver.available !== false &&
+    !driver.bookingId &&
+    !driver.bookedBy
+  );
+});
   return (
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -516,8 +574,10 @@ export default function DriverResultsScreen() {
           <Ionicons name="arrow-back" size={22} color="#7C5F46" />
           <Text style={styles.backText}>Back</Text>
         </Pressable>
+                <Text style={styles.title}>
+          Available Drivers ({availableDrivers.length})
+        </Text>
 
-        <Text style={styles.title}>Available Drivers ({drivers.length})</Text>
 
         <Text style={styles.routeText}>
           {from || "Any location"} → {to || "Any destination"}
@@ -527,7 +587,7 @@ export default function DriverResultsScreen() {
           <Text style={styles.routeText}>📅 {requestedDate}</Text>
         ) : null}
 
-        {drivers.length === 0 ? (
+        {availableDrivers.length === 0? (
           <View style={styles.emptyCard}>
             <Ionicons name="car-outline" size={42} color="#8B7B6B" />
             <Text style={styles.emptyTitle}>No drivers found</Text>
@@ -538,7 +598,7 @@ export default function DriverResultsScreen() {
           </View>
         ) : (
           <View style={styles.list}>
-            {drivers.map((driver) => {
+            {availableDrivers.map((driver) =>  {
               const isDelivery = driver.category === "delivery";
               const totalPrice =
                 Number(driver.price || 0) * (isDelivery ? 1 : seats);

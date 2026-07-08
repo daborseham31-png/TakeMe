@@ -1,5 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import {
+  collection,
+  doc,
+  getDoc,
+  runTransaction,
+  serverTimestamp,
+} from "firebase/firestore";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -15,7 +22,8 @@ import {
   View,
 } from "react-native";
 
-import { createRideBooking, RidePayment } from "./rideBookingLib";
+import { auth, db } from "../../firebase";
+import { RIDE_CATEGORY, RidePayment } from "./rideBookingLib";
 import { detectCurrentLocation, GeoPoint } from "./work-errand/workErrandLib";
 
 type Method = "cash" | "card" | null;
@@ -33,6 +41,9 @@ const getLast3 = (value: string) => {
 export default function RidePaymentScreen() {
   const params = useLocalSearchParams();
 
+  const category = String(params.category || "personal");
+  const isSchool = category === "school";
+
   const driverId = String(params.driverId || "");
   const driverName = String(params.driverName || "Driver");
   const driverPhone = String(params.driverPhone || "");
@@ -46,8 +57,8 @@ export default function RidePaymentScreen() {
   const routeId = String(params.routeId || "");
   const from = String(params.from || "");
   const to = String(params.to || "");
-  const date = String(params.date || "");
-  const day = String(params.day || "");
+  const date = String(params.date || params.tripDate || "");
+  const day = String(params.day || params.tripDay || "");
   const time = String(params.time || "");
   const seats = num(params.seats);
   const price = num(params.price);
@@ -74,6 +85,176 @@ export default function RidePaymentScreen() {
       return null;
     }
   };
+
+  const getPassengerProfile = async () => {
+    const user = auth.currentUser;
+
+    if (!user) {
+      throw new Error("Please login first.");
+    }
+
+    let passengerName = user.displayName || "Passenger";
+    let passengerPhone = "";
+
+    try {
+      const userSnap = await getDoc(doc(db, "users", user.uid));
+
+      if (userSnap.exists()) {
+        const data = userSnap.data();
+        passengerName = data.name || passengerName;
+        passengerPhone = data.phone || "";
+      }
+    } catch {
+      // keep auth fallback values
+    }
+
+    return { user, passengerName, passengerPhone };
+  };
+
+const createBookingAfterPayment = async (
+  pickup: GeoPoint | null,
+  payment: RidePayment,
+) => {
+  const { user, passengerName, passengerPhone } = await getPassengerProfile();
+
+  if (!routeId) {
+    throw new Error(
+      "Missing trip id. Please go back and choose the driver again.",
+    );
+  }
+
+  const bookingRef = doc(collection(db, "bookings"));
+  const routeRef = doc(db, "driverRoutes", routeId);
+
+  const paymentFields =
+    payment.method === "cash"
+      ? {
+          paymentMethod: "cash",
+          paymentStatus: "cash_selected",
+          cardLast4: null,
+        }
+      : {
+          paymentMethod: "card",
+          paymentStatus: "mock_paid",
+          cardLast4: payment.cardLast4.slice(-4),
+        };
+
+  const cleanPickup =
+    pickup &&
+    typeof pickup.latitude === "number" &&
+    typeof pickup.longitude === "number"
+      ? {
+          latitude: pickup.latitude,
+          longitude: pickup.longitude,
+          address: pickup.address || "",
+        }
+      : null;
+
+  await runTransaction(db, async (transaction) => {
+    const routeSnap = await transaction.get(routeRef);
+
+    if (!routeSnap.exists()) {
+      throw new Error("This trip is no longer available.");
+    }
+
+    const routeData = routeSnap.data();
+
+    const alreadyBooked =
+      routeData.status === "booked" ||
+      routeData.status === "completed" ||
+      routeData.tripStatus === "completed" ||
+      routeData.isBooked === true ||
+      routeData.available === false ||
+      !!routeData.bookingId ||
+      !!routeData.bookedBy;
+
+    if (alreadyBooked) {
+      throw new Error("This trip was already booked by someone else.");
+    }
+
+    transaction.set(bookingRef, {
+      category: isSchool ? "school" : RIDE_CATEGORY,
+
+      passengerId: user.uid,
+      passengerName,
+      passengerPhone,
+      passengerEmail: user.email || "",
+
+      driverId: driverId || null,
+      driverName: driverName || "Driver",
+      driverPhone: driverPhone || "",
+
+      driverCar,
+      driverCarColor,
+      driverCarPlateLast3,
+
+      routeId,
+      from,
+      to,
+      date,
+      day,
+      time,
+
+      seats: seats ?? null,
+      price: price ?? null,
+
+      pickup: cleanPickup,
+      pickupCoords: cleanPickup
+        ? {
+            latitude: cleanPickup.latitude,
+            longitude: cleanPickup.longitude,
+          }
+        : null,
+      passengerPickupLocation: cleanPickup,
+
+      ...paymentFields,
+
+      // مهم جدًا:
+      // بعد الدفع الرحلة تكون محجوزة فقط، مش منتهية.
+      status: isSchool ? "ongoing" : "booked",
+      tripStatus: "booked",
+      trackingEnabled: false,
+
+      driverLocation: null,
+      driverLocationUpdatedAt: null,
+
+      // مهم جدًا:
+      // التقييم ممنوع يطلع بعد الدفع.
+      // يصير true فقط لما السائق يكبس End Trip.
+      needsPassengerRating: false,
+      ratingSubmitted: false,
+      rating: null,
+      reviewComment: "",
+      ratedAt: null,
+
+      finishedByDriver: false,
+
+      roleType: "passenger_booking",
+      deletedForPassenger: false,
+      deletedForDriver: false,
+
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+
+      startedAt: null,
+      arrivedAt: null,
+      completedAt: null,
+    });
+
+    transaction.update(routeRef, {
+      status: "booked",
+      tripStatus: "booked",
+      isBooked: true,
+      available: false,
+      bookingId: bookingRef.id,
+      bookedBy: user.uid,
+      bookedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  return bookingRef.id;
+};
 
   const handleContinue = async () => {
     if (!method) {
@@ -113,33 +294,12 @@ export default function RidePaymentScreen() {
 
     try {
       setProcessing(true);
-
       const pickup = await resolvePickup();
-
-      const bookingId = await createRideBooking({
-        driverId,
-        driverName,
-        driverPhone,
-
-        driverCar,
-        driverCarColor,
-        driverCarPlateLast3,
-
-        routeId,
-        from,
-        to,
-        date,
-        day,
-        time,
-        seats,
-        price,
-        pickup,
-        payment,
-      });
+      await createBookingAfterPayment(pickup, payment);
 
       router.replace({
-        pathname: "/booking/ride-success",
-        params: { bookingId },
+        pathname: "/(tabs)/bookings",
+        params: { tab: "passenger" },
       } as any);
     } catch (error: any) {
       Alert.alert("Error", error?.message || "Could not confirm the booking.");
@@ -164,7 +324,9 @@ export default function RidePaymentScreen() {
           <Text style={styles.subtitle}>Confirm and pay for your ride</Text>
 
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryTitle}>Personal Ride</Text>
+            <Text style={styles.summaryTitle}>
+              {isSchool ? "School Ride" : "Personal Ride"}
+            </Text>
 
             <View style={styles.summaryRow}>
               <Ionicons name="person-outline" size={15} color="#7C5F46" />
@@ -357,9 +519,7 @@ export default function RidePaymentScreen() {
                   <TextInput
                     style={styles.input}
                     value={cvv}
-                    onChangeText={(t) =>
-                      setCvv(t.replace(/\D/g, "").slice(0, 4))
-                    }
+                    onChangeText={(t) => setCvv(t.replace(/\D/g, "").slice(0, 4))}
                     placeholder="123"
                     placeholderTextColor="#9B7A68"
                     keyboardType="number-pad"
