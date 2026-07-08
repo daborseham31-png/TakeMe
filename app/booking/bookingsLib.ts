@@ -52,7 +52,10 @@ export type DriverLiveLocation = {
   speed?: number | null;
 };
 
+// Live tracking is active from the moment the driver arrives for pickup
+// until Finish Trip (there is no separate "Start Trip" step anymore).
 export const ACTIVE_TRACKING_STATUSES: TripTrackingStatus[] = [
+  "arrived_pickup",
   "in_progress",
 ];
 
@@ -239,7 +242,7 @@ export const updatePassengerBookingTripStatus = async (
 
   if (tripStatus === "arrived_pickup") {
     payload.status = "arrived";
-    payload.trackingEnabled = false;
+    payload.trackingEnabled = true;
     payload.needsPassengerRating = false;
     payload.arrivedPickupAt = serverTimestamp();
   }

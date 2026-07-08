@@ -6,7 +6,30 @@ import React, { useEffect, useState } from "react";
 import { View } from "react-native";
 
 import { auth, db } from "../../firebase";
-import { isActiveRideStatus, RIDE_CATEGORY } from "../booking/rideBookingLib";
+import { RIDE_CATEGORY } from "../booking/rideBookingLib";
+
+const RIDE_LIKE_CATEGORIES = [RIDE_CATEGORY, "school"];
+
+// A booking still needs attention as a passenger while the trip hasn't been
+// finished by the driver yet, or the trip finished but the passenger hasn't
+// rated the driver yet.
+const passengerNeedsAttention = (data: any) => {
+  if (!RIDE_LIKE_CATEGORIES.includes(data.category)) return false;
+
+  const isDone = data.status === "completed" || data.tripStatus === "completed";
+  const ratingPending =
+    data.needsPassengerRating === true && data.ratingSubmitted !== true;
+
+  return !isDone || ratingPending;
+};
+
+// A booking still needs attention as a driver while Finish Trip hasn't been
+// pressed yet.
+const driverNeedsAttention = (data: any) => {
+  if (!RIDE_LIKE_CATEGORIES.includes(data.category)) return false;
+
+  return data.status !== "completed" && data.tripStatus !== "completed";
+};
 
 // Small green dot shown over the My Bookings tab icon while the passenger has an
 // active (unfinished) personal-ride booking.
@@ -42,40 +65,52 @@ function BookingsTabIcon({
 }
 
 export default function TabLayout() {
-  const [hasActiveRide, setHasActiveRide] = useState(false);
+  const [hasPassengerAttention, setHasPassengerAttention] = useState(false);
+  const [hasDriverAttention, setHasDriverAttention] = useState(false);
+  const hasActiveRide = hasPassengerAttention || hasDriverAttention;
 
-  // Live listener: any of the passenger's bookings still in booked/on_the_way/
-  // arrived means an active ride the passenger hasn't finished yet.
+  // Live listeners: passenger side stays lit until the trip is rated;
+  // driver side stays lit until the driver presses Finish Trip.
   useEffect(() => {
-    let unsubBookings: (() => void) | null = null;
+    let unsubPassenger: (() => void) | null = null;
+    let unsubDriver: (() => void) | null = null;
 
     const unsubAuth = onAuthStateChanged(auth, (user) => {
-      unsubBookings?.();
-      unsubBookings = null;
+      unsubPassenger?.();
+      unsubDriver?.();
+      unsubPassenger = null;
+      unsubDriver = null;
 
       if (!user) {
-        setHasActiveRide(false);
+        setHasPassengerAttention(false);
+        setHasDriverAttention(false);
         return;
       }
 
-      unsubBookings = onSnapshot(
+      unsubPassenger = onSnapshot(
         query(collection(db, "bookings"), where("passengerId", "==", user.uid)),
         (snap) => {
-          const active = snap.docs.some((d) => {
-            const data = d.data();
-            return (
-              data.category === RIDE_CATEGORY &&
-              isActiveRideStatus(data.status)
-            );
-          });
-          setHasActiveRide(active);
+          setHasPassengerAttention(
+            snap.docs.some((d) => passengerNeedsAttention(d.data())),
+          );
         },
-        () => setHasActiveRide(false),
+        () => setHasPassengerAttention(false),
+      );
+
+      unsubDriver = onSnapshot(
+        query(collection(db, "bookings"), where("driverId", "==", user.uid)),
+        (snap) => {
+          setHasDriverAttention(
+            snap.docs.some((d) => driverNeedsAttention(d.data())),
+          );
+        },
+        () => setHasDriverAttention(false),
       );
     });
 
     return () => {
-      unsubBookings?.();
+      unsubPassenger?.();
+      unsubDriver?.();
       unsubAuth();
     };
   }, []);

@@ -138,8 +138,7 @@ export default function LiveTrackingScreen() {
     );
   }
 
-  const trackingActive =
-    booking.trackingEnabled === true && booking.tripStatus === "in_progress";
+  const trackingActive = booking.trackingEnabled === true;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -266,7 +265,8 @@ export default function LiveTrackingScreen() {
             </Text>
           ) : (
             <Text style={styles.updatedText}>
-              The driver location will appear after Start Trip.
+              The driver location will appear once the driver arrives for
+              pickup.
             </Text>
           )}
         </View>
