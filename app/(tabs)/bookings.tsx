@@ -38,7 +38,7 @@ import {
 } from "../booking/bookingsLib";
 import {
   arriveRide,
-  completeRideWithReview,
+  finishRide,
   hideRideBookingForDriver,
   hideRideBookingForPassenger,
   normalizeRideBooking,
@@ -47,6 +47,7 @@ import {
   RideBooking,
   RideStatus,
   startRide,
+  submitRideRating,
 } from "../booking/rideBookingLib";
 import {
   acceptRequest,
@@ -449,8 +450,14 @@ const bookedRouteIds = useMemo(() => {
     }
   });
 
+  driverRides.forEach((r) => {
+    if (r.routeId) {
+      ids.add(r.routeId);
+    }
+  });
+
   return ids;
-}, [driverRoadside]);
+}, [driverRoadside, driverRides]);
 
 const driverTrips = useMemo(
   () =>
@@ -589,7 +596,7 @@ const driverTrips = useMemo(
   };
 
   const canShowLiveTracking = (item: any) => {
-    return item?.trackingEnabled === true && item?.tripStatus === "in_progress";
+    return item?.trackingEnabled === true && item?.tripStatus === "arrived_pickup";
   };
 
   const getBookingTripLabel = (b: BookingItem) => {
@@ -652,7 +659,7 @@ const driverTrips = useMemo(
           runApp(ride.id, () =>
             viewer === "passenger"
               ? hideRideBookingForPassenger(ride.id)
-              : hideRideBookingForDriver(ride.id),
+              : hideRideBookingForDriver(ride.id, ride.routeId),
           ),
       },
     ]);
@@ -897,7 +904,10 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
 
   const handleRideArrived = (r: RideBooking) =>
     runApp(r.id, () => arriveRide(r.id, r));
-    const bookingNeedsRating = (b: BookingItem) => {
+
+  const handleRideFinish = (r: RideBooking) =>
+    runApp(r.id, () => finishRide(r.id, r));
+    const bookingNeedsRating = (b: BookingItem | RideBooking) => {
     const item: any = b;
 
     if (ratedSchoolBookingIds.includes(b.id)) {
@@ -1055,16 +1065,36 @@ const submitRating = async () => {
     }
 
     if (ratingBooking) {
-      await completeRideWithReview(
-        ratingBooking.id,
-        ratingBooking,
-        ratingStars,
-        ratingComment,
+      const bookingToRate = ratingBooking;
+      const ratedId = bookingToRate.id;
+      const stars = ratingStars;
+      const comment = ratingComment.trim();
+
+      // Close the rating popup immediately and block it from reopening
+      // while Firestore is saving the rating.
+      setRatedSchoolBookingIds((prev) =>
+        prev.includes(ratedId) ? prev : [...prev, ratedId],
+      );
+
+      setPassengerRides((prev) =>
+        prev.map((r) =>
+          r.id === ratedId
+            ? {
+                ...r,
+                rating: stars,
+                reviewComment: comment,
+                ratingSubmitted: true,
+                needsPassengerRating: false,
+              }
+            : r,
+        ),
       );
 
       setRatingBooking(null);
       setRatingStars(0);
       setRatingComment("");
+
+      await submitRideRating(bookingToRate.id, bookingToRate, stars, comment);
     }
   } catch (error: any) {
     Alert.alert("Error", error?.message || "Could not submit your rating.");
@@ -1077,6 +1107,13 @@ useEffect(() => {
   if (tab !== "passenger") return;
   if (ratingBooking || schoolRatingBooking || ratingBusy) return;
 
+  const pendingRideRating = passengerRides.find((r) => bookingNeedsRating(r));
+
+  if (pendingRideRating) {
+    openRatingModal(pendingRideRating);
+    return;
+  }
+
   const pendingSchoolRating = bookings.find((b) => bookingNeedsRating(b));
 
   if (pendingSchoolRating) {
@@ -1084,6 +1121,7 @@ useEffect(() => {
   }
 }, [
   bookings,
+  passengerRides,
   tab,
   ratingBooking,
   schoolRatingBooking,
@@ -1174,7 +1212,6 @@ useEffect(() => {
     const meta = getCategoryMeta(RIDE_CATEGORY);
     const otherName = viewer === "passenger" ? r.driverName : r.passengerName;
     const busy = busyId === r.id;
-    const canFinish = r.status === "on_the_way" || r.status === "arrived";
 
     return (
       <View
@@ -1278,17 +1315,19 @@ useEffect(() => {
                 </Pressable>
               ) : null}
 
-              {canFinish ? (
-              <Pressable
-                style={styles.primaryButton}
-                onPress={() => openRatingModal(r)}
-              >
-                <Ionicons name="checkmark-done" size={17} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>Finish Trip</Text>
-              </Pressable>
-            ) : null}
+              {r.status === "completed" && bookingNeedsRating(r) ? (
+                <Pressable
+                  style={styles.primaryButton}
+                  onPress={() => openRatingModal(r)}
+                >
+                  <Ionicons name="star-outline" size={17} color="#FFFFFF" />
+                  <Text style={styles.primaryButtonText}>Rate Driver</Text>
+                </Pressable>
+              ) : null}
 
-            {r.status === "completed" && typeof r.rating === "number" ? (
+            {r.status === "completed" &&
+            !bookingNeedsRating(r) &&
+            typeof r.rating === "number" ? (
               <Pressable
                 style={styles.primaryButton}
                 onPress={() => openRideRebook(r)}
@@ -1332,12 +1371,14 @@ useEffect(() => {
             ) : null}
 
             {r.status === "arrived" ? (
-              <View style={styles.waitBanner}>
-                <Ionicons name="time-outline" size={16} color="#B86115" />
-                <Text style={styles.waitText}>
-                  Arrived — waiting for passenger to finish the trip
-                </Text>
-              </View>
+              <Pressable
+                style={styles.primaryButton}
+                onPress={() => handleRideFinish(r)}
+                disabled={busy}
+              >
+                <Ionicons name="checkmark-done" size={17} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>Finish Trip</Text>
+              </Pressable>
             ) : null}
           </>
         )}

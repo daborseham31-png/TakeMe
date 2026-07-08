@@ -146,6 +146,8 @@ export const detectCurrentLocation = async (): Promise<GeoPoint> => {
   return { latitude, longitude, address };
 };
 
+export type NotificationTab = "passenger" | "driver";
+
 export type NotifyInput = {
   receiverId: string;
   senderId?: string;
@@ -153,13 +155,22 @@ export type NotifyInput = {
   title: string;
   message: string;
   applicationId?: string;
+  bookingId?: string;
   kind?: WorkErrandKind;
   category?: string;
   status?: string;
+  // Which side of "My Bookings" tapping this notification should open.
+  targetTab?: NotificationTab;
+  roleTarget?: NotificationTab;
+  openBookingTab?: NotificationTab;
 };
 
 export const notify = async (input: NotifyInput) => {
   if (!input.receiverId) return;
+
+  const tab =
+    input.targetTab || input.roleTarget || input.openBookingTab || null;
+
   try {
     await addDoc(collection(db, "notifications"), {
       // userId is kept for backwards-compatible querying; receiverId is the
@@ -172,9 +183,13 @@ export const notify = async (input: NotifyInput) => {
       message: input.message,
       applicationId: input.applicationId || null,
       relatedId: input.applicationId || null,
+      bookingId: input.bookingId || input.applicationId || null,
       kind: input.kind || null,
       category: input.category || null,
       status: input.status || null,
+      targetTab: tab,
+      roleTarget: tab,
+      openBookingTab: tab,
       read: false,
       deleted: false,
       createdAt: serverTimestamp(),

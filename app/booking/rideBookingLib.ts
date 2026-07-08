@@ -21,11 +21,13 @@ import {
   collection,
   doc,
   getDoc,
+  runTransaction,
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
+import { DriverLiveLocation, TripTrackingStatus } from "./bookingsLib";
 import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
 export const RIDE_CATEGORY = "personal_ride";
@@ -192,8 +194,8 @@ export const createRideBooking = async (
       bookingId: ref.id,
       category: RIDE_CATEGORY,
       status: "booked",
-      openBookingTab: "driver",
-    } as any);
+      targetTab: "driver",
+    });
   }
 
   return ref.id;
@@ -210,20 +212,36 @@ export const hideRideBookingForPassenger = async (bookingId: string) => {
   });
 };
 
-export const hideRideBookingForDriver = async (bookingId: string) => {
+export const hideRideBookingForDriver = async (
+  bookingId: string,
+  routeId?: string | null,
+) => {
   await updateDoc(doc(db, "bookings", bookingId), {
     deletedForDriver: true,
     updatedAt: serverTimestamp(),
   });
+
+  // Also hide the original driverRoutes card so it doesn't reappear once the
+  // driver removes the matching booking card.
+  if (routeId) {
+    await updateDoc(doc(db, "driverRoutes", routeId), {
+      deletedForDriver: true,
+      updatedAt: serverTimestamp(),
+    }).catch(() => {});
+  }
 };
 
 // ---------------------------------------------------------------------------
-// Driver: start → arrive. Passenger: finish + rate.
+// Driver: start → arrive → finish. Passenger: rate after Finish Trip.
 // ---------------------------------------------------------------------------
 
 export const startRide = async (bookingId: string, booking: RideBooking) => {
   await updateDoc(doc(db, "bookings", bookingId), {
     status: "on_the_way",
+    tripStatus: "driver_on_way" as TripTrackingStatus,
+    trackingEnabled: false,
+    needsPassengerRating: false,
+    driverOnWayAt: serverTimestamp(),
     startedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -232,18 +250,22 @@ export const startRide = async (bookingId: string, booking: RideBooking) => {
     receiverId: booking.passengerId,
     type: "ride_on_the_way",
     title: "Driver on the way",
-    message: "Your driver is on the way.",
+    message: "Your driver is on the way",
     applicationId: bookingId,
     bookingId,
     category: RIDE_CATEGORY,
     status: "on_the_way",
-    openBookingTab: "passenger",
-  } as any);
+    targetTab: "passenger",
+  });
 };
 
 export const arriveRide = async (bookingId: string, booking: RideBooking) => {
   await updateDoc(doc(db, "bookings", bookingId), {
     status: "arrived",
+    tripStatus: "arrived_pickup" as TripTrackingStatus,
+    trackingEnabled: true,
+    needsPassengerRating: false,
+    arrivedPickupAt: serverTimestamp(),
     arrivedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -252,16 +274,45 @@ export const arriveRide = async (bookingId: string, booking: RideBooking) => {
     receiverId: booking.passengerId,
     type: "ride_arrived",
     title: "Driver arrived",
-    message: "Your driver has arrived.",
+    message: "Your driver has arrived",
     applicationId: bookingId,
     bookingId,
     category: RIDE_CATEGORY,
     status: "arrived",
-    openBookingTab: "passenger",
-  } as any);
+    targetTab: "passenger",
+  });
 };
 
-export const completeRideWithReview = async (
+// Driver: Finish Trip. Marks the ride completed and asks the passenger to
+// rate — the rating popup must never appear before this runs.
+export const finishRide = async (bookingId: string, booking: RideBooking) => {
+  await updateDoc(doc(db, "bookings", bookingId), {
+    status: "completed",
+    tripStatus: "completed" as TripTrackingStatus,
+    trackingEnabled: false,
+    finishedByDriver: true,
+    needsPassengerRating: true,
+    ratingSubmitted: false,
+    completedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await notify({
+    receiverId: booking.passengerId,
+    type: "ride_trip_completed",
+    title: "Trip completed",
+    message: "Your trip is completed. Please rate your driver.",
+    applicationId: bookingId,
+    bookingId,
+    category: RIDE_CATEGORY,
+    status: "completed",
+    targetTab: "passenger",
+  });
+};
+
+// Passenger: submit the post-trip rating. Closes out needsPassengerRating so
+// the popup never reopens for this booking.
+export const submitRideRating = async (
   bookingId: string,
   booking: RideBooking,
   rating: number,
@@ -269,60 +320,83 @@ export const completeRideWithReview = async (
 ) => {
   const cleanComment = comment.trim();
 
-  await updateDoc(doc(db, "bookings", bookingId), {
-    status: "completed",
-    completedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    rating,
-    reviewComment: cleanComment || null,
-  });
+  if (!booking.driverId) {
+    await updateDoc(doc(db, "bookings", bookingId), {
+      rating,
+      reviewComment: cleanComment || null,
+      ratingSubmitted: true,
+      needsPassengerRating: false,
+      ratedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return;
+  }
 
-  try {
-    await addDoc(collection(db, "driverReviews"), {
+  const bookingRef = doc(db, "bookings", bookingId);
+  const driverRef = doc(db, "users", booking.driverId);
+  const reviewRef = doc(collection(db, "driverReviews"));
+
+  await runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+
+    if (!bookingSnap.exists()) {
+      throw new Error("Booking not found.");
+    }
+
+    const bookingData: any = bookingSnap.data();
+
+    if (bookingData.ratingSubmitted === true) {
+      return;
+    }
+
+    const driverSnap = await transaction.get(driverRef);
+    const driverData: any = driverSnap.exists() ? driverSnap.data() : {};
+
+    const oldCount = Number(driverData.ratingCount) || 0;
+    const oldSum =
+      Number(driverData.ratingSum) ||
+      Number(driverData.ratingAverage || 0) * oldCount;
+
+    const newCount = oldCount + 1;
+    const newSum = oldSum + rating;
+    const newAverage = Number((newSum / newCount).toFixed(2));
+
+    transaction.set(reviewRef, {
       bookingId,
-      driverId: booking.driverId || null,
+      driverId: booking.driverId,
+      driverName: booking.driverName || "Driver",
       passengerId: booking.passengerId || null,
       passengerName: booking.passengerName || "Passenger",
       rating,
       comment: cleanComment,
       category: RIDE_CATEGORY,
+      from: booking.from || "",
+      to: booking.to || "",
+      date: booking.date || "",
+      time: booking.time || "",
       createdAt: serverTimestamp(),
     });
-  } catch {
-    // لا توقف إغلاق الرحلة لو التقييم فشل
-  }
 
-  if (booking.driverId) {
-    try {
-      const driverRef = doc(db, "users", booking.driverId);
-      const snap = await getDoc(driverRef);
-      const data = snap.exists() ? snap.data() : {};
+    transaction.update(bookingRef, {
+      rating,
+      reviewComment: cleanComment || null,
+      ratingSubmitted: true,
+      needsPassengerRating: false,
+      ratedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
 
-      const prevAvg = Number(data.ratingAverage) || 0;
-      const prevCount = Number(data.ratingCount) || 0;
-      const newCount = prevCount + 1;
-      const newAvg = (prevAvg * prevCount + rating) / newCount;
-
-      await updateDoc(driverRef, {
-        ratingAverage: Math.round(newAvg * 10) / 10,
+    transaction.set(
+      driverRef,
+      {
         ratingCount: newCount,
-      });
-    } catch {
-      // best effort
-    }
-
-    await notify({
-      receiverId: booking.driverId,
-      type: "ride_completed",
-      title: "Ride completed",
-      message: `${booking.passengerName} completed the ride and rated you ${rating}★.`,
-      applicationId: bookingId,
-      bookingId,
-      category: RIDE_CATEGORY,
-      status: "completed",
-      openBookingTab: "driver",
-    } as any);
-  }
+        ratingSum: newSum,
+        ratingAverage: newAverage,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  });
 };
 
 // ---------------------------------------------------------------------------
@@ -364,6 +438,14 @@ export type RideBooking = {
   rating: number | null;
   reviewComment: string | null;
 
+  // Live tracking + rating-gate fields (shared shape with school bookings).
+  tripStatus: TripTrackingStatus;
+  trackingEnabled: boolean;
+  driverLocation: DriverLiveLocation | null;
+  needsPassengerRating: boolean;
+  ratingSubmitted: boolean;
+  finishedByDriver: boolean;
+
   deletedForPassenger: boolean;
   deletedForDriver: boolean;
 
@@ -384,6 +466,37 @@ const normalizeGeo = (raw: any): GeoPoint | null => {
     latitude,
     longitude,
     address: raw.address || "",
+  };
+};
+
+const normalizeTripStatus = (value: any): TripTrackingStatus => {
+  if (
+    value === "booked" ||
+    value === "driver_on_way" ||
+    value === "arrived_pickup" ||
+    value === "in_progress" ||
+    value === "completed"
+  ) {
+    return value;
+  }
+
+  return "booked";
+};
+
+const normalizeDriverLocation = (value: any): DriverLiveLocation | null => {
+  const latitude = Number(value?.latitude);
+  const longitude = Number(value?.longitude);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+    accuracy: value?.accuracy ?? null,
+    heading: value?.heading ?? null,
+    speed: value?.speed ?? null,
   };
 };
 
@@ -435,6 +548,13 @@ export const normalizeRideBooking = (id: string, data: any): RideBooking => {
 
     rating: asNumber(data.rating),
     reviewComment: data.reviewComment || null,
+
+    tripStatus: normalizeTripStatus(data.tripStatus || data.status),
+    trackingEnabled: !!data.trackingEnabled,
+    driverLocation: normalizeDriverLocation(data.driverLocation),
+    needsPassengerRating: data.needsPassengerRating === true,
+    ratingSubmitted: data.ratingSubmitted === true,
+    finishedByDriver: data.finishedByDriver === true,
 
     deletedForPassenger: data.deletedForPassenger === true,
     deletedForDriver: data.deletedForDriver === true,

@@ -18,6 +18,7 @@ import MapView, { Marker } from "react-native-maps";
 
 import { db } from "../../firebase";
 import { normalizeRideBooking, RideBooking } from "../booking/rideBookingLib";
+import { notify } from "../booking/work-errand/workErrandLib";
 
 type TripStatus =
   | "booked"
@@ -33,9 +34,10 @@ const getTripStatus = (booking: any): TripStatus => {
   return "booked";
 };
 
-// Live tracking يظهر للراكب فقط بعد ما الولد يطلع بالسيارة ويكبس السائق Start Trip.
+// Live tracking starts as soon as the driver arrives for pickup (there is no
+// separate "Start Trip" step) and stays on until Finish Trip.
 const shouldTrackDriver = (status: TripStatus) => {
-  return status === "in_progress";
+  return status === "arrived_pickup";
 };
 
 const getDriverLocation = (booking: any) => {
@@ -126,8 +128,9 @@ useEffect(() => {
 
   const tripStatus = getTripStatus(booking);
 
-  // التتبع الحقيقي يشتغل بس بعد Start Trip
-  if (tripStatus !== "in_progress") return;
+  // Live location updates run while the driver has arrived for pickup, up
+  // until Finish Trip.
+  if (tripStatus !== "arrived_pickup") return;
 
   let subscription: Location.LocationSubscription | null = null;
   let cancelled = false;
@@ -184,7 +187,7 @@ useEffect(() => {
 }, [id, booking]);
 
   const updateTripStatus = async (nextStatus: TripStatus) => {
-    if (!id) return;
+    if (!id || !booking) return;
 
     const payload: any = {
       tripStatus: nextStatus,
@@ -192,7 +195,7 @@ useEffect(() => {
     };
 
     if (nextStatus === "driver_on_way") {
-      payload.status = "ongoing";
+      payload.status = "on_the_way";
       payload.trackingEnabled = false;
       payload.needsPassengerRating = false;
       payload.driverOnWayAt = serverTimestamp();
@@ -200,16 +203,9 @@ useEffect(() => {
 
     if (nextStatus === "arrived_pickup") {
       payload.status = "arrived";
-      payload.trackingEnabled = false;
-      payload.needsPassengerRating = false;
-      payload.arrivedPickupAt = serverTimestamp();
-    }
-
-    if (nextStatus === "in_progress") {
-      payload.status = "ongoing";
       payload.trackingEnabled = true;
       payload.needsPassengerRating = false;
-      payload.tripStartedAt = serverTimestamp();
+      payload.arrivedPickupAt = serverTimestamp();
     }
 
     if (nextStatus === "completed") {
@@ -219,7 +215,7 @@ useEffect(() => {
       payload.completedAt = serverTimestamp();
       payload.finishedByDriver = true;
 
-      // التقييم يظهر عند المسافر فقط بعد End Trip.
+      // The rating popup only appears for the passenger after Finish Trip.
       payload.needsPassengerRating = true;
       payload.ratingSubmitted = false;
       payload.rating = null;
@@ -239,8 +235,53 @@ useEffect(() => {
       });
     }
 
-    if (nextStatus === "in_progress") {
+    if (nextStatus === "arrived_pickup") {
       await updateDriverLocationOnce();
+    }
+
+    const passengerId = (booking as any).passengerId;
+    const category = (booking as any).category || "personal_ride";
+
+    if (passengerId && nextStatus === "driver_on_way") {
+      await notify({
+        receiverId: passengerId,
+        type: "ride_on_the_way",
+        title: "Driver on the way",
+        message: "Your driver is on the way",
+        applicationId: id,
+        bookingId: id,
+        category,
+        status: "on_the_way",
+        targetTab: "passenger",
+      });
+    }
+
+    if (passengerId && nextStatus === "arrived_pickup") {
+      await notify({
+        receiverId: passengerId,
+        type: "ride_arrived",
+        title: "Driver arrived",
+        message: "Your driver has arrived",
+        applicationId: id,
+        bookingId: id,
+        category,
+        status: "arrived",
+        targetTab: "passenger",
+      });
+    }
+
+    if (passengerId && nextStatus === "completed") {
+      await notify({
+        receiverId: passengerId,
+        type: "ride_trip_completed",
+        title: "Trip completed",
+        message: "Your trip is completed. Please rate your driver.",
+        applicationId: id,
+        bookingId: id,
+        category,
+        status: "completed",
+        targetTab: "passenger",
+      });
     }
   };
 
@@ -312,18 +353,19 @@ useEffect(() => {
     ]);
   };
 
-  const handleStartTrip = () => {
+  const handleFinishTrip = () => {
     Alert.alert(
-      "Start trip",
-      "Start the trip after the passenger entered the car?",
+      "Finish trip",
+      "Finish this trip and ask the passenger to rate you?",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Start trip",
+          text: "Finish trip",
+          style: "destructive",
           onPress: async () => {
             try {
               setBusy(true);
-              await updateTripStatus("in_progress");
+              await updateTripStatus("completed");
             } catch (error: any) {
               Alert.alert("Error", error?.message || "Could not update.");
             } finally {
@@ -333,26 +375,6 @@ useEffect(() => {
         },
       ],
     );
-  };
-
-  const handleEndTrip = () => {
-    Alert.alert("End trip", "End this trip and ask passenger to rate you?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "End trip",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            setBusy(true);
-            await updateTripStatus("completed");
-          } catch (error: any) {
-            Alert.alert("Error", error?.message || "Could not update.");
-          } finally {
-            setBusy(false);
-          }
-        },
-      },
-    ]);
   };
 
   if (loading) {
@@ -415,7 +437,6 @@ useEffect(() => {
             {tripStatus === "booked" && "Booked - not started yet"}
             {tripStatus === "driver_on_way" && "Driver on the way to pickup"}
             {tripStatus === "arrived_pickup" && "Arrived at pickup"}
-            {tripStatus === "in_progress" && "Trip in progress"}
             {tripStatus === "completed" && "Trip completed"}
           </Text>
         </View>
@@ -577,29 +598,8 @@ useEffect(() => {
 
             {tripStatus === "arrived_pickup" ? (
               <Pressable
-                style={[styles.actionButton, busy && styles.disabled]}
-                onPress={handleStartTrip}
-                disabled={busy}
-              >
-                {busy ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons
-                      name="play-circle-outline"
-                      size={20}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.actionText}>Start Trip</Text>
-                  </>
-                )}
-              </Pressable>
-            ) : null}
-
-            {tripStatus === "in_progress" ? (
-              <Pressable
                 style={[styles.endButton, busy && styles.disabled]}
-                onPress={handleEndTrip}
+                onPress={handleFinishTrip}
                 disabled={busy}
               >
                 {busy ? (
@@ -611,7 +611,7 @@ useEffect(() => {
                       size={20}
                       color="#FFFFFF"
                     />
-                    <Text style={styles.actionText}>End Trip</Text>
+                    <Text style={styles.actionText}>Finish Trip</Text>
                   </>
                 )}
               </Pressable>

@@ -24,7 +24,11 @@ import {
 
 import { auth, db } from "../../firebase";
 import { RIDE_CATEGORY, RidePayment } from "./rideBookingLib";
-import { detectCurrentLocation, GeoPoint } from "./work-errand/workErrandLib";
+import {
+  detectCurrentLocation,
+  GeoPoint,
+  notify,
+} from "./work-errand/workErrandLib";
 
 type Method = "cash" | "card" | null;
 
@@ -252,6 +256,21 @@ const createBookingAfterPayment = async (
       updatedAt: serverTimestamp(),
     });
   });
+
+  if (driverId) {
+    await notify({
+      receiverId: driverId,
+      senderId: user.uid,
+      type: isSchool ? "school_ride_booking" : "personal_ride_booking",
+      title: "New ride booking",
+      message: `${passengerName} booked a ride with you`,
+      applicationId: bookingRef.id,
+      bookingId: bookingRef.id,
+      category: isSchool ? "school" : RIDE_CATEGORY,
+      status: "booked",
+      targetTab: "driver",
+    });
+  }
 
   return bookingRef.id;
 };

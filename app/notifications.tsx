@@ -37,7 +37,10 @@ type Notification = {
 
   kind?: "work" | "errand" | null;
 
-  // إذا موجود بالفايربيس بنستخدمه، وإذا مش موجود بنخمن من type
+  // Canonical field for routing. openBookingTab/roleTarget are kept for
+  // backwards compatibility with older notification documents.
+  targetTab?: BookingTab | null;
+  roleTarget?: BookingTab | null;
   openBookingTab?: BookingTab | null;
 
   read?: boolean;
@@ -56,9 +59,11 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
   cancelled: "ban-outline",
 
   personal_ride_booking: "car-sport-outline",
+  school_ride_booking: "school-outline",
   ride_on_the_way: "car-outline",
   ride_arrived: "location-outline",
   ride_completed: "trophy-outline",
+  ride_trip_completed: "star-outline",
 };
 
 export default function NotificationsScreen() {
@@ -109,6 +114,14 @@ export default function NotificationsScreen() {
     n.type === "request_accepted" && n.kind === "errand";
 
   const getBookingTabFromNotification = (n: Notification): BookingTab => {
+    if (n.targetTab === "driver" || n.targetTab === "passenger") {
+      return n.targetTab;
+    }
+
+    if (n.roleTarget === "driver" || n.roleTarget === "passenger") {
+      return n.roleTarget;
+    }
+
     if (n.openBookingTab === "driver" || n.openBookingTab === "passenger") {
       return n.openBookingTab;
     }
@@ -118,6 +131,7 @@ export default function NotificationsScreen() {
       "request_received",
       "payment_confirmed",
       "personal_ride_booking",
+      "school_ride_booking",
       "ride_completed",
     ];
 
@@ -135,6 +149,7 @@ export default function NotificationsScreen() {
       "cancelled",
       "ride_on_the_way",
       "ride_arrived",
+      "ride_trip_completed",
     ];
 
     if (passengerTypes.includes(n.type || "")) {
