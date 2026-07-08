@@ -19,8 +19,8 @@ import {
   arriveJob,
   collectionFor,
   finishJob,
-  NormalizedApplication,
   normalizeApplication,
+  NormalizedApplication,
   WorkErrandKind,
 } from "../booking/work-errand/workErrandLib";
 

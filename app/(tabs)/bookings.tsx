@@ -7,6 +7,7 @@ import {
   getDoc,
   onSnapshot,
   query,
+  runTransaction,
   serverTimestamp,
   updateDoc,
   where,
@@ -145,7 +146,7 @@ type DriverRow =
       trip: DriverTripItem;
     }
   | {
-      kind: "roadside";
+      kind: "booking";
       key: string;
       createdAtSeconds: number;
       searchText: string;
@@ -173,6 +174,12 @@ export default function BookingsScreen() {
   const [driverRides, setDriverRides] = useState<RideBooking[]>([]);
 
   const [ratingBooking, setRatingBooking] = useState<RideBooking | null>(null);
+  const [schoolRatingBooking, setSchoolRatingBooking] =
+    useState<BookingItem | null>(null);
+  const [ratedSchoolBookingIds, setRatedSchoolBookingIds] = useState<string[]>(
+    [],
+  );
+
   const [ratingStars, setRatingStars] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
   const [ratingBusy, setRatingBusy] = useState(false);
@@ -228,23 +235,23 @@ export default function BookingsScreen() {
 
     setLoading(true);
 
-    const subscribe = (
-      collectionName: "driverRoutes" | "workJobs" | "errandJobs",
-      field: string,
-      setter: (items: DriverTripItem[]) => void,
-    ) =>
-      onSnapshot(
-        query(collection(db, collectionName), where(field, "==", uid)),
-        (snap) => {
-          setter(
-            snap.docs.map((d) =>
-              normalizeDriverTrip(d.id, d.data(), collectionName),
-            ),
-          );
-          setLoading(false);
-        },
-        () => setLoading(false),
+const subscribe = (
+  collectionName: "driverRoutes" | "workJobs" | "errandJobs",
+  field: string,
+  setter: (items: DriverTripItem[]) => void,
+) =>
+  onSnapshot(
+    query(collection(db, collectionName), where(field, "==", uid)),
+    (snap) => {
+      setter(
+        snap.docs
+          .filter((d) => d.data().deletedForDriver !== true)
+          .map((d) => normalizeDriverTrip(d.id, d.data(), collectionName)),
       );
+      setLoading(false);
+    },
+    () => setLoading(false),
+  );
 
     const unsubBookings = onSnapshot(
       query(collection(db, "bookings"), where("passengerId", "==", uid)),
@@ -303,7 +310,7 @@ export default function BookingsScreen() {
               const data = d.data();
 
               return (
-                data.category === "roadside" &&
+                data.category !== RIDE_CATEGORY &&
                 data.deletedForDriver !== true &&
                 data.driverId === uid &&
                 data.passengerId !== uid
@@ -433,13 +440,32 @@ export default function BookingsScreen() {
     [asProviderWork, asProviderErrand],
   );
 
-  const driverTrips = useMemo(
-    () =>
-      [...routes, ...workJobs, ...errandJobs].sort(
-        (a, b) => b.createdAtSeconds - a.createdAtSeconds,
-      ),
-    [routes, workJobs, errandJobs],
-  );
+const bookedRouteIds = useMemo(() => {
+  const ids = new Set<string>();
+
+  driverRoadside.forEach((b) => {
+    if (b.routeId) {
+      ids.add(b.routeId);
+    }
+  });
+
+  return ids;
+}, [driverRoadside]);
+
+const driverTrips = useMemo(
+  () =>
+    [...routes, ...workJobs, ...errandJobs]
+      .filter((t) => {
+        // إذا رحلة مدرسة انحجزت، لا تعرض كرت driverRoutes الأصلي
+        if (t.collectionName === "driverRoutes" && bookedRouteIds.has(t.id)) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => b.createdAtSeconds - a.createdAtSeconds),
+  [routes, workJobs, errandJobs, bookedRouteIds],
+);
 
   const driverRows = useMemo<DriverRow[]>(() => {
     const rows: DriverRow[] = [
@@ -451,8 +477,8 @@ export default function BookingsScreen() {
         trip: t,
       })),
       ...driverRoadside.map((b) => ({
-        kind: "roadside" as const,
-        key: `roadside-${b.id}`,
+        kind: "booking" as const,
+        key: `booking-${b.id}`,
         createdAtSeconds: b.createdAtSeconds,
         searchText: b.searchText,
         booking: b,
@@ -547,6 +573,75 @@ export default function BookingsScreen() {
     );
   };
 
+
+  const openLiveTracking = (bookingId: string) => {
+    router.push({
+      pathname: "/booking/live-tracking",
+      params: { id: bookingId },
+    } as any);
+  };
+
+  const openSchoolRideNavigation = (bookingId: string) => {
+    router.push({
+      pathname: "/driver/ride-navigation",
+      params: { id: bookingId },
+    } as any);
+  };
+
+  const canShowLiveTracking = (item: any) => {
+    return item?.trackingEnabled === true && item?.tripStatus === "in_progress";
+  };
+
+  const getBookingTripLabel = (b: BookingItem) => {
+    const tripStatus = (b as any).tripStatus;
+
+    if (b.status === "completed" || tripStatus === "completed") {
+      return "Completed";
+    }
+
+    if (tripStatus === "driver_on_way") {
+      return "Driver on the way";
+    }
+
+    if (tripStatus === "arrived_pickup") {
+      return "Driver arrived";
+    }
+
+    if (tripStatus === "in_progress") {
+      return "In trip";
+    }
+
+    return "Ongoing";
+  };
+
+  const renderBookingTripStatus = (b: BookingItem) => {
+    const tripStatus = (b as any).tripStatus;
+    const completed = b.status === "completed" || tripStatus === "completed";
+
+    return (
+      <View
+        style={[
+          styles.statusPill,
+          completed ? styles.statusDone : styles.statusOngoing,
+        ]}
+      >
+        <Ionicons
+          name={completed ? "checkmark-circle" : "time"}
+          size={13}
+          color={completed ? "#166534" : "#B86115"}
+        />
+        <Text
+          style={[
+            styles.statusText,
+            completed ? styles.statusTextDone : styles.statusTextOngoing,
+          ]}
+        >
+          {getBookingTripLabel(b)}
+        </Text>
+      </View>
+    );
+  };
+
   const confirmHideRideBooking = (ride: RideBooking, viewer: Tab) => {
     Alert.alert("Remove booking", "Remove this booking from your list?", [
       { text: "Cancel", style: "cancel" },
@@ -563,13 +658,40 @@ export default function BookingsScreen() {
     ]);
   };
 
-  const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
-    await updateDoc(doc(db, "bookings", bookingId), {
-      [viewer === "passenger" ? "deletedForPassenger" : "deletedForDriver"]:
-        true,
+const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
+  const localBooking = driverRoadside.find((b) => b.id === bookingId);
+
+  if (viewer === "passenger") {
+    setBookings((prev) => prev.filter((b) => b.id !== bookingId));
+  } else {
+    setDriverRoadside((prev) => prev.filter((b) => b.id !== bookingId));
+
+    if (localBooking?.routeId) {
+      setRoutes((prev) => prev.filter((r) => r.id !== localBooking.routeId));
+    }
+  }
+
+  const bookingRef = doc(db, "bookings", bookingId);
+  const bookingSnap = await getDoc(bookingRef);
+
+  const routeId =
+    localBooking?.routeId ||
+    (bookingSnap.exists() ? String(bookingSnap.data().routeId || "") : "");
+
+  await updateDoc(bookingRef, {
+    [viewer === "passenger" ? "deletedForPassenger" : "deletedForDriver"]: true,
+    updatedAt: serverTimestamp(),
+  });
+
+  // مهم: إذا السائق حذف كرت حجز مدرسة، نخفي كمان كرت driverRoutes الأصلي
+  // عشان ما يرجع يظهر مكانه.
+  if (viewer === "driver" && routeId) {
+    await updateDoc(doc(db, "driverRoutes", routeId), {
+      deletedForDriver: true,
       updatedAt: serverTimestamp(),
     });
-  };
+  }
+};
 
   const confirmHideGeneralBooking = (
     bookingId: string,
@@ -775,6 +897,116 @@ export default function BookingsScreen() {
 
   const handleRideArrived = (r: RideBooking) =>
     runApp(r.id, () => arriveRide(r.id, r));
+    const bookingNeedsRating = (b: BookingItem) => {
+    const item: any = b;
+
+    if (ratedSchoolBookingIds.includes(b.id)) {
+      return false;
+    }
+
+    return (
+      (item.status === "completed" || item.tripStatus === "completed") &&
+      item.needsPassengerRating === true &&
+      item.ratingSubmitted !== true &&
+      typeof item.rating !== "number" &&
+      !!item.driverId
+    );
+  };
+
+const openSchoolRatingModal = (b: BookingItem) => {
+  setSchoolRatingBooking(b);
+  setRatingBooking(null);
+  setRatingStars(0);
+  setRatingComment("");
+};
+
+const submitSchoolRating = async (
+  booking: BookingItem,
+  stars: number,
+  comment: string,
+) => {
+  const user = auth.currentUser;
+
+  if (!user) {
+    throw new Error("Please login first.");
+  }
+
+  const item: any = booking;
+
+  if (!item.driverId) {
+    throw new Error("Missing driver id.");
+  }
+
+  const bookingRef = doc(db, "bookings", booking.id);
+  const driverRef = doc(db, "users", item.driverId);
+  const reviewRef = doc(collection(db, "driverReviews"));
+
+  await runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+
+    if (!bookingSnap.exists()) {
+      throw new Error("Booking not found.");
+    }
+
+    const bookingData: any = bookingSnap.data();
+
+    if (bookingData.ratingSubmitted === true) {
+      return;
+    }
+
+    const driverSnap = await transaction.get(driverRef);
+    const driverData: any = driverSnap.exists() ? driverSnap.data() : {};
+
+    const oldCount = Number(driverData.ratingCount || 0);
+    const oldSum = Number(driverData.ratingSum || 0);
+
+    const newCount = oldCount + 1;
+    const newSum = oldSum + stars;
+    const newAverage = Number((newSum / newCount).toFixed(2));
+
+    transaction.set(reviewRef, {
+      bookingId: booking.id,
+      routeId: item.routeId || "",
+      category: item.category || "school",
+
+      driverId: item.driverId,
+      driverName: item.driverName || "Driver",
+
+      passengerId: user.uid,
+      passengerName: item.passengerName || user.displayName || "Passenger",
+
+      rating: stars,
+      comment: comment.trim(),
+
+      from: item.from || "",
+      to: item.to || "",
+      date: item.date || "",
+      time: item.time || "",
+
+      createdAt: serverTimestamp(),
+    });
+
+    transaction.update(bookingRef, {
+      rating: stars,
+      reviewComment: comment.trim(),
+      ratingSubmitted: true,
+      needsPassengerRating: false,
+      ratedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    transaction.set(
+      driverRef,
+      {
+        ratingCount: newCount,
+        ratingSum: newSum,
+        ratingAverage: newAverage,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  });
+};
 
   const openRatingModal = (r: RideBooking) => {
     setRatingBooking(r);
@@ -782,24 +1014,83 @@ export default function BookingsScreen() {
     setRatingComment("");
   };
 
-  const submitRating = async () => {
-    if (!ratingBooking || ratingStars < 1) return;
+const submitRating = async () => {
+  if (ratingStars < 1 || ratingBusy) return;
 
-    try {
-      setRatingBusy(true);
+  try {
+    setRatingBusy(true);
+
+    if (schoolRatingBooking) {
+      const bookingToRate = schoolRatingBooking;
+      const ratedId = bookingToRate.id;
+      const stars = ratingStars;
+      const comment = ratingComment.trim();
+
+      // Close the rating popup immediately and block it from reopening
+      // while Firestore is saving the rating.
+      setRatedSchoolBookingIds((prev) =>
+        prev.includes(ratedId) ? prev : [...prev, ratedId],
+      );
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.id === ratedId
+            ? ({
+                ...b,
+                rating: stars,
+                reviewComment: comment,
+                ratingSubmitted: true,
+                needsPassengerRating: false,
+              } as any)
+            : b,
+        ),
+      );
+
+      setSchoolRatingBooking(null);
+      setRatingStars(0);
+      setRatingComment("");
+
+      await submitSchoolRating(bookingToRate, stars, comment);
+      return;
+    }
+
+    if (ratingBooking) {
       await completeRideWithReview(
         ratingBooking.id,
         ratingBooking,
         ratingStars,
         ratingComment,
       );
+
       setRatingBooking(null);
-    } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not submit your rating.");
-    } finally {
-      setRatingBusy(false);
+      setRatingStars(0);
+      setRatingComment("");
     }
-  };
+  } catch (error: any) {
+    Alert.alert("Error", error?.message || "Could not submit your rating.");
+  } finally {
+    setRatingBusy(false);
+  }
+};
+
+useEffect(() => {
+  if (tab !== "passenger") return;
+  if (ratingBooking || schoolRatingBooking || ratingBusy) return;
+
+  const pendingSchoolRating = bookings.find((b) => bookingNeedsRating(b));
+
+  if (pendingSchoolRating) {
+    openSchoolRatingModal(pendingSchoolRating);
+  }
+}, [
+  bookings,
+  tab,
+  ratingBooking,
+  schoolRatingBooking,
+  ratingBusy,
+  ratedSchoolBookingIds,
+]);
+
 
   const renderDeleteButton = (onPress: () => void) => (
     <Pressable style={styles.deleteButton} onPress={onPress} hitSlop={8}>
@@ -975,9 +1266,19 @@ export default function BookingsScreen() {
           </View>
         ) : null}
 
-        {viewer === "passenger" ? (
-          <>
-            {canFinish ? (
+          {viewer === "passenger" ? (
+            <>
+              {canShowLiveTracking(r) ? (
+                <Pressable
+                  style={styles.liveTrackButton}
+                  onPress={() => openLiveTracking(r.id)}
+                >
+                  <Ionicons name="map-outline" size={17} color="#FFFFFF" />
+                  <Text style={styles.liveTrackButtonText}>Live Tracking</Text>
+                </Pressable>
+              ) : null}
+
+              {canFinish ? (
               <Pressable
                 style={styles.primaryButton}
                 onPress={() => openRatingModal(r)}
@@ -1093,9 +1394,12 @@ export default function BookingsScreen() {
     return null;
   };
 
-  const renderBookingCard = (b: BookingItem) => {
+  const renderBookingCard = (b: BookingItem, viewer: Tab = "passenger") => {
     const meta = getCategoryMeta(b.category);
-    const done = b.status === "completed";
+    const tripStatus = (b as any).tripStatus;
+    const done = b.status === "completed" || tripStatus === "completed";
+    const isSchool = b.category === "school";
+    const isDriverView = viewer === "driver";
 
     return (
       <View key={b.id} style={[styles.card, done && styles.cardDone]}>
@@ -1110,9 +1414,9 @@ export default function BookingsScreen() {
           </View>
 
           <View style={styles.cardTopActions}>
-            {renderStatus(b.status)}
+            {renderBookingTripStatus(b)}
             {renderDeleteButton(() =>
-              confirmHideGeneralBooking(b.id, "passenger"),
+              confirmHideGeneralBooking(b.id, viewer),
             )}
           </View>
         </View>
@@ -1135,7 +1439,9 @@ export default function BookingsScreen() {
 
         <View style={styles.infoRow}>
           <Ionicons name="person-outline" size={15} color="#7C5F46" />
-          <Text style={styles.infoText}>{b.driverName}</Text>
+          <Text style={styles.infoText}>
+            {isDriverView ? b.passengerName : b.driverName}
+          </Text>
         </View>
 
         <View style={styles.metaRow}>
@@ -1154,19 +1460,92 @@ export default function BookingsScreen() {
           ) : null}
         </View>
 
-        {done ? (
-          <Pressable style={styles.primaryButton} onPress={() => openRebook(b)}>
-            <Ionicons name="refresh" size={17} color="#FFFFFF" />
-            <Text style={styles.primaryButtonText}>Book Again</Text>
-          </Pressable>
+        {viewer === "passenger" ? (
+          <>
+            {tripStatus === "arrived_pickup" ? (
+              <View style={styles.waitBanner}>
+                <Ionicons name="car-outline" size={16} color="#B86115" />
+                <Text style={styles.waitText}>
+                  Driver arrived. Please go to the car.
+                </Text>
+              </View>
+            ) : null}
+
+            {canShowLiveTracking(b) ? (
+              <Pressable
+                style={styles.liveTrackButton}
+                onPress={() => openLiveTracking(b.id)}
+              >
+                <Ionicons name="map-outline" size={17} color="#FFFFFF" />
+                <Text style={styles.liveTrackButtonText}>Live Tracking</Text>
+              </Pressable>
+            ) : null}
+
+            {done && bookingNeedsRating(b) ? (
+              <Pressable
+                style={styles.primaryButton}
+                onPress={() => openSchoolRatingModal(b)}
+              >
+                <Ionicons name="star-outline" size={17} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>Rate Driver</Text>
+              </Pressable>
+            ) : null}
+
+            {done && !bookingNeedsRating(b) ? (
+              <Pressable
+                style={styles.primaryButton}
+                onPress={() => openRebook(b)}
+              >
+                <Ionicons name="refresh" size={17} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>Book Again</Text>
+              </Pressable>
+            ) : null}
+
+            {!done && !isSchool ? (
+              <Pressable
+                style={styles.completeButton}
+                onPress={() => confirmComplete("bookings", b.id, "booking")}
+              >
+                <Ionicons name="checkmark-done" size={17} color="#166534" />
+                <Text style={styles.completeButtonText}>Mark as Completed</Text>
+              </Pressable>
+            ) : null}
+          </>
         ) : (
-          <Pressable
-            style={styles.completeButton}
-            onPress={() => confirmComplete("bookings", b.id, "booking")}
-          >
-            <Ionicons name="checkmark-done" size={17} color="#166534" />
-            <Text style={styles.completeButtonText}>Mark as Completed</Text>
-          </Pressable>
+          <>
+            {isSchool && tripStatus === "booked" ? (
+              <Pressable
+                style={styles.startButton}
+                onPress={() => openSchoolRideNavigation(b.id)}
+              >
+                <Ionicons name="play" size={16} color="#FFFFFF" />
+                <Text style={styles.startButtonText}>Start Ride</Text>
+              </Pressable>
+            ) : null}
+
+            {isSchool &&
+            (tripStatus === "driver_on_way" ||
+              tripStatus === "arrived_pickup" ||
+              tripStatus === "in_progress") ? (
+              <Pressable
+                style={styles.startButton}
+                onPress={() => openSchoolRideNavigation(b.id)}
+              >
+                <Ionicons name="navigate-outline" size={16} color="#FFFFFF" />
+                <Text style={styles.startButtonText}>Open Ride Navigation</Text>
+              </Pressable>
+            ) : null}
+
+            {!isSchool && !done ? (
+              <Pressable
+                style={styles.completeButton}
+                onPress={() => confirmComplete("bookings", b.id, "booking")}
+              >
+                <Ionicons name="checkmark-done" size={17} color="#166534" />
+                <Text style={styles.completeButtonText}>Mark as Completed</Text>
+              </Pressable>
+            ) : null}
+          </>
         )}
       </View>
     );
@@ -1236,15 +1615,15 @@ export default function BookingsScreen() {
           ) : null}
         </View>
 
-        {!done ? (
-          <Pressable
-            style={styles.completeButton}
-            onPress={() => confirmComplete(t.collectionName, t.id, "trip")}
-          >
-            <Ionicons name="checkmark-done" size={17} color="#166534" />
-            <Text style={styles.completeButtonText}>Mark as Completed</Text>
-          </Pressable>
-        ) : null}
+{!done && !(t.collectionName === "driverRoutes" && t.category === "school") ? (
+  <Pressable
+    style={styles.completeButton}
+    onPress={() => confirmComplete(t.collectionName, t.id, "trip")}
+  >
+    <Ionicons name="checkmark-done" size={17} color="#166534" />
+    <Text style={styles.completeButtonText}>Mark as Completed</Text>
+  </Pressable>
+) : null}
       </View>
     );
   };
@@ -1687,7 +2066,7 @@ export default function BookingsScreen() {
                 {filteredBookings.map((b) =>
                   b.category === "roadside"
                     ? renderRoadsideCard(b, "passenger")
-                    : renderBookingCard(b),
+                    : renderBookingCard(b, "passenger"),
                 )}
               </>
             ) : (
@@ -1699,7 +2078,9 @@ export default function BookingsScreen() {
                 {filteredDriverRows.map((r) =>
                   r.kind === "trip"
                     ? renderTripCard(r.trip)
-                    : renderRoadsideCard(r.booking, "driver"),
+                    : r.booking.category === "roadside"
+                      ? renderRoadsideCard(r.booking, "driver")
+                      : renderBookingCard(r.booking, "driver"),
                 )}
               </>
             )}
@@ -1796,15 +2177,21 @@ export default function BookingsScreen() {
       </Modal>
 
       <Modal
-        visible={!!ratingBooking}
+        visible={!!ratingBooking || !!schoolRatingBooking}
         transparent
         animationType="fade"
-        onRequestClose={() => setRatingBooking(null)}
+        onRequestClose={() => {
+          setRatingBooking(null);
+          setSchoolRatingBooking(null);
+        }}
       >
         <View style={styles.ratingBackdrop}>
           <Pressable
             style={StyleSheet.absoluteFill}
-            onPress={() => setRatingBooking(null)}
+            onPress={() => {
+              setRatingBooking(null);
+              setSchoolRatingBooking(null);
+            }}
           />
 
           <View style={styles.ratingCard}>
@@ -2403,5 +2790,20 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "900",
     fontSize: 16,
+  },
+  liveTrackButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#111827",
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  liveTrackButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 15,
   },
 });
