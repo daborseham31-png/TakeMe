@@ -4,6 +4,8 @@ import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Image,
   Pressable,
   SafeAreaView,
@@ -13,6 +15,7 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../firebase";
+import { fetchDriverEligibility } from "../driver/driverEligibility";
 
 const logoImg = require("../../assets/images/logo-new.jpg");
 
@@ -21,6 +24,7 @@ export default function HomeScreen() {
   const [unreadNotifs, setUnreadNotifs] = useState(0);
   // Unread chat messages across all of the user's conversations.
   const [unreadChats, setUnreadChats] = useState(0);
+  const [checkingDriver, setCheckingDriver] = useState(false);
 
   // Live count of unread roadside help notifications for the signed-in driver.
   // Single equality filter keeps this index-free; unread count is computed here.
@@ -118,6 +122,43 @@ export default function HomeScreen() {
     };
   }, []);
 
+  const handleBecomeDriver = async () => {
+    const user = auth.currentUser;
+
+    if (!user) {
+      router.replace("/");
+      return;
+    }
+
+    if (checkingDriver) return;
+
+    setCheckingDriver(true);
+
+    try {
+      const eligibility = await fetchDriverEligibility(user.uid);
+
+      if (eligibility.eligible) {
+        router.push("/driver/add-route" as any);
+        return;
+      }
+
+      if (eligibility.status === "license_expired") {
+        Alert.alert(
+          "License expired",
+          "Your driving license is expired. Please upload a valid license before becoming a driver.",
+        );
+      }
+
+      // not_registered, license_missing, and languages_missing all land on
+      // the same verification screen.
+      router.push("/driver/verify-license" as any);
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not check your driver status.");
+    } finally {
+      setCheckingDriver(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.page}>
       {/* Top notification icons (Instagram/Facebook style) */}
@@ -157,7 +198,11 @@ export default function HomeScreen() {
           onPress={() => router.push("/messages" as any)}
           hitSlop={8}
         >
-          <Ionicons name="chatbubble-ellipses-outline" size={26} color="#7C5F46" />
+          <Ionicons
+            name="chatbubble-ellipses-outline"
+            size={26}
+            color="#7C5F46"
+          />
           {unreadChats > 0 ? (
             <View style={styles.iconBadge}>
               <Text style={styles.iconBadgeText}>
@@ -173,31 +218,31 @@ export default function HomeScreen() {
 
         <Text style={styles.title}>Take Me</Text>
 
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>🚗 Community Rides & Deliveries</Text>
-        </View>
-
         <Text style={styles.description}>
-          Connect with neighbors heading your way. Safe, affordable rides and
-          deliveries for your community.
+          Connect with neighbors heading your way. Safe, affordable rides for
+          your community.
         </Text>
 
         <Pressable
           style={styles.primaryButton}
           onPress={() => router.push("/booking/ride-category" as any)}
         >
-          <Text style={styles.primaryButtonText}>🔍 Find a Ride</Text>
+          <Text style={styles.primaryButtonText}> Find a Ride 🔍</Text>
         </Pressable>
 
         <Pressable
-          style={styles.outlineButton}
-          onPress={() => router.push("/driver/add-route" as any)}
+          style={[
+            styles.outlineButton,
+            checkingDriver && styles.outlineButtonDisabled,
+          ]}
+          onPress={handleBecomeDriver}
+          disabled={checkingDriver}
         >
-          <Text style={styles.outlineButtonText}>Become a Driver →</Text>
-        </Pressable>
-
-        <Pressable style={styles.ghostButton}>
-          <Text style={styles.ghostButtonText}>❓ Forgot Something?</Text>
+          {checkingDriver ? (
+            <ActivityIndicator color="#2B2118" />
+          ) : (
+            <Text style={styles.outlineButtonText}>Become a Driver →</Text>
+          )}
         </Pressable>
       </View>
     </SafeAreaView>
@@ -273,6 +318,9 @@ const styles = StyleSheet.create({
     color: "#2B2118",
     fontWeight: "800",
     fontSize: 18,
+  },
+  outlineButtonDisabled: {
+    opacity: 0.6,
   },
   topBar: {
     flexDirection: "row",

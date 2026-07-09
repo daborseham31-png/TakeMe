@@ -31,6 +31,7 @@ type DriverProfile = {
   gender?: string;
   language?: string;
   languages?: string[];
+  spokenLanguages?: string[];
   ratingAverage?: number;
   ratingCount?: number;
 };
@@ -157,8 +158,16 @@ const languageToCode = (value: any) => {
 const getProfileLanguages = (profile?: DriverProfile) => {
   if (!profile) return [];
 
-  if (Array.isArray(profile.languages)) {
-    return profile.languages
+  // spokenLanguages (full words, e.g. "Arabic") comes from the sign up
+  // flow's driver language picker; languages (codes, e.g. "ar") comes from
+  // the older per-route language picker. languageToCode understands both.
+  const combined = [
+    ...(Array.isArray(profile.spokenLanguages) ? profile.spokenLanguages : []),
+    ...(Array.isArray(profile.languages) ? profile.languages : []),
+  ];
+
+  if (combined.length > 0) {
+    return combined
       .map(languageToCode)
       .filter(Boolean)
       .filter((value, index, array) => array.indexOf(value) === index);
