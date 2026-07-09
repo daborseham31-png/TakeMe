@@ -45,6 +45,13 @@
           }
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "TakeMe uses your photo library to upload your ID and driving license for verification.",
+          "cameraPermission": "TakeMe uses your camera to scan your ID and driving license for verification."
+        }
+      ],
       "@react-native-community/datetimepicker"
     ],
     "experiments": {

@@ -14,6 +14,7 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../../firebase";
+import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
 import YesNoField from "./YesNoField";
 import {
@@ -146,6 +147,16 @@ export default function RideForm({ category, showPets, onBack }: Props) {
     if (!user) {
       Alert.alert("Login required", "Please login first.");
       router.replace("/");
+      return;
+    }
+
+    const eligibility = await fetchDriverEligibility(user.uid);
+
+    if (!eligibility.eligible) {
+      Alert.alert(
+        "Verification required",
+        "You must verify a valid driving license before creating a driver trip.",
+      );
       return;
     }
 

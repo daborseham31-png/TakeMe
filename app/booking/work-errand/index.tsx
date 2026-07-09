@@ -32,8 +32,6 @@ export default function WorkErrandScreen() {
           Choose the type of ride or service
         </Text>
 
-        <Text style={styles.sectionTitle}>Work & Errands</Text>
-
         <View style={styles.cardsRow}>
           <Pressable style={styles.card} onPress={openWork}>
             <Feather name="briefcase" size={34} color="#22C55E" />

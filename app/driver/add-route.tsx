@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -10,6 +11,9 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+
+import { auth } from "../../firebase";
+import { fetchDriverEligibility } from "./driverEligibility";
 
 type Category = {
   key: string;
@@ -78,6 +82,42 @@ export default function AddDriverRouteScreen() {
   const columns = width >= 760 ? 3 : width >= 360 ? 2 : 1;
 
   const cardWidth = (width - pagePadding * 2 - gap * (columns - 1)) / columns;
+
+  // Guard against this route being opened directly (deep link, back
+  // navigation, stale bookmark) by a user who isn't a valid driver.
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    const user = auth.currentUser;
+
+    if (!user) {
+      router.replace("/");
+      return;
+    }
+
+    fetchDriverEligibility(user.uid)
+      .then((result) => {
+        if (!result.eligible) {
+          router.replace("/driver/verify-license" as any);
+          return;
+        }
+
+        setChecking(false);
+      })
+      .catch(() => {
+        router.replace("/driver/verify-license" as any);
+      });
+  }, []);
+
+  if (checking) {
+    return (
+      <SafeAreaView style={styles.page}>
+        <View style={styles.checkingBox}>
+          <ActivityIndicator size="large" color="#F58220" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.page}>
@@ -156,6 +196,11 @@ const styles = StyleSheet.create({
   page: {
     flex: 1,
     backgroundColor: "#FBF7F1",
+  },
+  checkingBox: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   scroll: {
     paddingTop: 48,

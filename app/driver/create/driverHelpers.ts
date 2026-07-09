@@ -50,6 +50,7 @@ export const normalizePhoneFromAccount = (value: any) => {
 
 export const normalizeLanguagesFromAccount = (data: any) => {
   const rawLanguages =
+    data.spokenLanguages ||
     data.languages ||
     data.language ||
     data.lang ||
