@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { router } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   Alert,
   Pressable,
@@ -14,18 +14,20 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../../firebase";
+import {
+  validateWeeklyRows,
+  WeekDayRow,
+  WeeklyDriverDay,
+} from "../../booking/weeklyBookingLib";
 import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
+import WeeklyDaysCard from "./WeeklyDaysCard";
 import YesNoField from "./YesNoField";
 import {
-  dayNames,
   getDayFromDateText,
   getDigitsOnly,
-  getTodayYMD,
-  isTimeAvailableForDate,
   normalize,
   normalizeDateToYMD,
-  normalizeTime,
   styles,
   useDriverAccount,
   validateAccountInfo,
@@ -60,13 +62,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
 
   const [isRecurring, setIsRecurring] = useState(false);
-  const [selectedDays, setSelectedDays] = useState<string[]>([]);
-
-  const [dayTimes, setDayTimes] = useState<Record<string, string>>({});
-  const [daySeats, setDaySeats] = useState<Record<string, number>>({});
-  const [openDayTimePicker, setOpenDayTimePicker] = useState<string | null>(
-    null,
-  );
+  const [weeklyRows, setWeeklyRows] = useState<WeekDayRow[]>([]);
 
   const [time, setTime] = useState("");
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -74,71 +70,12 @@ export default function RideForm({ category, showPets, onBack }: Props) {
   const [price, setPrice] = useState("");
   const [seats, setSeats] = useState("1");
 
-  const clearWeeklyDays = () => {
-    setSelectedDays([]);
-    setDayTimes({});
-    setDaySeats({});
-    setOpenDayTimePicker(null);
-  };
+  const toggleRecurring = (value: boolean) => {
+    setIsRecurring(value);
 
-  const toggleDay = (day: string) => {
-    if (selectedDays.includes(day)) {
-      setSelectedDays((prev) => prev.filter((item) => item !== day));
-
-      setDayTimes((prev) => {
-        const next = { ...prev };
-        delete next[day];
-        return next;
-      });
-
-      setDaySeats((prev) => {
-        const next = { ...prev };
-        delete next[day];
-        return next;
-      });
-
-      if (openDayTimePicker === day) {
-        setOpenDayTimePicker(null);
-      }
-
-      return;
+    if (!value) {
+      setWeeklyRows([]);
     }
-
-    setSelectedDays((prev) => [...prev, day]);
-    setDayTimes((prev) => ({ ...prev, [day]: "09:00" }));
-    setDaySeats((prev) => ({ ...prev, [day]: 1 }));
-  };
-
-  useEffect(() => {
-    if (!(canRepeat && isRecurring)) return;
-
-    const startDay = getDayFromDateText(tripDate);
-
-    if (!startDay) return;
-
-    setSelectedDays((prev) =>
-      prev.includes(startDay) ? prev : [...prev, startDay],
-    );
-
-    setDayTimes((prev) =>
-      prev[startDay] ? prev : { ...prev, [startDay]: "09:00" },
-    );
-
-    setDaySeats((prev) => (prev[startDay] ? prev : { ...prev, [startDay]: 1 }));
-  }, [tripDate, isRecurring, canRepeat]);
-
-  const decreaseSeatsForDay = (day: string) => {
-    setDaySeats((prev) => ({
-      ...prev,
-      [day]: Math.max(1, (prev[day] || 1) - 1),
-    }));
-  };
-
-  const increaseSeatsForDay = (day: string) => {
-    setDaySeats((prev) => ({
-      ...prev,
-      [day]: Math.min(8, (prev[day] || 1) + 1),
-    }));
   };
 
   const handleSubmit = async () => {
@@ -180,86 +117,46 @@ export default function RideForm({ category, showPets, onBack }: Props) {
       !carPlate ||
       !from ||
       !to ||
-      !tripDate ||
-      !price ||
-      (!recurring && (!time || !seats))
+      (!recurring && (!tripDate || !price || !time || !seats))
     ) {
       Alert.alert("Missing details", "Please fill in all fields.");
       return;
     }
 
-    const cleanTripDate = normalizeDateToYMD(tripDate);
-
-    if (!cleanTripDate) {
-      Alert.alert(
-        "Invalid date",
-        "Travel date must be today or a future date.",
-      );
-      return;
-    }
-
-    const tripDay = getDayFromDateText(cleanTripDate);
-
-    if (recurring && selectedDays.length === 0) {
-      Alert.alert("Missing days", "Please choose at least one repeat day.");
-      return;
-    }
-
-    const finalAvailableDays = recurring ? selectedDays : [tripDay];
-
-    const cleanPrice = Number(price);
-
-    if (Number.isNaN(cleanPrice) || cleanPrice <= 0) {
-      Alert.alert("Invalid price", "Price must be more than 0.");
-      return;
-    }
-
+    let weeklyTrips: WeeklyDriverDay[] = [];
+    let cleanTripDate = "";
+    let tripDay = "";
     let cleanTime = "";
     let cleanSeats = 0;
-    const cleanedDayTimes: Record<string, string> = {};
-    const cleanedDaySeats: Record<string, number> = {};
+    let cleanPrice = 0;
 
     if (recurring) {
-      for (const day of selectedDays) {
-        const dayTime = normalizeTime(dayTimes[day] || "");
+      const cleanedDays = validateWeeklyRows(weeklyRows, {
+        requirePrice: true,
+      });
 
-        if (!dayTime) {
-          Alert.alert(
-            "Invalid time",
-            `Please choose a valid time for ${day} between 00:00 and 23:59.`,
-          );
-          return;
-        }
+      if (!cleanedDays) return;
 
-        if (
-          cleanTripDate === getTodayYMD() &&
-          day === tripDay &&
-          !isTimeAvailableForDate(cleanTripDate, dayTime)
-        ) {
-          Alert.alert(
-            "Invalid time",
-            `You cannot choose a time that already passed today for ${day}.`,
-          );
-          return;
-        }
+      weeklyTrips = cleanedDays;
+      cleanTripDate = weeklyTrips[0].date;
+      tripDay = weeklyTrips[0].dayName;
+      cleanTime = weeklyTrips[0].time;
+      cleanSeats = Math.max(...weeklyTrips.map((day) => day.seats));
+      cleanPrice = weeklyTrips[0].price;
+    } else {
+      const cleanedDate = normalizeDateToYMD(tripDate);
 
-        const daySeatsValue = daySeats[day] || 1;
-
-        if (daySeatsValue < 1 || daySeatsValue > 8) {
-          Alert.alert(
-            "Invalid seats",
-            `Seats for ${day} must be between 1 and 8.`,
-          );
-          return;
-        }
-
-        cleanedDayTimes[day] = dayTime;
-        cleanedDaySeats[day] = daySeatsValue;
+      if (!cleanedDate) {
+        Alert.alert(
+          "Invalid date",
+          "Travel date must be today or a future date.",
+        );
+        return;
       }
 
-      cleanTime = cleanedDayTimes[selectedDays[0]];
-      cleanSeats = Math.max(...Object.values(cleanedDaySeats));
-    } else {
+      cleanTripDate = cleanedDate;
+      tripDay = getDayFromDateText(cleanTripDate);
+
       const validation = validateDateAndTimeNotPassed(tripDate, time, {
         dateLabel: "travel date",
         timeLabel: "departure time",
@@ -274,7 +171,18 @@ export default function RideForm({ category, showPets, onBack }: Props) {
         Alert.alert("Invalid seats", "Seats must be between 1 and 8.");
         return;
       }
+
+      cleanPrice = Number(price);
+
+      if (Number.isNaN(cleanPrice) || cleanPrice <= 0) {
+        Alert.alert("Invalid price", "Price must be more than 0.");
+        return;
+      }
     }
+
+    const finalAvailableDays = recurring
+      ? weeklyTrips.map((day) => day.dayName)
+      : [tripDay];
 
     try {
       setLoading(true);
@@ -327,15 +235,15 @@ export default function RideForm({ category, showPets, onBack }: Props) {
         day: tripDay,
 
         isRecurring: recurring,
+        bookingType: recurring ? "weekly" : "quick",
         repeatDays: finalAvailableDays,
         availableDays: finalAvailableDays,
+        weeklyTrips: recurring ? weeklyTrips : [],
 
         time: cleanTime,
-        dayTimes: recurring ? cleanedDayTimes : {},
 
         price: cleanPrice,
         seats: cleanSeats,
-        daySeats: recurring ? cleanedDaySeats : {},
 
         rating: 4.8,
         reviews: 0,
@@ -439,192 +347,75 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             />
           </View>
 
-          <DateInput
-            label={isRecurring ? "Start Date" : "Travel Date"}
-            value={tripDate}
-            onChange={setTripDate}
-            showPicker={showTripDatePicker}
-            setShowPicker={setShowTripDatePicker}
-          />
-
           {canRepeat && (
             <YesNoField
               label="Repeat on multiple days?"
               value={isRecurring}
-              onValueChange={(value) => {
-                setIsRecurring(value);
-
-                if (!value) {
-                  clearWeeklyDays();
-                }
-              }}
+              onValueChange={toggleRecurring}
             />
           )}
 
-          {canRepeat && isRecurring && (
+          {!(canRepeat && isRecurring) ? (
             <>
-              <Text style={styles.label}>Choose Repeat Days</Text>
+              <DateInput
+                label="Travel Date"
+                value={tripDate}
+                onChange={setTripDate}
+                showPicker={showTripDatePicker}
+                setShowPicker={setShowTripDatePicker}
+              />
 
-              <View style={styles.languageRow}>
-                {dayNames.map((day) => {
-                  const active = selectedDays.includes(day);
+              <TimeInput
+                label="Departure Time"
+                value={time}
+                onChange={setTime}
+                showPicker={showTimePicker}
+                setShowPicker={setShowTimePicker}
+                associatedDate={tripDate}
+              />
 
-                  return (
-                    <Pressable
-                      key={day}
-                      style={[
-                        styles.languageButton,
-                        active && styles.languageButtonActive,
-                      ]}
-                      onPress={() => toggleDay(day)}
-                    >
-                      <Text
-                        style={[
-                          styles.languageText,
-                          active && styles.languageTextActive,
-                        ]}
-                      >
-                        {day}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              {selectedDays.length > 0 && (
-                <View style={styles.daySettingsBox}>
-                  {selectedDays.map((day, index) => {
-                    const currentSeats = daySeats[day] || 1;
-                    const isLast = index === selectedDays.length - 1;
-
-                    return (
-                      <View
-                        key={day}
-                        style={[
-                          styles.dayItem,
-                          !isLast && styles.dayItemDivider,
-                        ]}
-                      >
-                        <Text style={styles.dayTitle}>{day}</Text>
-
-                        <View style={styles.dayFieldsRow}>
-                          <View style={styles.dayFieldColumn}>
-                            <TimeInput
-                              label="Time"
-                              value={dayTimes[day] || "09:00"}
-                              onChange={(value) =>
-                                setDayTimes((prev) => ({
-                                  ...prev,
-                                  [day]: value,
-                                }))
-                              }
-                              showPicker={openDayTimePicker === day}
-                              setShowPicker={(value) =>
-                                setOpenDayTimePicker(value ? day : null)
-                              }
-                            />
-                          </View>
-
-                          <View style={styles.dayFieldColumn}>
-                            <Text style={styles.label}>Seats</Text>
-
-                            <View style={styles.weeklySeatsRow}>
-                              <Pressable
-                                style={styles.weeklySeatButton}
-                                onPress={() => decreaseSeatsForDay(day)}
-                              >
-                                <Ionicons
-                                  name="remove"
-                                  size={20}
-                                  color="#111827"
-                                />
-                              </Pressable>
-
-                              <Text style={styles.weeklySeatsNumber}>
-                                {currentSeats}
-                              </Text>
-
-                              <Pressable
-                                style={styles.weeklySeatButton}
-                                onPress={() => increaseSeatsForDay(day)}
-                              >
-                                <Ionicons
-                                  name="add"
-                                  size={20}
-                                  color="#111827"
-                                />
-                              </Pressable>
-                            </View>
-                          </View>
-                        </View>
-                      </View>
-                    );
-                  })}
+              <View style={styles.twoColumns}>
+                <View style={styles.column}>
+                  <Text style={styles.label}>Price (₪)</Text>
+                  <View style={styles.inputRow}>
+                    <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
+                    <TextInput
+                      style={styles.rowInput}
+                      placeholder="₪"
+                      placeholderTextColor="#8B7B6B"
+                      keyboardType="numeric"
+                      value={price}
+                      onChangeText={(text) => setPrice(getDigitsOnly(text))}
+                    />
+                  </View>
                 </View>
-              )}
-            </>
-          )}
 
-          {!(canRepeat && isRecurring) && (
-            <TimeInput
-              label="Departure Time"
-              value={time}
-              onChange={setTime}
-              showPicker={showTimePicker}
-              setShowPicker={setShowTimePicker}
-            />
-          )}
-
-          {canRepeat && isRecurring ? (
-            <>
-              <Text style={styles.label}>Price (₪)</Text>
-              <View style={styles.inputRow}>
-                <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
-                <TextInput
-                  style={styles.rowInput}
-                  placeholder="₪"
-                  placeholderTextColor="#8B7B6B"
-                  keyboardType="numeric"
-                  value={price}
-                  onChangeText={(text) => setPrice(getDigitsOnly(text))}
-                />
+                <View style={styles.column}>
+                  <Text style={styles.label}>Available Seats</Text>
+                  <View style={styles.inputRow}>
+                    <Ionicons name="people-outline" size={18} color="#8B7B6B" />
+                    <TextInput
+                      style={styles.rowInput}
+                      placeholder="1"
+                      placeholderTextColor="#8B7B6B"
+                      keyboardType="numeric"
+                      maxLength={1}
+                      value={seats}
+                      onChangeText={(text) =>
+                        setSeats(getDigitsOnly(text).slice(0, 1))
+                      }
+                    />
+                  </View>
+                </View>
               </View>
             </>
           ) : (
-            <View style={styles.twoColumns}>
-              <View style={styles.column}>
-                <Text style={styles.label}>Price (₪)</Text>
-                <View style={styles.inputRow}>
-                  <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
-                  <TextInput
-                    style={styles.rowInput}
-                    placeholder="₪"
-                    placeholderTextColor="#8B7B6B"
-                    keyboardType="numeric"
-                    value={price}
-                    onChangeText={(text) => setPrice(getDigitsOnly(text))}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.column}>
-                <Text style={styles.label}>Available Seats</Text>
-                <View style={styles.inputRow}>
-                  <Ionicons name="people-outline" size={18} color="#8B7B6B" />
-                  <TextInput
-                    style={styles.rowInput}
-                    placeholder="1"
-                    placeholderTextColor="#8B7B6B"
-                    keyboardType="numeric"
-                    maxLength={1}
-                    value={seats}
-                    onChangeText={(text) =>
-                      setSeats(getDigitsOnly(text).slice(0, 1))
-                    }
-                  />
-                </View>
-              </View>
-            </View>
+            <WeeklyDaysCard
+              rows={weeklyRows}
+              onChange={setWeeklyRows}
+              defaultTime="09:00"
+              mode="driver"
+            />
           )}
 
           <Pressable

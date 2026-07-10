@@ -25,6 +25,12 @@ import {
 import { auth, db } from "../../firebase";
 import { RIDE_CATEGORY, RidePayment } from "./rideBookingLib";
 import {
+  computeWeeklyTotal,
+  createWeeklyBookings,
+  WeeklyDriverDay,
+  WeeklyRequestDay,
+} from "./weeklyBookingLib";
+import {
   detectCurrentLocation,
   GeoPoint,
   notify,
@@ -69,6 +75,38 @@ export default function RidePaymentScreen() {
 
   const presetLat = num(params.fromLat);
   const presetLng = num(params.fromLng);
+
+  const bookingType = String(params.bookingType || "quick");
+  const isWeekly = bookingType === "weekly";
+
+  let selectedWeeklyDays: WeeklyDriverDay[] = [];
+
+  try {
+    const parsed = JSON.parse(String(params.selectedWeeklyDays || "[]"));
+    selectedWeeklyDays = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    selectedWeeklyDays = [];
+  }
+
+  let remainingWeeklyDays: WeeklyRequestDay[] = [];
+
+  try {
+    const parsed = JSON.parse(String(params.remainingWeeklyDays || "[]"));
+    remainingWeeklyDays = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    remainingWeeklyDays = [];
+  }
+
+  const weeklyTotal = computeWeeklyTotal(selectedWeeklyDays);
+
+  const resultsPassthrough = {
+    category: isSchool ? "school" : "personal",
+    schoolName: String(params.schoolName || ""),
+    from,
+    to,
+    genderPref: String(params.genderPref || "any"),
+    languages: String(params.languages || ""),
+  };
 
   const [method, setMethod] = useState<Method>(null);
   const [processing, setProcessing] = useState(false);
@@ -311,6 +349,67 @@ const createBookingAfterPayment = async (
       payment = { method: "card", cardLast4: digits.slice(-4) };
     }
 
+    if (isWeekly) {
+      try {
+        setProcessing(true);
+
+        await createWeeklyBookings({
+          category: isSchool ? "school" : "personal",
+
+          driverId,
+          driverName,
+          driverPhone,
+
+          driverCar,
+          driverCarColor,
+          driverCarPlateLast3,
+
+          routeId,
+          from,
+          to,
+
+          selectedDays: selectedWeeklyDays,
+          payment,
+        });
+
+        if (remainingWeeklyDays.length > 0) {
+          Alert.alert(
+            "Some days still need a driver",
+            "Please choose another driver for the remaining days.",
+            [
+              {
+                text: "OK",
+                onPress: () =>
+                  router.replace({
+                    pathname: "/booking/driverresults",
+                    params: {
+                      ...resultsPassthrough,
+                      bookingType: "weekly",
+                      weeklyDays: JSON.stringify(remainingWeeklyDays),
+                    },
+                  } as any),
+              },
+            ],
+          );
+          return;
+        }
+
+        router.replace({
+          pathname: "/(tabs)/bookings",
+          params: { tab: "passenger" },
+        } as any);
+      } catch (error: any) {
+        Alert.alert(
+          "Error",
+          error?.message || "Could not confirm the booking.",
+        );
+      } finally {
+        setProcessing(false);
+      }
+
+      return;
+    }
+
     try {
       setProcessing(true);
       const pickup = await resolvePickup();
@@ -393,7 +492,7 @@ const createBookingAfterPayment = async (
               </Text>
             </View>
 
-            {date ? (
+            {!isWeekly && date ? (
               <View style={styles.summaryRow}>
                 <Ionicons name="calendar-outline" size={15} color="#7C5F46" />
                 <Text style={styles.summaryText}>
@@ -403,26 +502,57 @@ const createBookingAfterPayment = async (
               </View>
             ) : null}
 
-            {time ? (
+            {!isWeekly && time ? (
               <View style={styles.summaryRow}>
                 <Ionicons name="time-outline" size={15} color="#7C5F46" />
                 <Text style={styles.summaryText}>{time}</Text>
               </View>
             ) : null}
 
-            {seats !== null ? (
+            {!isWeekly && seats !== null ? (
               <View style={styles.summaryRow}>
                 <Ionicons name="people-outline" size={15} color="#7C5F46" />
                 <Text style={styles.summaryText}>{seats} seats</Text>
               </View>
             ) : null}
 
+            {isWeekly ? (
+              <View style={styles.weeklyDaysBox}>
+                <Text style={styles.weeklyDaysTitle}>Selected days</Text>
+
+                {selectedWeeklyDays.map((dayItem) => (
+                  <View key={dayItem.date} style={styles.weeklyDayRow}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={15}
+                      color="#7C5F46"
+                    />
+                    <Text style={styles.summaryText}>
+                      {dayItem.dayName} — {dayItem.date} · {dayItem.time} ·{" "}
+                      {dayItem.seats} seats · {dayItem.price} ₪
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
             <View style={styles.amountRow}>
               <Text style={styles.amountLabel}>Amount</Text>
               <Text style={styles.amountValue}>
-                {price !== null ? `${price} ₪` : "—"}
+                {isWeekly
+                  ? `${weeklyTotal} ₪`
+                  : price !== null
+                    ? `${price} ₪`
+                    : "—"}
               </Text>
             </View>
+
+            {isWeekly ? (
+              <Text style={styles.weeklyHint}>
+                Card total = price × seats, summed across selected days. For
+                cash, pay each day directly to the driver.
+              </Text>
+            ) : null}
           </View>
 
           <Text style={styles.sectionTitle}>Payment Method</Text>
@@ -626,6 +756,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     flexShrink: 1,
+  },
+  weeklyDaysBox: {
+    marginTop: 4,
+    marginBottom: 4,
+    gap: 6,
+  },
+  weeklyDaysTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 2,
+  },
+  weeklyDayRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  weeklyHint: {
+    color: "#7C5F46",
+    fontSize: 12,
+    marginTop: 8,
   },
   amountRow: {
     flexDirection: "row",

@@ -30,11 +30,15 @@ import {
 import { auth, db } from "../../firebase";
 import {
   BookingItem,
+  canStartTrip,
+  compareBookingsByDate,
   DriverTripItem,
   getCategoryMeta,
+  getStartTripBlockedReason,
   markCompleted,
   normalizeBooking,
   normalizeDriverTrip,
+  sortBookingsByDate,
 } from "../booking/bookingsLib";
 import {
   arriveRide,
@@ -461,16 +465,16 @@ const bookedRouteIds = useMemo(() => {
 
 const driverTrips = useMemo(
   () =>
-    [...routes, ...workJobs, ...errandJobs]
-      .filter((t) => {
+    sortBookingsByDate(
+      [...routes, ...workJobs, ...errandJobs].filter((t) => {
         // إذا رحلة مدرسة انحجزت، لا تعرض كرت driverRoutes الأصلي
         if (t.collectionName === "driverRoutes" && bookedRouteIds.has(t.id)) {
           return false;
         }
 
         return true;
-      })
-      .sort((a, b) => b.createdAtSeconds - a.createdAtSeconds),
+      }),
+    ),
   [routes, workJobs, errandJobs, bookedRouteIds],
 );
 
@@ -492,11 +496,16 @@ const driverTrips = useMemo(
       })),
     ];
 
-    return rows.sort((a, b) => b.createdAtSeconds - a.createdAtSeconds);
+    return rows.sort((a, b) =>
+      compareBookingsByDate(
+        a.kind === "trip" ? a.trip : a.booking,
+        b.kind === "trip" ? b.trip : b.booking,
+      ),
+    );
   }, [driverTrips, driverRoadside]);
 
   const sortedBookings = useMemo(
-    () => [...bookings].sort((a, b) => b.createdAtSeconds - a.createdAtSeconds),
+    () => sortBookingsByDate(bookings),
     [bookings],
   );
 
@@ -516,16 +525,12 @@ const driverTrips = useMemo(
   );
 
   const sortedPassengerRides = useMemo(
-    () =>
-      [...passengerRides].sort(
-        (a, b) => b.createdAtSeconds - a.createdAtSeconds,
-      ),
+    () => sortBookingsByDate(passengerRides),
     [passengerRides],
   );
 
   const sortedDriverRides = useMemo(
-    () =>
-      [...driverRides].sort((a, b) => b.createdAtSeconds - a.createdAtSeconds),
+    () => sortBookingsByDate(driverRides),
     [driverRides],
   );
 
@@ -595,8 +600,14 @@ const driverTrips = useMemo(
     } as any);
   };
 
+  // Live Tracking is a School Ride–only feature. Personal Ride never shows
+  // it, for either the passenger or the driver, regardless of trip status.
   const canShowLiveTracking = (item: any) => {
-    return item?.trackingEnabled === true && item?.tripStatus === "arrived_pickup";
+    return (
+      item?.category === "school" &&
+      item?.trackingEnabled === true &&
+      item?.tripStatus === "arrived_pickup"
+    );
   };
 
   const getBookingTripLabel = (b: BookingItem) => {
@@ -887,7 +898,16 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     setRebook(null);
   };
 
-  const handleRideStart = (r: RideBooking) =>
+  const handleRideStart = (r: RideBooking) => {
+    if (!canStartTrip(r)) {
+      Alert.alert(
+        "Not available yet",
+        getStartTripBlockedReason(r) ||
+          "You can start this trip only on the trip date.",
+      );
+      return;
+    }
+
     runApp(r.id, async () => {
       await startRide(r.id, r);
       router.push({
@@ -895,6 +915,7 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         params: { id: r.id },
       } as any);
     });
+  };
 
   const handleRideOpenMap = (r: RideBooking) =>
     router.push({
@@ -1212,6 +1233,8 @@ useEffect(() => {
     const meta = getCategoryMeta(RIDE_CATEGORY);
     const otherName = viewer === "passenger" ? r.driverName : r.passengerName;
     const busy = busyId === r.id;
+    const rideCanStart = canStartTrip(r);
+    const rideBlockedReason = getStartTripBlockedReason(r);
 
     return (
       <View
@@ -1305,15 +1328,8 @@ useEffect(() => {
 
           {viewer === "passenger" ? (
             <>
-              {canShowLiveTracking(r) ? (
-                <Pressable
-                  style={styles.liveTrackButton}
-                  onPress={() => openLiveTracking(r.id)}
-                >
-                  <Ionicons name="map-outline" size={17} color="#FFFFFF" />
-                  <Text style={styles.liveTrackButtonText}>Live Tracking</Text>
-                </Pressable>
-              ) : null}
+              {/* Personal Ride never shows Live Tracking — renderRideCard is
+                  exclusively the personal ride pipeline (RIDE_CATEGORY). */}
 
               {r.status === "completed" && bookingNeedsRating(r) ? (
                 <Pressable
@@ -1340,14 +1356,23 @@ useEffect(() => {
         ) : (
           <>
             {r.status === "booked" ? (
-              <Pressable
-                style={styles.startButton}
-                onPress={() => handleRideStart(r)}
-                disabled={busy}
-              >
-                <Ionicons name="play" size={16} color="#FFFFFF" />
-                <Text style={styles.startButtonText}>Start Ride</Text>
-              </Pressable>
+              <>
+                <Pressable
+                  style={[
+                    styles.startButton,
+                    !rideCanStart && styles.startDisabled,
+                  ]}
+                  onPress={() => handleRideStart(r)}
+                  disabled={busy || !rideCanStart}
+                >
+                  <Ionicons name="play" size={16} color="#FFFFFF" />
+                  <Text style={styles.startButtonText}>Start Ride</Text>
+                </Pressable>
+
+                {!rideCanStart && rideBlockedReason ? (
+                  <Text style={styles.appHint}>{rideBlockedReason}</Text>
+                ) : null}
+              </>
             ) : null}
 
             {r.status === "on_the_way" ? (
@@ -1440,7 +1465,13 @@ useEffect(() => {
     const tripStatus = (b as any).tripStatus;
     const done = b.status === "completed" || tripStatus === "completed";
     const isSchool = b.category === "school";
+    const isPersonalCategory = b.category === "personal";
+    // School and (weekly) personal bookings both drive through the ride
+    // navigation screen for their Start Ride -> Finish Trip lifecycle.
+    const usesRideNavigation = isSchool || isPersonalCategory;
     const isDriverView = viewer === "driver";
+    const bookingCanStart = canStartTrip(b);
+    const bookingBlockedReason = getStartTripBlockedReason(b);
 
     return (
       <View key={b.id} style={[styles.card, done && styles.cardDone]}>
@@ -1542,7 +1573,7 @@ useEffect(() => {
               </Pressable>
             ) : null}
 
-            {!done && !isSchool ? (
+            {!done && !usesRideNavigation ? (
               <Pressable
                 style={styles.completeButton}
                 onPress={() => confirmComplete("bookings", b.id, "booking")}
@@ -1554,17 +1585,38 @@ useEffect(() => {
           </>
         ) : (
           <>
-            {isSchool && tripStatus === "booked" ? (
-              <Pressable
-                style={styles.startButton}
-                onPress={() => openSchoolRideNavigation(b.id)}
-              >
-                <Ionicons name="play" size={16} color="#FFFFFF" />
-                <Text style={styles.startButtonText}>Start Ride</Text>
-              </Pressable>
+            {usesRideNavigation && tripStatus === "booked" ? (
+              <>
+                <Pressable
+                  style={[
+                    styles.startButton,
+                    !bookingCanStart && styles.startDisabled,
+                  ]}
+                  onPress={() => {
+                    if (!canStartTrip(b)) {
+                      Alert.alert(
+                        "Not available yet",
+                        getStartTripBlockedReason(b) ||
+                          "You can start this trip only on the trip date.",
+                      );
+                      return;
+                    }
+
+                    openSchoolRideNavigation(b.id);
+                  }}
+                  disabled={!bookingCanStart}
+                >
+                  <Ionicons name="play" size={16} color="#FFFFFF" />
+                  <Text style={styles.startButtonText}>Start Ride</Text>
+                </Pressable>
+
+                {!bookingCanStart && bookingBlockedReason ? (
+                  <Text style={styles.appHint}>{bookingBlockedReason}</Text>
+                ) : null}
+              </>
             ) : null}
 
-            {isSchool &&
+            {usesRideNavigation &&
             (tripStatus === "driver_on_way" ||
               tripStatus === "arrived_pickup" ||
               tripStatus === "in_progress") ? (
@@ -1577,7 +1629,7 @@ useEffect(() => {
               </Pressable>
             ) : null}
 
-            {!isSchool && !done ? (
+            {!usesRideNavigation && !done ? (
               <Pressable
                 style={styles.completeButton}
                 onPress={() => confirmComplete("bookings", b.id, "booking")}
@@ -1736,6 +1788,94 @@ useEffect(() => {
         </View>
       </View>
     );
+  };
+
+  // Weekly bookings share a bookingGroupId (one document per booked day,
+  // possibly with different drivers). Render each group's day-cards together
+  // under one "Weekly booking" header instead of scattering them in the list.
+  const renderWeeklyGroup = (groupItems: BookingItem[], viewer: Tab) => {
+    const sorted = [...groupItems].sort((a, b) =>
+      a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+    );
+
+    const dayLabels = sorted
+      .map((item) => item.dayName || item.date)
+      .filter(Boolean)
+      .join(", ");
+
+    return (
+      <View
+        key={`group-${sorted[0].bookingGroupId}`}
+        style={styles.weeklyGroupBox}
+      >
+        <View style={styles.weeklyGroupHeader}>
+          <Ionicons name="calendar-outline" size={15} color="#F58220" />
+          <Text style={styles.weeklyGroupHeaderText}>
+            Weekly booking{dayLabels ? ` · ${dayLabels}` : ""}
+          </Text>
+        </View>
+
+        {sorted.map((item) => renderBookingCard(item, viewer))}
+      </View>
+    );
+  };
+
+  const renderGeneralBookingItems = (items: BookingItem[], viewer: Tab) => {
+    const renderedGroupIds = new Set<string>();
+
+    return items.map((b) => {
+      if (b.category === "roadside") {
+        return renderRoadsideCard(b, viewer);
+      }
+
+      if (b.bookingGroupId) {
+        if (renderedGroupIds.has(b.bookingGroupId)) return null;
+
+        renderedGroupIds.add(b.bookingGroupId);
+
+        const groupItems = items.filter(
+          (item) => item.bookingGroupId === b.bookingGroupId,
+        );
+
+        return renderWeeklyGroup(groupItems, viewer);
+      }
+
+      return renderBookingCard(b, viewer);
+    });
+  };
+
+  const renderDriverRowItems = (rows: DriverRow[]) => {
+    const renderedGroupIds = new Set<string>();
+
+    return rows.map((r) => {
+      if (r.kind === "trip") {
+        return renderTripCard(r.trip);
+      }
+
+      const b = r.booking;
+
+      if (b.category === "roadside") {
+        return renderRoadsideCard(b, "driver");
+      }
+
+      if (b.bookingGroupId) {
+        if (renderedGroupIds.has(b.bookingGroupId)) return null;
+
+        renderedGroupIds.add(b.bookingGroupId);
+
+        const groupItems = rows
+          .filter(
+            (row) =>
+              row.kind === "booking" &&
+              row.booking.bookingGroupId === b.bookingGroupId,
+          )
+          .map((row) => (row as Extract<DriverRow, { kind: "booking" }>).booking);
+
+        return renderWeeklyGroup(groupItems, "driver");
+      }
+
+      return renderBookingCard(b, "driver");
+    });
   };
 
   const renderApplicationCard = (a: NormalizedApplication, viewer: Tab) => {
@@ -2104,11 +2244,7 @@ useEffect(() => {
                 {filteredPassengerApps.map((a) =>
                   renderApplicationCard(a, "passenger"),
                 )}
-                {filteredBookings.map((b) =>
-                  b.category === "roadside"
-                    ? renderRoadsideCard(b, "passenger")
-                    : renderBookingCard(b, "passenger"),
-                )}
+                {renderGeneralBookingItems(filteredBookings, "passenger")}
               </>
             ) : (
               <>
@@ -2116,13 +2252,7 @@ useEffect(() => {
                 {filteredDriverApps.map((a) =>
                   renderApplicationCard(a, "driver"),
                 )}
-                {filteredDriverRows.map((r) =>
-                  r.kind === "trip"
-                    ? renderTripCard(r.trip)
-                    : r.booking.category === "roadside"
-                      ? renderRoadsideCard(r.booking, "driver")
-                      : renderBookingCard(r.booking, "driver"),
-                )}
+                {renderDriverRowItems(filteredDriverRows)}
               </>
             )}
           </View>
@@ -2296,6 +2426,27 @@ useEffect(() => {
 }
 
 const styles = StyleSheet.create({
+  weeklyGroupBox: {
+    borderWidth: 1,
+    borderColor: "#F58220",
+    borderRadius: 20,
+    padding: 10,
+    marginBottom: 18,
+    backgroundColor: "#FFF8F2",
+    gap: 12,
+  },
+  weeklyGroupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 6,
+  },
+  weeklyGroupHeaderText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#B86115",
+    flexShrink: 1,
+  },
   page: {
     flex: 1,
     backgroundColor: "#FBF7F1",

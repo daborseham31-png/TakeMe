@@ -27,7 +27,12 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
-import { DriverLiveLocation, TripTrackingStatus } from "./bookingsLib";
+import {
+  canStartTrip,
+  DriverLiveLocation,
+  getStartTripBlockedReason,
+  TripTrackingStatus,
+} from "./bookingsLib";
 import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
 export const RIDE_CATEGORY = "personal_ride";
@@ -236,6 +241,13 @@ export const hideRideBookingForDriver = async (
 // ---------------------------------------------------------------------------
 
 export const startRide = async (bookingId: string, booking: RideBooking) => {
+  if (!canStartTrip(booking)) {
+    throw new Error(
+      getStartTripBlockedReason(booking) ||
+        "You can start this trip only on the trip date.",
+    );
+  }
+
   await updateDoc(doc(db, "bookings", bookingId), {
     status: "on_the_way",
     tripStatus: "driver_on_way" as TripTrackingStatus,

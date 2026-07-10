@@ -17,6 +17,7 @@ import {
 import MapView, { Marker } from "react-native-maps";
 
 import { db } from "../../firebase";
+import { canStartTrip, getStartTripBlockedReason } from "../booking/bookingsLib";
 import { normalizeRideBooking, RideBooking } from "../booking/rideBookingLib";
 import { notify } from "../booking/work-errand/workErrandLib";
 
@@ -189,6 +190,19 @@ useEffect(() => {
   const updateTripStatus = async (nextStatus: TripStatus) => {
     if (!id || !booking) return;
 
+    // Guard the actual write, not just the button — this is the one place
+    // that flips tripStatus to driver_on_way for school + weekly bookings
+    // reached through this screen, so it must never allow starting a trip
+    // outside its own trip date even if this gets called some other way.
+    if (nextStatus === "driver_on_way" && !canStartTrip(booking)) {
+      Alert.alert(
+        "Not available yet",
+        getStartTripBlockedReason(booking) ||
+          "You can start this trip only on the trip date.",
+      );
+      return;
+    }
+
     const payload: any = {
       tripStatus: nextStatus,
       updatedAt: serverTimestamp(),
@@ -316,6 +330,15 @@ useEffect(() => {
   };
 
   const handleStartDriving = () => {
+    if (!booking || !canStartTrip(booking)) {
+      Alert.alert(
+        "Not available yet",
+        getStartTripBlockedReason(booking) ||
+          "You can start this trip only on the trip date.",
+      );
+      return;
+    }
+
     Alert.alert("Start driving", "Start driving to pickup?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -405,6 +428,8 @@ useEffect(() => {
   const driverLocation = getDriverLocation(booking);
   const tripStatus = getTripStatus(booking);
   const completed = tripStatus === "completed";
+  const canStart = canStartTrip(booking);
+  const blockedReason = getStartTripBlockedReason(booking);
 
   const mapCenter = driverLocation
     ? {
@@ -563,20 +588,31 @@ useEffect(() => {
         ) : (
           <View style={styles.actionsCard}>
             {tripStatus === "booked" ? (
-              <Pressable
-                style={[styles.actionButton, busy && styles.disabled]}
-                onPress={handleStartDriving}
-                disabled={busy}
-              >
-                {busy ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name="car-outline" size={19} color="#FFFFFF" />
-                    <Text style={styles.actionText}>Start Driving to Pickup</Text>
-                  </>
-                )}
-              </Pressable>
+              <>
+                <Pressable
+                  style={[
+                    styles.actionButton,
+                    (busy || !canStart) && styles.disabled,
+                  ]}
+                  onPress={handleStartDriving}
+                  disabled={busy || !canStart}
+                >
+                  {busy ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="car-outline" size={19} color="#FFFFFF" />
+                      <Text style={styles.actionText}>
+                        Start Driving to Pickup
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {!canStart && blockedReason ? (
+                  <Text style={styles.gateHint}>{blockedReason}</Text>
+                ) : null}
+              </>
             ) : null}
 
             {tripStatus === "driver_on_way" ? (
@@ -802,6 +838,13 @@ const styles = StyleSheet.create({
   trackingHint: {
     marginTop: 12,
     color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 13,
+    textAlign: "center",
+  },
+  gateHint: {
+    marginTop: 10,
+    color: "#B86115",
     fontWeight: "800",
     fontSize: 13,
     textAlign: "center",

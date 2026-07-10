@@ -12,6 +12,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -22,6 +23,14 @@ import {
 
 import { db } from "../../firebase";
 import { createPassengerBooking } from "./bookingsLib";
+import {
+  buildBookingDayFromMatch,
+  computeWeeklyTotal,
+  matchDriverWeeklyDays,
+  WeeklyDayMatch,
+  WeeklyDriverDay,
+  WeeklyRequestDay,
+} from "./weeklyBookingLib";
 
 type DriverProfile = {
   name?: string;
@@ -72,6 +81,7 @@ type DriverRoute = {
   time?: string;
   price?: number;
   seats?: number;
+  weeklyTrips?: WeeklyDriverDay[];
   storeName?: string;
   recipientPhone?: string;
   itemDescription?: string;
@@ -285,9 +295,19 @@ export default function DriverResultsScreen() {
   const params = useLocalSearchParams();
 
   const [drivers, setDrivers] = useState<DriverRoute[]>([]);
+  const [weeklyMatches, setWeeklyMatches] = useState<
+    Record<string, WeeklyDayMatch[]>
+  >({});
   const [loading, setLoading] = useState(true);
   const [expandedDriver, setExpandedDriver] = useState<string | null>(null);
   const [bookingBusy, setBookingBusy] = useState(false);
+
+  const [dayPickerDriver, setDayPickerDriver] = useState<DriverRoute | null>(
+    null,
+  );
+  const [dayPickerSelected, setDayPickerSelected] = useState<Set<string>>(
+    new Set(),
+  );
 
   const from = String(params.from || "");
   const to = String(params.to || "");
@@ -295,44 +315,29 @@ export default function DriverResultsScreen() {
   const genderPref = String(params.genderPref || "any");
   const seats = Number(params.seats || 1);
 
-const requestedTime = String(params.time || "");
-const requestedDate = String(params.tripDate || "");
-const requestedDay = String(params.tripDay || "");
+  const requestedTime = String(params.time || "");
+  const requestedDate = String(params.tripDate || "");
+  const requestedDay = String(params.tripDay || "");
 
-const bookingType = String(params.bookingType || "quick");
+  const bookingType = String(params.bookingType || "quick");
+  const isWeekly = bookingType === "weekly";
 
-let requestedWeeklyTrips: {
-  day: string;
-  date: string;
-  time: string;
-  seats: number;
-}[] = [];
+  let requestedWeeklyDays: WeeklyRequestDay[] = [];
 
-try {
-  const parsed = JSON.parse(String(params.weeklyTrips || "[]"));
-  requestedWeeklyTrips = Array.isArray(parsed) ? parsed : [];
-} catch {
-  requestedWeeklyTrips = [];
-}
+  try {
+    const parsed = JSON.parse(String(params.weeklyDays || "[]"));
+    requestedWeeklyDays = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    requestedWeeklyDays = [];
+  }
 
   const selectedLanguages = String(params.languages || "")
     .split(",")
     .filter(Boolean);
 
-  const requestedDays = String(params.days || "")
-    .split(",")
-    .filter(Boolean);
-
-  let requestedDayTimes: Record<string, string> = {};
-
-  try {
-    requestedDayTimes = JSON.parse(String(params.dayTimes || "{}"));
-  } catch {
-    requestedDayTimes = {};
-  }
-
   useEffect(() => {
     loadDrivers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadDrivers = async () => {
@@ -383,7 +388,7 @@ try {
         }),
       );
 
-      const filtered = routesWithProfilesAndReviews.filter((driver) => {
+      const commonFiltered = routesWithProfilesAndReviews.filter((driver) => {
         const driverFrom =
           driver.fromNormalized || normalize(driver.from || "");
         const driverTo = driver.toNormalized || normalize(driver.to || "");
@@ -404,6 +409,38 @@ try {
           selectedLanguages.length === 0 ||
           selectedLanguages.some((lang) => driverLanguages.includes(lang));
 
+        return (
+          activeMatches &&
+          categoryMatches &&
+          fromMatches &&
+          toMatches &&
+          genderMatches &&
+          languageMatches
+        );
+      });
+
+      if (isWeekly) {
+        const matchesMap: Record<string, WeeklyDayMatch[]> = {};
+
+        const matchedDrivers = commonFiltered.filter((driver) => {
+          const matches = matchDriverWeeklyDays(
+            driver,
+            requestedWeeklyDays,
+            { maxTimeDiffMinutes: MAX_TIME_DIFF_MINUTES },
+          );
+
+          if (matches.length === 0) return false;
+
+          matchesMap[driver.id] = matches;
+          return true;
+        });
+
+        setWeeklyMatches(matchesMap);
+        setDrivers(matchedDrivers);
+        return;
+      }
+
+      const filtered = commonFiltered.filter((driver) => {
         const isDelivery = driver.category === "delivery";
 
         const seatsMatches = isDelivery
@@ -415,37 +452,10 @@ try {
           driver.tripDate === requestedDate ||
           driver.deliveryDate === requestedDate;
 
-        let timeMatches = true;
+        const timeMatches =
+          !requestedTime || isTimeClose(driver.time, requestedTime);
 
-        if (isDelivery) {
-          timeMatches =
-            !requestedTime || isTimeClose(driver.time, requestedTime);
-        } else if (requestedDays.length > 0) {
-          timeMatches = requestedDays.some((day) => {
-            const driverDays = driver.availableDays || [];
-            const passengerTimeForDay = requestedDayTimes[day];
-
-            return (
-              driverDays.includes(day) &&
-              isTimeClose(driver.time, passengerTimeForDay)
-            );
-          });
-        } else {
-          timeMatches =
-            !requestedTime || isTimeClose(driver.time, requestedTime);
-        }
-
-        return (
-          activeMatches &&
-          categoryMatches &&
-          fromMatches &&
-          toMatches &&
-          genderMatches &&
-          languageMatches &&
-          seatsMatches &&
-          dateMatches &&
-          timeMatches
-        );
+        return seatsMatches && dateMatches && timeMatches;
       });
 
       setDrivers(filtered);
@@ -465,16 +475,9 @@ const handleBookDriver = async (driver: DriverRoute) => {
   const isPersonal =
     currentCategory === "personal" || currentCategory === "personal_ride";
   const isSchool = currentCategory === "school";
-  const isWeeklySchool = isSchool && bookingType === "weekly";
 
   const driverPrice = Number(driver.price || 0);
-
-  const totalPrice = isWeeklySchool
-    ? requestedWeeklyTrips.reduce(
-        (sum, trip) => sum + driverPrice * Number(trip.seats || seats || 1),
-        0,
-      )
-    : driverPrice * (isDelivery ? 1 : seats);
+  const totalPrice = driverPrice * (isDelivery ? 1 : seats);
 
   const selectedDate =
     driver.tripDate || driver.deliveryDate || requestedDate || "";
@@ -490,7 +493,7 @@ const handleBookDriver = async (driver: DriverRoute) => {
       pathname: "/booking/ride-payment",
       params: {
         category: isSchool ? "school" : "personal",
-        bookingType,
+        bookingType: "quick",
 
         driverId: driver.driverId || "",
         driverName: getDriverName(driver),
@@ -508,12 +511,6 @@ const handleBookDriver = async (driver: DriverRoute) => {
         seats: String(seats),
         price: String(totalPrice),
         unitPrice: String(driverPrice),
-
-        days: requestedDays.join(","),
-        dayTimes: String(params.dayTimes || "{}"),
-        daySeats: String(params.daySeats || "{}"),
-        dayDates: String(params.dayDates || "{}"),
-        weeklyTrips: JSON.stringify(requestedWeeklyTrips),
 
         driverCar: driver.car || "",
         driverCarColor: driver.carColor || "",
@@ -557,6 +554,99 @@ const handleBookDriver = async (driver: DriverRoute) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Weekly: "Book This Driver" opens a day-selection modal instead of going
+// straight to payment. Matching is day-by-day, so the passenger can split
+// their weekly request across multiple drivers.
+// ---------------------------------------------------------------------------
+
+const openWeeklyDayPicker = (driver: DriverRoute) => {
+  const matches = weeklyMatches[driver.id] || [];
+  if (matches.length === 0) return;
+
+  setDayPickerDriver(driver);
+  setDayPickerSelected(new Set(matches.map((match) => match.requested.date)));
+};
+
+const closeWeeklyDayPicker = () => {
+  setDayPickerDriver(null);
+  setDayPickerSelected(new Set());
+};
+
+const toggleWeeklyDaySelection = (date: string) => {
+  setDayPickerSelected((prev) => {
+    const next = new Set(prev);
+
+    if (next.has(date)) {
+      next.delete(date);
+    } else {
+      next.add(date);
+    }
+
+    return next;
+  });
+};
+
+const selectAllWeeklyDays = () => {
+  if (!dayPickerDriver) return;
+
+  const matches = weeklyMatches[dayPickerDriver.id] || [];
+  setDayPickerSelected(new Set(matches.map((match) => match.requested.date)));
+};
+
+const confirmWeeklyDayPicker = () => {
+  if (!dayPickerDriver) return;
+
+  const matches = weeklyMatches[dayPickerDriver.id] || [];
+  const chosen = matches.filter((match) =>
+    dayPickerSelected.has(match.requested.date),
+  );
+
+  if (chosen.length === 0) {
+    Alert.alert("Choose a day", "Please select at least one day to continue.");
+    return;
+  }
+
+  const driver = dayPickerDriver;
+  const selectedDaysForBooking = chosen.map(buildBookingDayFromMatch);
+  const chosenDates = new Set(chosen.map((match) => match.requested.date));
+  const remainingDays = requestedWeeklyDays.filter(
+    (day) => !chosenDates.has(day.date),
+  );
+
+  closeWeeklyDayPicker();
+
+  router.push({
+    pathname: "/booking/ride-payment",
+    params: {
+      category: category === "school" ? "school" : "personal",
+      bookingType: "weekly",
+
+      driverId: driver.driverId || "",
+      driverName: getDriverName(driver),
+      driverPhone: getDriverPhone(driver),
+
+      routeId: driver.id,
+
+      from: driver.from || from,
+      to: driver.to || to,
+
+      driverCar: driver.car || "",
+      driverCarColor: driver.carColor || "",
+      driverCarPlateLast3: (driver.carPlate || "").replace(/\D/g, "").slice(-3),
+
+      selectedWeeklyDays: JSON.stringify(selectedDaysForBooking),
+      remainingWeeklyDays: JSON.stringify(remainingDays),
+
+      // Passthrough so ride-payment can rebuild this results search if
+      // some requested days still need a driver after this booking.
+      schoolName: String(params.schoolName || ""),
+      genderPref,
+      languages: String(params.languages || ""),
+    },
+  } as any);
+};
+
   if (loading) {
     return (
       <SafeAreaView style={styles.page}>
@@ -592,8 +682,17 @@ const availableDrivers = drivers.filter((driver: any) => {
           {from || "Any location"} → {to || "Any destination"}
         </Text>
 
-        {requestedDate ? (
+        {!isWeekly && requestedDate ? (
           <Text style={styles.routeText}>📅 {requestedDate}</Text>
+        ) : null}
+
+        {isWeekly ? (
+          <Text style={styles.routeText}>
+            📅 Weekly:{" "}
+            {requestedWeeklyDays
+              .map((day) => `${day.dayName} ${day.date}`)
+              .join(", ")}
+          </Text>
         ) : null}
 
         {availableDrivers.length === 0? (
@@ -677,64 +776,78 @@ const availableDrivers = drivers.filter((driver: any) => {
                     </View>
                   </View>
 
-                  <View style={styles.detailsPanel}>
-                    <View style={styles.detailsColumn}>
-                      {(dateText || daysText) && (
-                        <View style={styles.detailRow}>
-                          <View style={styles.iconCircle}>
-                            <Ionicons
-                              name="calendar-outline"
-                              size={17}
-                              color="#F58220"
-                            />
-                          </View>
+                  {isWeekly ? (
+                    <View style={styles.weeklyAvailBox}>
+                      <Text style={styles.weeklyAvailTitle}>
+                        Available for:
+                      </Text>
 
-                          <View style={styles.detailTextBox}>
-                            {dateText ? (
-                              <Text style={styles.detailMainText}>
-                                {dateText}
-                              </Text>
-                            ) : null}
-
-                            {daysText ? (
-                              <Text style={styles.detailSubText}>
-                                {daysText}
-                              </Text>
-                            ) : null}
-                          </View>
+                      {(weeklyMatches[driver.id] || []).map((match) => (
+                        <View
+                          key={match.requested.date}
+                          style={styles.weeklyAvailRow}
+                        >
+                          <Ionicons
+                            name="calendar-outline"
+                            size={15}
+                            color="#F58220"
+                          />
+                          <Text style={styles.weeklyAvailText}>
+                            {match.driverDay.dayName} · {match.driverDay.date}{" "}
+                            · {match.driverDay.time} · {match.driverDay.price}{" "}
+                            ₪
+                          </Text>
                         </View>
-                      )}
+                      ))}
 
                       <View style={styles.softLine} />
 
-                      <View style={styles.detailRow}>
-                        <View style={styles.iconCircle}>
-                          <Ionicons
-                            name="time-outline"
-                            size={17}
-                            color="#F58220"
-                          />
-                        </View>
-
-                        <View style={styles.detailTextBox}>
-                          <Text style={styles.detailMainText}>
-                            {driver.time || "--:--"}
-                          </Text>
-                          <Text style={styles.detailSubText}>
-                            {isDelivery ? "Arrival time" : "Departure time"}
-                          </Text>
-                        </View>
-                      </View>
+                      <Text style={styles.priceText}>
+                        Total if all days booked:{" "}
+                        {computeWeeklyTotal(
+                          (weeklyMatches[driver.id] || []).map((match) => ({
+                            price: match.driverDay.price,
+                            seats: match.requested.seats,
+                          })),
+                        )}{" "}
+                        ₪
+                      </Text>
                     </View>
+                  ) : (
+                    <View style={styles.detailsPanel}>
+                      <View style={styles.detailsColumn}>
+                        {(dateText || daysText) && (
+                          <View style={styles.detailRow}>
+                            <View style={styles.iconCircle}>
+                              <Ionicons
+                                name="calendar-outline"
+                                size={17}
+                                color="#F58220"
+                              />
+                            </View>
 
-                    <View style={styles.verticalDivider} />
+                            <View style={styles.detailTextBox}>
+                              {dateText ? (
+                                <Text style={styles.detailMainText}>
+                                  {dateText}
+                                </Text>
+                              ) : null}
 
-                    <View style={styles.detailsColumn}>
-                      {!isDelivery && (
+                              {daysText ? (
+                                <Text style={styles.detailSubText}>
+                                  {daysText}
+                                </Text>
+                              ) : null}
+                            </View>
+                          </View>
+                        )}
+
+                        <View style={styles.softLine} />
+
                         <View style={styles.detailRow}>
                           <View style={styles.iconCircle}>
                             <Ionicons
-                              name="people-outline"
+                              name="time-outline"
                               size={17}
                               color="#F58220"
                             />
@@ -742,31 +855,60 @@ const availableDrivers = drivers.filter((driver: any) => {
 
                           <View style={styles.detailTextBox}>
                             <Text style={styles.detailMainText}>
-                              {driver.seats || 1} seats
+                              {driver.time || "--:--"}
                             </Text>
-                            <Text style={styles.detailSubText}>Available</Text>
+                            <Text style={styles.detailSubText}>
+                              {isDelivery ? "Arrival time" : "Departure time"}
+                            </Text>
                           </View>
                         </View>
-                      )}
+                      </View>
 
-                      {!isDelivery && <View style={styles.softLine} />}
+                      <View style={styles.verticalDivider} />
 
-                      <View style={styles.detailRow}>
-                        <View style={styles.iconCircle}>
-                          <Ionicons
-                            name="bag-outline"
-                            size={17}
-                            color="#F58220"
-                          />
-                        </View>
+                      <View style={styles.detailsColumn}>
+                        {!isDelivery && (
+                          <View style={styles.detailRow}>
+                            <View style={styles.iconCircle}>
+                              <Ionicons
+                                name="people-outline"
+                                size={17}
+                                color="#F58220"
+                              />
+                            </View>
 
-                        <View style={styles.detailTextBox}>
-                          <Text style={styles.priceText}>{totalPrice} ₪</Text>
-                          <Text style={styles.detailSubText}>Price</Text>
+                            <View style={styles.detailTextBox}>
+                              <Text style={styles.detailMainText}>
+                                {driver.seats || 1} seats
+                              </Text>
+                              <Text style={styles.detailSubText}>
+                                Available
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+
+                        {!isDelivery && <View style={styles.softLine} />}
+
+                        <View style={styles.detailRow}>
+                          <View style={styles.iconCircle}>
+                            <Ionicons
+                              name="bag-outline"
+                              size={17}
+                              color="#F58220"
+                            />
+                          </View>
+
+                          <View style={styles.detailTextBox}>
+                            <Text style={styles.priceText}>
+                              {totalPrice} ₪
+                            </Text>
+                            <Text style={styles.detailSubText}>Price</Text>
+                          </View>
                         </View>
                       </View>
                     </View>
-                  </View>
+                  )}
 
                   <View style={styles.badgesRow}>
                     {driverLanguages.map((lang) => (
@@ -891,7 +1033,11 @@ const availableDrivers = drivers.filter((driver: any) => {
 
                   <Pressable
                     style={[styles.bookButton, bookingBusy && { opacity: 0.6 }]}
-                    onPress={() => handleBookDriver(driver)}
+                    onPress={() =>
+                      isWeekly
+                        ? openWeeklyDayPicker(driver)
+                        : handleBookDriver(driver)
+                    }
                     disabled={bookingBusy}
                   >
                     <Text style={styles.bookButtonText}>Book This Driver</Text>
@@ -902,6 +1048,78 @@ const availableDrivers = drivers.filter((driver: any) => {
           </View>
         )}
       </ScrollView>
+
+      <Modal
+        visible={!!dayPickerDriver}
+        transparent
+        animationType="slide"
+        onRequestClose={closeWeeklyDayPicker}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalBackdrop} onPress={closeWeeklyDayPicker} />
+
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+
+            <Text style={styles.modalTitle}>
+              Choose days to book with this driver
+            </Text>
+
+            {dayPickerDriver ? (
+              <Text style={styles.modalSubtitle}>
+                {getDriverName(dayPickerDriver)}
+              </Text>
+            ) : null}
+
+            <ScrollView style={styles.modalList}>
+              {dayPickerDriver &&
+                (weeklyMatches[dayPickerDriver.id] || []).map((match) => {
+                  const checked = dayPickerSelected.has(match.requested.date);
+
+                  return (
+                    <Pressable
+                      key={match.requested.date}
+                      style={styles.modalDayRow}
+                      onPress={() => toggleWeeklyDaySelection(match.requested.date)}
+                    >
+                      <Ionicons
+                        name={checked ? "checkbox" : "square-outline"}
+                        size={22}
+                        color={checked ? "#F58220" : "#8B7B6B"}
+                      />
+
+                      <View style={styles.modalDayTextBox}>
+                        <Text style={styles.modalDayTitle}>
+                          {match.driverDay.dayName} — {match.driverDay.date}
+                        </Text>
+                        <Text style={styles.modalDaySubtitle}>
+                          {match.driverDay.time} · {match.requested.seats}{" "}
+                          seats · {match.driverDay.price} ₪
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+            </ScrollView>
+
+            <View style={styles.modalButtonsRow}>
+              <Pressable style={styles.modalSecondaryButton} onPress={selectAllWeeklyDays}>
+                <Text style={styles.modalSecondaryButtonText}>Select all</Text>
+              </Pressable>
+
+              <Pressable style={styles.modalSecondaryButton} onPress={closeWeeklyDayPicker}>
+                <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
+              </Pressable>
+            </View>
+
+            <Pressable style={styles.modalPrimaryButton} onPress={confirmWeeklyDayPicker}>
+              <Text style={styles.modalPrimaryButtonText}>
+                Continue to Payment
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1231,5 +1449,126 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 17,
     fontWeight: "900",
+  },
+  weeklyAvailBox: {
+    backgroundColor: "#FBF7F1",
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 14,
+    gap: 8,
+  },
+  weeklyAvailTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 2,
+  },
+  weeklyAvailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  weeklyAvailText: {
+    color: "#3C2319",
+    fontSize: 13,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "flex-end",
+  },
+  modalBackdrop: {
+    flex: 1,
+  },
+  modalSheet: {
+    backgroundColor: "#FBF7F1",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 34,
+    maxHeight: "80%",
+  },
+  modalHandle: {
+    alignSelf: "center",
+    width: 46,
+    height: 5,
+    borderRadius: 20,
+    backgroundColor: "#D8C9BC",
+    marginBottom: 14,
+  },
+  modalTitle: {
+    fontSize: 19,
+    fontWeight: "900",
+    color: "#111827",
+    textAlign: "center",
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: "#7C5F46",
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  modalList: {
+    marginBottom: 12,
+  },
+  modalDayRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 10,
+  },
+  modalDayTextBox: {
+    flex: 1,
+  },
+  modalDayTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  modalDaySubtitle: {
+    fontSize: 12,
+    color: "#7C5F46",
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  modalButtonsRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 10,
+  },
+  modalSecondaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  modalSecondaryButtonText: {
+    fontWeight: "900",
+    color: "#7C5F46",
+    fontSize: 15,
+  },
+  modalPrimaryButton: {
+    backgroundColor: "#F58220",
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: "center",
+  },
+  modalPrimaryButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 16,
   },
 });
