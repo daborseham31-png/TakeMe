@@ -15,6 +15,7 @@
 
 import {
   addDoc,
+  arrayUnion,
   collection,
   doc,
   getDoc,
@@ -23,6 +24,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
@@ -147,18 +149,34 @@ export const markConversationRead = async (convId: string) => {
   }
 };
 
-// Hide a conversation from the current user's list (does not delete messages
-// for the other participant).
+// Hide a conversation from the current user's list only (does not delete
+// messages, and never affects the other participant's own list).
 export const hideConversation = async (convId: string) => {
   const me = auth.currentUser;
   if (!me) return;
-  const ref = doc(db, "conversations", convId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return;
-  const data = snap.data();
-  const hiddenFor: string[] = Array.isArray(data.hiddenFor)
-    ? data.hiddenFor
-    : [];
-  if (!hiddenFor.includes(me.uid)) hiddenFor.push(me.uid);
-  await updateDoc(ref, { hiddenFor });
+
+  await updateDoc(doc(db, "conversations", convId), {
+    hiddenFor: arrayUnion(me.uid),
+  });
+};
+
+// "Clear All" — hide every currently-visible conversation for the current
+// user in one go. Still per-user (hiddenFor), never deletes the
+// conversation/messages, and never touches the other participant's list.
+export const clearAllConversations = async (conversationIds: string[]) => {
+  const me = auth.currentUser;
+  if (!me || conversationIds.length === 0) return;
+
+  // Firestore batched writes cap at 500 operations — chunk defensively.
+  for (let i = 0; i < conversationIds.length; i += 450) {
+    const batch = writeBatch(db);
+
+    conversationIds.slice(i, i + 450).forEach((id) => {
+      batch.update(doc(db, "conversations", id), {
+        hiddenFor: arrayUnion(me.uid),
+      });
+    });
+
+    await batch.commit();
+  }
 };

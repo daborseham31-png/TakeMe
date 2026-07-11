@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   Alert,
   Pressable,
@@ -12,14 +12,18 @@ import {
   View,
 } from "react-native";
 
+import CurrentLocationButton, {
+  CurrentLocationResult,
+} from "../booking/CurrentLocationButton";
+import { validateWeeklyRows, WeekDayRow } from "../booking/weeklyBookingLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
 import {
-  dayNames,
   getDayFromDateText,
   normalizeDateToYMD,
   normalizeTime,
   styles as weeklyStyles,
 } from "../driver/create/driverHelpers";
+import WeeklyDaysCard from "../driver/create/WeeklyDaysCard";
 
 const LANGUAGES_LIST = [
   { key: "ar", label: "العربية" },
@@ -71,8 +75,20 @@ const isTimeAvailableForDate = (dateText: string, timeText: string) => {
 };
 
 export default function PersonalRideScreen() {
+  // Manual matching field ("Nazareth") — this is what driver search compares
+  // against driver.from/driver.to. It is NEVER auto-filled with an exact GPS
+  // address, and using "Use my current location" below never touches it.
   const [fromLocation, setFromLocation] = useState("");
   const [toLocation, setToLocation] = useState("");
+
+  // Separate "pickup location for driver navigation" — an exact GPS point
+  // (+ readable address) used ONLY so the driver can navigate to the
+  // passenger. Never sent to driver matching, never written into `from`.
+  const [navAddress, setNavAddress] = useState("");
+  const [navCoords, setNavCoords] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
 
   const [tripDate, setTripDate] = useState(getTodayDate());
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
@@ -82,12 +98,7 @@ export default function PersonalRideScreen() {
   const [seats, setSeats] = useState(1);
 
   const [weeklyBooking, setWeeklyBooking] = useState(false);
-  const [selectedDays, setSelectedDays] = useState<string[]>([]);
-  const [dayTimes, setDayTimes] = useState<Record<string, string>>({});
-  const [daySeats, setDaySeats] = useState<Record<string, number>>({});
-  const [openWeeklyTimePickerDay, setOpenWeeklyTimePickerDay] = useState<
-    string | null
-  >(null);
+  const [weeklyRows, setWeeklyRows] = useState<WeekDayRow[]>([]);
 
   const [genderPref, setGenderPref] = useState<"any" | "male" | "female">(
     "any",
@@ -103,66 +114,20 @@ export default function PersonalRideScreen() {
     }
   };
 
-  const clearWeeklyDays = () => {
-    setSelectedDays([]);
-    setDayTimes({});
-    setDaySeats({});
-    setOpenWeeklyTimePickerDay(null);
-  };
-
   const toggleWeeklyBooking = () => {
     const nextValue = !weeklyBooking;
 
     setWeeklyBooking(nextValue);
 
     if (!nextValue) {
-      clearWeeklyDays();
+      setWeeklyRows([]);
     }
   };
 
-  const toggleDay = (day: string) => {
-    if (selectedDays.includes(day)) {
-      setSelectedDays((prev) => prev.filter((item) => item !== day));
-
-      setDayTimes((prev) => {
-        const next = { ...prev };
-        delete next[day];
-        return next;
-      });
-
-      setDaySeats((prev) => {
-        const next = { ...prev };
-        delete next[day];
-        return next;
-      });
-
-      if (openWeeklyTimePickerDay === day) {
-        setOpenWeeklyTimePickerDay(null);
-      }
-
-      return;
-    }
-
-    setSelectedDays((prev) => [...prev, day]);
-    setDayTimes((prev) => ({ ...prev, [day]: "09:00" }));
-    setDaySeats((prev) => ({ ...prev, [day]: 1 }));
+  const handleUseCurrentLocation = (result: CurrentLocationResult) => {
+    setNavAddress(result.address);
+    setNavCoords({ latitude: result.latitude, longitude: result.longitude });
   };
-
-  useEffect(() => {
-    if (!weeklyBooking) return;
-
-    const startDay = getDayFromDateText(tripDate);
-
-    if (!startDay) return;
-
-    setSelectedDays((prev) =>
-      prev.includes(startDay) ? prev : [...prev, startDay],
-    );
-    setDayTimes((prev) =>
-      prev[startDay] ? prev : { ...prev, [startDay]: "09:00" },
-    );
-    setDaySeats((prev) => (prev[startDay] ? prev : { ...prev, [startDay]: 1 }));
-  }, [tripDate, weeklyBooking]);
 
   const decreaseSeats = () => {
     setSeats((prev) => Math.max(1, prev - 1));
@@ -172,23 +137,55 @@ export default function PersonalRideScreen() {
     setSeats((prev) => Math.min(8, prev + 1));
   };
 
-  const decreaseSeatsForDay = (day: string) => {
-    setDaySeats((prev) => ({
-      ...prev,
-      [day]: Math.max(1, (prev[day] || 1) - 1),
-    }));
-  };
-
-  const increaseSeatsForDay = (day: string) => {
-    setDaySeats((prev) => ({
-      ...prev,
-      [day]: Math.min(8, (prev[day] || 1) + 1),
-    }));
-  };
-
   const handleSearch = () => {
     if (!fromLocation || !toLocation) {
       Alert.alert("Missing details", "Please enter both From and To.");
+      return;
+    }
+
+    const baseParams: Record<string, string> = {
+      category: "personal",
+      // Manual matching fields only — driver search compares these, never
+      // the GPS pickup point below.
+      from: fromLocation.trim(),
+      to: toLocation.trim(),
+      genderPref,
+      languages: selectedLanguages.join(","),
+      // Separate navigation-only pickup point (optional) — passed through
+      // untouched to ride-payment/the booking doc, never used for matching.
+      ...(navCoords
+        ? {
+            pickupLatitude: String(navCoords.latitude),
+            pickupLongitude: String(navCoords.longitude),
+            pickupAddress: navAddress,
+          }
+        : {}),
+    };
+
+    if (weeklyBooking) {
+      const cleanedDays = validateWeeklyRows(weeklyRows, {
+        requirePrice: false,
+      });
+
+      if (!cleanedDays) return;
+
+      router.push({
+        pathname: "/booking/driverresults",
+        params: {
+          ...baseParams,
+          bookingType: "weekly",
+          weeklyDays: JSON.stringify(
+            cleanedDays.map(({ dayKey, dayName, date, time, seats }) => ({
+              dayKey,
+              dayName,
+              date,
+              time,
+              seats,
+            })),
+          ),
+        },
+      } as any);
+
       return;
     }
 
@@ -208,82 +205,6 @@ export default function PersonalRideScreen() {
     }
 
     const tripDay = getDayFromDateText(cleanDate);
-
-    const baseParams: Record<string, string> = {
-      category: "personal",
-      from: fromLocation.trim(),
-      to: toLocation.trim(),
-      genderPref,
-      languages: selectedLanguages.join(","),
-    };
-
-    if (weeklyBooking) {
-      if (selectedDays.length === 0) {
-        Alert.alert("Missing days", "Please choose at least one repeat day.");
-        return;
-      }
-
-      const cleanedDayTimes: Record<string, string> = {};
-      const cleanedDaySeats: Record<string, number> = {};
-
-      for (const day of selectedDays) {
-        const cleanTime = normalizeTime(dayTimes[day] || "");
-
-        if (!cleanTime) {
-          Alert.alert(
-            "Invalid time",
-            `Please choose a valid time for ${day} between 00:00 and 23:59.`,
-          );
-          return;
-        }
-
-        if (
-          cleanDate === getTodayDate() &&
-          day === tripDay &&
-          !isTimeAvailableForDate(cleanDate, cleanTime)
-        ) {
-          Alert.alert(
-            "Invalid time",
-            `You cannot book a time that already passed for ${day}.`,
-          );
-          return;
-        }
-
-        const seatsValue = daySeats[day] || 1;
-
-        if (seatsValue < 1 || seatsValue > 8) {
-          Alert.alert(
-            "Invalid seats",
-            `Seats for ${day} must be between 1 and 8.`,
-          );
-          return;
-        }
-
-        cleanedDayTimes[day] = cleanTime;
-        cleanedDaySeats[day] = seatsValue;
-      }
-
-      const maxSeatsNeeded = Math.max(...Object.values(cleanedDaySeats));
-
-      router.push({
-        pathname: "/booking/driverresults",
-        params: {
-          ...baseParams,
-          tripDate: cleanDate,
-          tripDay,
-          startDate: cleanDate,
-          startDay: tripDay,
-          bookForWholeWeek: "true",
-          days: selectedDays.join(","),
-          dayTimes: JSON.stringify(cleanedDayTimes),
-          daySeats: JSON.stringify(cleanedDaySeats),
-          seats: String(maxSeatsNeeded),
-          bookingType: "weekly",
-        },
-      } as any);
-
-      return;
-    }
 
     const cleanTime = normalizeTime(tripTime);
 
@@ -366,41 +287,61 @@ export default function PersonalRideScreen() {
             </View>
           </View>
 
-          <DateInput
-            label={weeklyBooking ? "Start Date" : "Trip Date"}
-            value={tripDate}
-            onChange={setTripDate}
-            showPicker={showTripDatePicker}
-            setShowPicker={setShowTripDatePicker}
-          />
+          <View style={styles.navPickupBox}>
+            <Text style={styles.label}>Pickup location for driver navigation</Text>
+            <Text style={styles.navPickupHint}>
+              Optional — used only to guide your driver to your exact spot.
+              Does not affect which drivers you see.
+            </Text>
+
+            <CurrentLocationButton onLocated={handleUseCurrentLocation} />
+
+            {navAddress ? (
+              <View style={styles.navPickupResult}>
+                <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
+                <Text style={styles.navPickupSavedText}>Location saved</Text>
+              </View>
+            ) : null}
+          </View>
 
           {!weeklyBooking && (
-            <View style={styles.twoColumns}>
-              <View style={styles.column}>
-                <TimeInput
-                  label="Trip Time"
-                  value={tripTime}
-                  onChange={setTripTime}
-                  showPicker={showTripTimePicker}
-                  setShowPicker={setShowTripTimePicker}
-                />
-              </View>
+            <>
+              <DateInput
+                label="Trip Date"
+                value={tripDate}
+                onChange={setTripDate}
+                showPicker={showTripDatePicker}
+                setShowPicker={setShowTripDatePicker}
+              />
 
-              <View style={styles.column}>
-                <Text style={weeklyStyles.label}>Seats</Text>
-                <View style={styles.seatsRow}>
-                  <Pressable style={styles.seatButton} onPress={decreaseSeats}>
-                    <Ionicons name="remove" size={20} color="#111827" />
-                  </Pressable>
+              <View style={styles.twoColumns}>
+                <View style={styles.column}>
+                  <TimeInput
+                    label="Trip Time"
+                    value={tripTime}
+                    onChange={setTripTime}
+                    showPicker={showTripTimePicker}
+                    setShowPicker={setShowTripTimePicker}
+                    associatedDate={tripDate}
+                  />
+                </View>
 
-                  <Text style={styles.seatsNumber}>{seats}</Text>
+                <View style={styles.column}>
+                  <Text style={weeklyStyles.label}>Seats</Text>
+                  <View style={styles.seatsRow}>
+                    <Pressable style={styles.seatButton} onPress={decreaseSeats}>
+                      <Ionicons name="remove" size={20} color="#111827" />
+                    </Pressable>
 
-                  <Pressable style={styles.seatButton} onPress={increaseSeats}>
-                    <Ionicons name="add" size={20} color="#111827" />
-                  </Pressable>
+                    <Text style={styles.seatsNumber}>{seats}</Text>
+
+                    <Pressable style={styles.seatButton} onPress={increaseSeats}>
+                      <Ionicons name="add" size={20} color="#111827" />
+                    </Pressable>
+                  </View>
                 </View>
               </View>
-            </View>
+            </>
           )}
 
           <Pressable style={styles.weeklyRow} onPress={toggleWeeklyBooking}>
@@ -415,105 +356,12 @@ export default function PersonalRideScreen() {
 
           {weeklyBooking && (
             <View style={styles.weeklyBox}>
-              <Text style={styles.label}>Choose Repeat Days</Text>
-
-              <View style={weeklyStyles.languageRow}>
-                {dayNames.map((day) => {
-                  const active = selectedDays.includes(day);
-
-                  return (
-                    <Pressable
-                      key={day}
-                      style={[
-                        weeklyStyles.languageButton,
-                        active && weeklyStyles.languageButtonActive,
-                      ]}
-                      onPress={() => toggleDay(day)}
-                    >
-                      <Text
-                        style={[
-                          weeklyStyles.languageText,
-                          active && weeklyStyles.languageTextActive,
-                        ]}
-                      >
-                        {day}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              {selectedDays.length > 0 && (
-                <View style={weeklyStyles.daySettingsBox}>
-                  {selectedDays.map((day, index) => {
-                    const currentSeats = daySeats[day] || 1;
-                    const isLast = index === selectedDays.length - 1;
-
-                    return (
-                      <View
-                        key={day}
-                        style={[
-                          weeklyStyles.dayItem,
-                          !isLast && weeklyStyles.dayItemDivider,
-                        ]}
-                      >
-                        <Text style={weeklyStyles.dayTitle}>{day}</Text>
-
-                        <View style={weeklyStyles.dayFieldsRow}>
-                          <View style={weeklyStyles.dayFieldColumn}>
-                            <TimeInput
-                              label="Time"
-                              value={dayTimes[day] || "09:00"}
-                              onChange={(value) =>
-                                setDayTimes((prev) => ({
-                                  ...prev,
-                                  [day]: value,
-                                }))
-                              }
-                              showPicker={openWeeklyTimePickerDay === day}
-                              setShowPicker={(value) =>
-                                setOpenWeeklyTimePickerDay(value ? day : null)
-                              }
-                            />
-                          </View>
-
-                          <View style={weeklyStyles.dayFieldColumn}>
-                            <Text style={weeklyStyles.label}>Seats</Text>
-
-                            <View style={weeklyStyles.weeklySeatsRow}>
-                              <Pressable
-                                style={weeklyStyles.weeklySeatButton}
-                                onPress={() => decreaseSeatsForDay(day)}
-                              >
-                                <Ionicons
-                                  name="remove"
-                                  size={20}
-                                  color="#111827"
-                                />
-                              </Pressable>
-
-                              <Text style={weeklyStyles.weeklySeatsNumber}>
-                                {currentSeats}
-                              </Text>
-
-                              <Pressable
-                                style={weeklyStyles.weeklySeatButton}
-                                onPress={() => increaseSeatsForDay(day)}
-                              >
-                                <Ionicons
-                                  name="add"
-                                  size={20}
-                                  color="#111827"
-                                />
-                              </Pressable>
-                            </View>
-                          </View>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
+              <WeeklyDaysCard
+                rows={weeklyRows}
+                onChange={setWeeklyRows}
+                defaultTime="09:00"
+                mode="passenger"
+              />
             </View>
           )}
         </View>
@@ -697,6 +545,37 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 8,
     color: "#111827",
+  },
+  navPickupBox: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#F0E5DC",
+  },
+  navPickupHint: {
+    fontSize: 12,
+    color: "#7C5F46",
+    marginTop: -4,
+    marginBottom: 4,
+  },
+  navPickupResult: {
+    marginTop: 10,
+    backgroundColor: "#F1FBF4",
+    borderWidth: 1,
+    borderColor: "#BBE7C6",
+    borderRadius: 10,
+    padding: 10,
+  },
+  navPickupResultText: {
+    color: "#111827",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  navPickupSavedText: {
+    color: "#166534",
+    fontWeight: "900",
+    fontSize: 12,
+    marginTop: 2,
   },
   seatsRow: {
     flexDirection: "row",

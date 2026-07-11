@@ -1,78 +1,172 @@
+// ---------------------------------------------------------------------------
+// Roadside Help – passenger payment screen.
+//
+// Reached either from "Finished Help" -> the roadside_payment_required
+// notification (requestId/offerId/driverId/driverName/amount/bookingId
+// params), or directly from My Bookings. The amount shown is a preview only
+// — the real charge always comes from the live `bookings`/`roadsideRequests`
+// documents inside payRoadsideHelp's transaction, never from route params.
+// ---------------------------------------------------------------------------
+
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useState } from "react";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  query,
+  where,
+} from "firebase/firestore";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 
-type PaymentMethod = "card" | "cash";
+import { db } from "../../../firebase";
+import { payRoadsideHelp, RoadsidePaymentMethod } from "./roadsideLib";
 
-const formatCardNumber = (value: string) => {
-  const digits = value.replace(/\D/g, "").slice(0, 16);
-  return digits.replace(/(.{4})/g, "$1 ").trim();
+type BookingDoc = {
+  id: string;
+  driverName: string;
+  problemTypes: string[];
+  address: string;
+  etaMinutes: number | null;
+  price: number | null;
+  status: string;
+  paymentStatus: string;
+  paidAmount: number | null;
 };
 
-const formatExpiry = (value: string) => {
-  const digits = value.replace(/\D/g, "").slice(0, 4);
-  if (digits.length > 2) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-  return digits;
-};
+const normalize = (id: string, data: any): BookingDoc => ({
+  id,
+  driverName: data.driverName || "Driver",
+  problemTypes: Array.isArray(data.problemTypes) ? data.problemTypes : [],
+  address: data.address || data.location?.address || "",
+  etaMinutes: typeof data.etaMinutes === "number" ? data.etaMinutes : null,
+  price: typeof data.price === "number" ? data.price : null,
+  status: data.status || "",
+  paymentStatus: data.paymentStatus || "",
+  paidAmount: typeof data.paidAmount === "number" ? data.paidAmount : null,
+});
 
 export default function RoadsideHelpPaymentScreen() {
   const params = useLocalSearchParams();
 
-  const problemLabel = String(params.problemLabel || "Roadside Help");
-  const description = String(params.description || "");
-  const address = String(params.address || "");
-  const lat = String(params.lat || "");
-  const lng = String(params.lng || "");
-  const helperName = String(params.helperName || "Your helper");
-  const helperSpecialty = String(params.helperSpecialty || "");
-  const helperEta = String(params.helperEta || "");
-  const helperPrice = Number(params.helperPrice) || 0;
+  const bookingIdParam = String(params.bookingId || "");
+  const requestId = String(params.requestId || "");
+  const driverNameParam = String(params.driverName || "Your helper");
+  const amountParam = Number(params.amount) || 0;
 
-  const [method, setMethod] = useState<PaymentMethod>("card");
-  const [cardNumber, setCardNumber] = useState("");
-  const [expiry, setExpiry] = useState("");
-  const [cvc, setCvc] = useState("");
+  const [booking, setBooking] = useState<BookingDoc | null>(null);
+  const [bookingId, setBookingId] = useState(bookingIdParam);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [method, setMethod] = useState<RoadsidePaymentMethod>("card");
   const [processing, setProcessing] = useState(false);
 
-  const cardComplete =
-    cardNumber.replace(/\s/g, "").length === 16 &&
-    expiry.length === 5 &&
-    cvc.length === 3;
+  // Resolve the booking id: prefer the one passed in (from the payment
+  // notification), otherwise look it up by requestId.
+  useEffect(() => {
+    if (bookingIdParam) {
+      setBookingId(bookingIdParam);
+      return;
+    }
 
-  const canPay = method === "cash" || cardComplete;
+    if (!requestId) {
+      setLoading(false);
+      setNotFound(true);
+      return;
+    }
 
-  const handlePay = () => {
-    if (!canPay || processing) return;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "roadsideRequests", requestId));
+        const selected = snap.exists() ? snap.data().selectedOfferId : null;
 
-    setProcessing(true);
+        const bookingsSnap = await getDocs(
+          query(collection(db, "bookings"), where("requestId", "==", requestId)),
+        );
 
-    // Simulate processing the payment, then continue to live tracking.
-    setTimeout(() => {
-      setProcessing(false);
-      router.replace({
-        pathname: "/booking/roadside-help/map",
-        params: {
-          problemLabel,
-          address,
-          lat,
-          lng,
-          helperName,
-          helperEta,
-          paymentMethod: method,
+        const match =
+          bookingsSnap.docs.find((d) => d.data().offerId === selected) ||
+          bookingsSnap.docs[0];
+
+        if (match) {
+          setBookingId(match.id);
+        } else {
+          setNotFound(true);
+          setLoading(false);
+        }
+      } catch {
+        setNotFound(true);
+        setLoading(false);
+      }
+    })();
+  }, [bookingIdParam, requestId]);
+
+  // Live-subscribe to the booking so "Already paid" / "not ready yet" states
+  // update immediately if this screen is left open.
+  useEffect(() => {
+    if (!bookingId) return;
+
+    const unsubscribe = onSnapshot(
+      doc(db, "bookings", bookingId),
+      (snap) => {
+        if (!snap.exists()) {
+          setNotFound(true);
+          setBooking(null);
+        } else {
+          setBooking(normalize(snap.id, snap.data()));
+        }
+        setLoading(false);
+      },
+      () => {
+        setLoading(false);
+        setNotFound(true);
+      },
+    );
+
+    return unsubscribe;
+  }, [bookingId]);
+
+  const handlePay = async () => {
+    if (!bookingId || processing) return;
+
+    try {
+      setProcessing(true);
+      const result = await payRoadsideHelp(bookingId, method);
+
+      Alert.alert("Payment successful", `You paid ₪${result.amount}.`, [
+        {
+          text: "OK",
+          onPress: () =>
+            router.replace({
+              pathname: "/(tabs)/bookings",
+              params: { tab: "passenger", bookingId },
+            } as any),
         },
-      } as any);
-    }, 1500);
+      ]);
+    } catch (error: any) {
+      Alert.alert("Payment failed", error?.message || "Please try again.");
+    } finally {
+      setProcessing(false);
+    }
   };
+
+  const driverName = booking?.driverName || driverNameParam;
+  const amount = booking?.price ?? amountParam;
+  const alreadyPaid = booking?.paymentStatus === "paid";
+  const readyForPayment =
+    booking?.status === "completed" && booking?.paymentStatus === "pending";
 
   return (
     <SafeAreaView style={styles.page}>
@@ -82,174 +176,152 @@ export default function RoadsideHelpPaymentScreen() {
           <Text style={styles.backText}>Back</Text>
         </Pressable>
 
-        <Text style={styles.title}>Payment</Text>
+        <Text style={styles.title}>Roadside Help Payment</Text>
 
-        {/* Trip summary */}
-        <View style={styles.card}>
-          <View style={styles.cardTitleRow}>
-            <Ionicons name="checkmark-circle" size={20} color="#F58220" />
-            <Text style={styles.cardTitle}>Trip Summary</Text>
+        {loading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color="#F58220" />
           </View>
-
-          <View style={styles.summaryRow}>
-            <Ionicons name="construct-outline" size={16} color="#7C5F46" />
-            <Text style={styles.summaryStrong}>{helperName}</Text>
-            {helperSpecialty ? (
-              <Text style={styles.summaryMuted}>— {helperSpecialty}</Text>
-            ) : null}
+        ) : notFound || !booking ? (
+          <View style={styles.card}>
+            <Text style={styles.summaryText}>
+              This roadside help booking could not be found.
+            </Text>
           </View>
-
-          {address ? (
-            <View style={styles.summaryRow}>
-              <Ionicons name="location-outline" size={16} color="#7C5F46" />
-              <Text style={styles.summaryText}>{address}</Text>
-            </View>
-          ) : null}
-
-          {helperEta ? (
-            <View style={styles.summaryRow}>
-              <Ionicons name="time-outline" size={16} color="#7C5F46" />
-              <Text style={styles.summaryText}>{helperEta} min</Text>
-            </View>
-          ) : null}
-
-          <View style={styles.summaryRow}>
-            <Ionicons name="build-outline" size={16} color="#7C5F46" />
-            <Text style={styles.summaryText}>{problemLabel}</Text>
-          </View>
-
-          {description ? (
-            <View style={styles.summaryRow}>
-              <Text style={styles.noteEmoji}>📝</Text>
-              <Text style={styles.summaryMuted}>{description}</Text>
-            </View>
-          ) : null}
-
-          <View style={styles.divider} />
-
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>{helperPrice} ₪</Text>
-          </View>
-        </View>
-
-        {/* Payment method */}
-        <View style={styles.card}>
-          <View style={styles.cardTitleRow}>
-            <Ionicons name="card-outline" size={20} color="#F58220" />
-            <Text style={styles.cardTitle}>Payment Method</Text>
-          </View>
-
-          <View style={styles.methodRow}>
-            <Pressable
-              style={[
-                styles.methodButton,
-                method === "card" && styles.methodButtonActive,
-              ]}
-              onPress={() => setMethod("card")}
-            >
-              <Ionicons
-                name="card"
-                size={18}
-                color={method === "card" ? "#FFFFFF" : "#7C5F46"}
-              />
-              <Text
-                style={[
-                  styles.methodText,
-                  method === "card" && styles.methodTextActive,
-                ]}
-              >
-                Credit Card
+        ) : alreadyPaid ? (
+          <View style={styles.card}>
+            <View style={styles.paidBox}>
+              <Ionicons name="checkmark-circle" size={40} color="#16A34A" />
+              <Text style={styles.paidTitle}>Already paid</Text>
+              <Text style={styles.summaryText}>
+                ₪{booking.paidAmount ?? amount} was paid to {driverName}.
               </Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.methodButton,
-                method === "cash" && styles.methodButtonActive,
-              ]}
-              onPress={() => setMethod("cash")}
-            >
-              <Text style={styles.cashEmoji}>💵</Text>
-              <Text
-                style={[
-                  styles.methodText,
-                  method === "cash" && styles.methodTextActive,
-                ]}
-              >
-                Cash
-              </Text>
-            </Pressable>
+            </View>
           </View>
+        ) : (
+          <>
+            <View style={styles.card}>
+              <View style={styles.cardTitleRow}>
+                <Ionicons name="checkmark-circle" size={20} color="#F58220" />
+                <Text style={styles.cardTitle}>Trip Summary</Text>
+              </View>
 
-          {method === "card" && (
-            <View style={styles.cardFields}>
-              <Text style={styles.fieldLabel}>Card Number</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="1234 5678 9012 3456"
-                placeholderTextColor="#8B7B6B"
-                keyboardType="number-pad"
-                maxLength={19}
-                value={cardNumber}
-                onChangeText={(text) => setCardNumber(formatCardNumber(text))}
-              />
+              <View style={styles.summaryRow}>
+                <Ionicons name="construct-outline" size={16} color="#7C5F46" />
+                <Text style={styles.summaryStrong}>Payment to: {driverName}</Text>
+              </View>
 
-              <View style={styles.twoColumns}>
-                <View style={styles.column}>
-                  <Text style={styles.fieldLabel}>Expiry</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="MM/YY"
-                    placeholderTextColor="#8B7B6B"
-                    keyboardType="number-pad"
-                    maxLength={5}
-                    value={expiry}
-                    onChangeText={(text) => setExpiry(formatExpiry(text))}
-                  />
+              {booking.address ? (
+                <View style={styles.summaryRow}>
+                  <Ionicons name="location-outline" size={16} color="#7C5F46" />
+                  <Text style={styles.summaryText}>{booking.address}</Text>
                 </View>
+              ) : null}
 
-                <View style={styles.column}>
-                  <Text style={styles.fieldLabel}>CVC</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="123"
-                    placeholderTextColor="#8B7B6B"
-                    keyboardType="number-pad"
-                    maxLength={3}
-                    secureTextEntry
-                    value={cvc}
-                    onChangeText={(text) =>
-                      setCvc(text.replace(/\D/g, "").slice(0, 3))
-                    }
-                  />
+              {booking.problemTypes.length > 0 ? (
+                <View style={styles.summaryRow}>
+                  <Ionicons name="build-outline" size={16} color="#7C5F46" />
+                  <Text style={styles.summaryText}>
+                    {booking.problemTypes.join(", ")}
+                  </Text>
                 </View>
+              ) : null}
+
+              <View style={styles.divider} />
+
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Amount</Text>
+                <Text style={styles.totalValue}>₪{amount}</Text>
               </View>
             </View>
-          )}
-        </View>
 
-        <View style={styles.secureRow}>
-          <Ionicons name="shield-checkmark-outline" size={16} color="#7C5F46" />
-          <Text style={styles.secureText}>
-            Your payment is secure and encrypted
-          </Text>
-        </View>
+            {!readyForPayment ? (
+              <View style={styles.card}>
+                <Text style={styles.summaryText}>
+                  This help isn&apos;t ready for payment yet. Please wait for the
+                  driver to mark it finished.
+                </Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.card}>
+                  <View style={styles.cardTitleRow}>
+                    <Ionicons name="card-outline" size={20} color="#F58220" />
+                    <Text style={styles.cardTitle}>Payment Method</Text>
+                  </View>
 
-        <Pressable
-          style={[styles.payButton, !canPay && styles.payButtonDisabled]}
-          onPress={handlePay}
-          disabled={!canPay || processing}
-        >
-          {processing ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <>
-              <Ionicons name="card-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.payText}>Pay {helperPrice} ₪</Text>
-            </>
-          )}
-        </Pressable>
+                  <View style={styles.methodRow}>
+                    <Pressable
+                      style={[
+                        styles.methodButton,
+                        method === "card" && styles.methodButtonActive,
+                      ]}
+                      onPress={() => setMethod("card")}
+                    >
+                      <Ionicons
+                        name="card"
+                        size={18}
+                        color={method === "card" ? "#FFFFFF" : "#7C5F46"}
+                      />
+                      <Text
+                        style={[
+                          styles.methodText,
+                          method === "card" && styles.methodTextActive,
+                        ]}
+                      >
+                        Credit Card
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      style={[
+                        styles.methodButton,
+                        method === "cash" && styles.methodButtonActive,
+                      ]}
+                      onPress={() => setMethod("cash")}
+                    >
+                      <Text style={styles.cashEmoji}>💵</Text>
+                      <Text
+                        style={[
+                          styles.methodText,
+                          method === "cash" && styles.methodTextActive,
+                        ]}
+                      >
+                        Cash
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                <View style={styles.secureRow}>
+                  <Ionicons
+                    name="shield-checkmark-outline"
+                    size={16}
+                    color="#7C5F46"
+                  />
+                  <Text style={styles.secureText}>
+                    Your payment is secure and encrypted
+                  </Text>
+                </View>
+
+                <Pressable
+                  style={[styles.payButton, processing && styles.payButtonDisabled]}
+                  onPress={handlePay}
+                  disabled={processing}
+                >
+                  {processing ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="card-outline" size={20} color="#FFFFFF" />
+                      <Text style={styles.payText}>Pay ₪{amount}</Text>
+                    </>
+                  )}
+                </Pressable>
+              </>
+            )}
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -277,10 +349,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: "900",
     color: "#111827",
     marginBottom: 20,
+  },
+  loadingBox: {
+    paddingVertical: 40,
+    alignItems: "center",
   },
   card: {
     backgroundColor: "#FFFFFF",
@@ -289,6 +365,16 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 18,
     marginBottom: 16,
+  },
+  paidBox: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 10,
+  },
+  paidTitle: {
+    fontSize: 19,
+    fontWeight: "900",
+    color: "#111827",
   },
   cardTitleRow: {
     flexDirection: "row",
@@ -311,20 +397,13 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontWeight: "900",
     fontSize: 14,
+    flexShrink: 1,
   },
   summaryText: {
-    color: "#111827",
+    color: "#7C5F46",
     fontSize: 14,
     fontWeight: "600",
     flexShrink: 1,
-  },
-  summaryMuted: {
-    color: "#7C5F46",
-    fontSize: 14,
-    flexShrink: 1,
-  },
-  noteEmoji: {
-    fontSize: 14,
   },
   divider: {
     height: 1,
@@ -377,33 +456,6 @@ const styles = StyleSheet.create({
   },
   cashEmoji: {
     fontSize: 16,
-  },
-  cardFields: {
-    marginTop: 16,
-  },
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#111827",
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#E2D8CF",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-    backgroundColor: "#FFFDFC",
-    color: "#111827",
-    fontWeight: "700",
-  },
-  twoColumns: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  column: {
-    flex: 1,
   },
   secureRow: {
     flexDirection: "row",

@@ -30,7 +30,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "TakeMe uses your location to find roadside help near you."
+          "locationAlwaysAndWhenInUsePermission": "TakeMe uses your location to find roadside help near you and to set your pickup location for rides."
         }
       ],
       [

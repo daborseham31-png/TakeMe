@@ -17,6 +17,7 @@ import {
 import MapView, { Marker } from "react-native-maps";
 
 import { db } from "../../firebase";
+import { canStartTrip, getStartTripBlockedReason } from "../booking/bookingsLib";
 import { normalizeRideBooking, RideBooking } from "../booking/rideBookingLib";
 import { notify } from "../booking/work-errand/workErrandLib";
 
@@ -84,13 +85,52 @@ export default function RideNavigationScreen() {
     return unsub;
   }, [id]);
 
+  // Exact GPS pickup point, if the passenger captured one — checked across
+  // every field name this has ever been saved under. This is completely
+  // separate from booking.from/to (the manual matching fields).
   const coords = (b: any) => {
-    const lat = b?.pickup?.latitude ?? b?.pickupCoords?.latitude;
-    const lng = b?.pickup?.longitude ?? b?.pickupCoords?.longitude;
+    const lat =
+      b?.pickupLatitude ??
+      b?.pickup?.latitude ??
+      b?.pickupCoords?.latitude ??
+      b?.pickupLocation?.latitude ??
+      b?.passengerPickupLocation?.latitude;
+    const lng =
+      b?.pickupLongitude ??
+      b?.pickup?.longitude ??
+      b?.pickupCoords?.longitude ??
+      b?.pickupLocation?.longitude ??
+      b?.passengerPickupLocation?.longitude;
 
     if (typeof lat !== "number" || typeof lng !== "number") return null;
 
     return { lat, lng };
+  };
+
+  // The exact readable address, if one was captured (independent of the
+  // coordinates above — used only as a last-resort navigation target).
+  const pickupAddressText = (b: any): string =>
+    b?.pickupAddress || b?.pickup?.address || b?.passengerPickupLocation?.address || "";
+
+  // Navigation destination with the exact fallback chain: precise
+  // coordinates -> exact pickup address text -> manual From address. This
+  // is ONLY for guiding the driver to the passenger — never used to decide
+  // which drivers a passenger sees (that's from/to matching, elsewhere).
+  type NavTarget =
+    | { kind: "coords"; lat: number; lng: number }
+    | { kind: "text"; text: string }
+    | null;
+
+  const getNavTarget = (b: any): NavTarget => {
+    const c = coords(b);
+    if (c) return { kind: "coords", lat: c.lat, lng: c.lng };
+
+    const address = pickupAddressText(b);
+    if (address) return { kind: "text", text: address };
+
+    if (b?.from) return { kind: "text", text: b.from };
+
+    return null;
   };
 
   const updateDriverLocationOnce = async () => {
@@ -189,6 +229,19 @@ useEffect(() => {
   const updateTripStatus = async (nextStatus: TripStatus) => {
     if (!id || !booking) return;
 
+    // Guard the actual write, not just the button — this is the one place
+    // that flips tripStatus to driver_on_way for school + weekly bookings
+    // reached through this screen, so it must never allow starting a trip
+    // outside its own trip date even if this gets called some other way.
+    if (nextStatus === "driver_on_way" && !canStartTrip(booking)) {
+      Alert.alert(
+        "Not available yet",
+        getStartTripBlockedReason(booking) ||
+          "You can start this trip only on the trip date.",
+      );
+      return;
+    }
+
     const payload: any = {
       tripStatus: nextStatus,
       updatedAt: serverTimestamp(),
@@ -286,14 +339,17 @@ useEffect(() => {
   };
 
   const openMaps = (b: RideBooking) => {
-    const c = coords(b);
+    const target = getNavTarget(b);
 
-    if (!c) {
-      Alert.alert("Location", "Exact pickup location is not available.");
+    if (!target) {
+      Alert.alert("Location", "Pickup location is not available.");
       return;
     }
 
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}`;
+    const url =
+      target.kind === "coords"
+        ? `https://www.google.com/maps/dir/?api=1&destination=${target.lat},${target.lng}`
+        : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(target.text)}`;
 
     Linking.openURL(url).catch(() =>
       Alert.alert("Error", "Could not open maps."),
@@ -301,14 +357,17 @@ useEffect(() => {
   };
 
   const openWaze = (b: RideBooking) => {
-    const c = coords(b);
+    const target = getNavTarget(b);
 
-    if (!c) {
-      Alert.alert("Location", "Exact pickup location is not available.");
+    if (!target) {
+      Alert.alert("Location", "Pickup location is not available.");
       return;
     }
 
-    const url = `https://waze.com/ul?ll=${c.lat},${c.lng}&navigate=yes`;
+    const url =
+      target.kind === "coords"
+        ? `https://waze.com/ul?ll=${target.lat},${target.lng}&navigate=yes`
+        : `https://waze.com/ul?q=${encodeURIComponent(target.text)}&navigate=yes`;
 
     Linking.openURL(url).catch(() =>
       Alert.alert("Error", "Could not open Waze."),
@@ -316,6 +375,15 @@ useEffect(() => {
   };
 
   const handleStartDriving = () => {
+    if (!booking || !canStartTrip(booking)) {
+      Alert.alert(
+        "Not available yet",
+        getStartTripBlockedReason(booking) ||
+          "You can start this trip only on the trip date.",
+      );
+      return;
+    }
+
     Alert.alert("Start driving", "Start driving to pickup?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -405,6 +473,8 @@ useEffect(() => {
   const driverLocation = getDriverLocation(booking);
   const tripStatus = getTripStatus(booking);
   const completed = tripStatus === "completed";
+  const canStart = canStartTrip(booking);
+  const blockedReason = getStartTripBlockedReason(booking);
 
   const mapCenter = driverLocation
     ? {
@@ -516,9 +586,9 @@ useEffect(() => {
             <Ionicons name="navigate-circle-outline" size={16} color="#7C5F46" />
             <Text style={styles.infoText}>
               {c
-                ? (booking as any).pickup?.address ||
+                ? pickupAddressText(booking) ||
                   `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`
-                : "Exact pickup not available"}
+                : pickupAddressText(booking) || "Exact pickup not available"}
             </Text>
           </View>
 
@@ -563,20 +633,31 @@ useEffect(() => {
         ) : (
           <View style={styles.actionsCard}>
             {tripStatus === "booked" ? (
-              <Pressable
-                style={[styles.actionButton, busy && styles.disabled]}
-                onPress={handleStartDriving}
-                disabled={busy}
-              >
-                {busy ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name="car-outline" size={19} color="#FFFFFF" />
-                    <Text style={styles.actionText}>Start Driving to Pickup</Text>
-                  </>
-                )}
-              </Pressable>
+              <>
+                <Pressable
+                  style={[
+                    styles.actionButton,
+                    (busy || !canStart) && styles.disabled,
+                  ]}
+                  onPress={handleStartDriving}
+                  disabled={busy || !canStart}
+                >
+                  {busy ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="car-outline" size={19} color="#FFFFFF" />
+                      <Text style={styles.actionText}>
+                        Start Driving to Pickup
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {!canStart && blockedReason ? (
+                  <Text style={styles.gateHint}>{blockedReason}</Text>
+                ) : null}
+              </>
             ) : null}
 
             {tripStatus === "driver_on_way" ? (
@@ -802,6 +883,13 @@ const styles = StyleSheet.create({
   trackingHint: {
     marginTop: 12,
     color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 13,
+    textAlign: "center",
+  },
+  gateHint: {
+    marginTop: 10,
+    color: "#B86115",
     fontWeight: "800",
     fontSize: 13,
     textAlign: "center",

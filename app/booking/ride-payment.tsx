@@ -25,10 +25,12 @@ import {
 import { auth, db } from "../../firebase";
 import { RIDE_CATEGORY, RidePayment } from "./rideBookingLib";
 import {
-  detectCurrentLocation,
-  GeoPoint,
-  notify,
-} from "./work-errand/workErrandLib";
+  computeWeeklyTotal,
+  createWeeklyBookings,
+  WeeklyDriverDay,
+  WeeklyRequestDay,
+} from "./weeklyBookingLib";
+import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
 type Method = "cash" | "card" | null;
 
@@ -67,8 +69,54 @@ export default function RidePaymentScreen() {
   const seats = num(params.seats);
   const price = num(params.price);
 
-  const presetLat = num(params.fromLat);
-  const presetLng = num(params.fromLng);
+  // "Pickup location for driver navigation" — a SEPARATE, optional GPS point
+  // from the booking form. Never used for driver matching (that already
+  // happened, using from/to text, before this screen). Only ever used to
+  // help the driver navigate to the passenger later.
+  const presetPickupLat = num(params.pickupLatitude);
+  const presetPickupLng = num(params.pickupLongitude);
+  const presetPickupAddress = String(params.pickupAddress || "");
+
+  const presetPickup: GeoPoint | null =
+    presetPickupLat !== null && presetPickupLng !== null
+      ? {
+          latitude: presetPickupLat,
+          longitude: presetPickupLng,
+          address: presetPickupAddress,
+        }
+      : null;
+
+  const bookingType = String(params.bookingType || "quick");
+  const isWeekly = bookingType === "weekly";
+
+  let selectedWeeklyDays: WeeklyDriverDay[] = [];
+
+  try {
+    const parsed = JSON.parse(String(params.selectedWeeklyDays || "[]"));
+    selectedWeeklyDays = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    selectedWeeklyDays = [];
+  }
+
+  let remainingWeeklyDays: WeeklyRequestDay[] = [];
+
+  try {
+    const parsed = JSON.parse(String(params.remainingWeeklyDays || "[]"));
+    remainingWeeklyDays = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    remainingWeeklyDays = [];
+  }
+
+  const weeklyTotal = computeWeeklyTotal(selectedWeeklyDays);
+
+  const resultsPassthrough = {
+    category: isSchool ? "school" : "personal",
+    schoolName: String(params.schoolName || ""),
+    from,
+    to,
+    genderPref: String(params.genderPref || "any"),
+    languages: String(params.languages || ""),
+  };
 
   const [method, setMethod] = useState<Method>(null);
   const [processing, setProcessing] = useState(false);
@@ -78,17 +126,11 @@ export default function RidePaymentScreen() {
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
 
-  const resolvePickup = async (): Promise<GeoPoint | null> => {
-    if (presetLat !== null && presetLng !== null) {
-      return { latitude: presetLat, longitude: presetLng, address: from };
-    }
-
-    try {
-      return await detectCurrentLocation();
-    } catch {
-      return null;
-    }
-  };
+  // Pickup GPS is optional — if the passenger never pressed "Use my current
+  // location" on the booking form, there is no preset pickup, and none is
+  // silently captured here either. Driver navigation then falls back to the
+  // manual From address (see driver/ride-navigation.tsx).
+  const resolvePickup = async (): Promise<GeoPoint | null> => presetPickup;
 
   const getPassengerProfile = async () => {
     const user = auth.currentUser;
@@ -202,6 +244,8 @@ const createBookingAfterPayment = async (
       seats: seats ?? null,
       price: price ?? null,
 
+      // Existing fields — already read by driver navigation / live tracking
+      // (app/driver/ride-navigation.tsx, app/booking/live-tracking.tsx).
       pickup: cleanPickup,
       pickupCoords: cleanPickup
         ? {
@@ -210,6 +254,17 @@ const createBookingAfterPayment = async (
           }
         : null,
       passengerPickupLocation: cleanPickup,
+
+      // Same data, explicit field names. This is the SEPARATE navigation
+      // pickup point — never defaulted to `from` (the matching field): when
+      // no GPS pickup was captured, these simply stay null and driver
+      // navigation falls back to the manual From address itself.
+      pickupAddress: cleanPickup?.address || null,
+      pickupLatitude: cleanPickup?.latitude ?? null,
+      pickupLongitude: cleanPickup?.longitude ?? null,
+      pickupLocation: cleanPickup
+        ? { latitude: cleanPickup.latitude, longitude: cleanPickup.longitude }
+        : null,
 
       ...paymentFields,
 
@@ -311,6 +366,68 @@ const createBookingAfterPayment = async (
       payment = { method: "card", cardLast4: digits.slice(-4) };
     }
 
+    if (isWeekly) {
+      try {
+        setProcessing(true);
+
+        await createWeeklyBookings({
+          category: isSchool ? "school" : "personal",
+
+          driverId,
+          driverName,
+          driverPhone,
+
+          driverCar,
+          driverCarColor,
+          driverCarPlateLast3,
+
+          routeId,
+          from,
+          to,
+          pickup: presetPickup,
+
+          selectedDays: selectedWeeklyDays,
+          payment,
+        });
+
+        if (remainingWeeklyDays.length > 0) {
+          Alert.alert(
+            "Some days still need a driver",
+            "Please choose another driver for the remaining days.",
+            [
+              {
+                text: "OK",
+                onPress: () =>
+                  router.replace({
+                    pathname: "/booking/driverresults",
+                    params: {
+                      ...resultsPassthrough,
+                      bookingType: "weekly",
+                      weeklyDays: JSON.stringify(remainingWeeklyDays),
+                    },
+                  } as any),
+              },
+            ],
+          );
+          return;
+        }
+
+        router.replace({
+          pathname: "/(tabs)/bookings",
+          params: { tab: "passenger" },
+        } as any);
+      } catch (error: any) {
+        Alert.alert(
+          "Error",
+          error?.message || "Could not confirm the booking.",
+        );
+      } finally {
+        setProcessing(false);
+      }
+
+      return;
+    }
+
     try {
       setProcessing(true);
       const pickup = await resolvePickup();
@@ -393,7 +510,7 @@ const createBookingAfterPayment = async (
               </Text>
             </View>
 
-            {date ? (
+            {!isWeekly && date ? (
               <View style={styles.summaryRow}>
                 <Ionicons name="calendar-outline" size={15} color="#7C5F46" />
                 <Text style={styles.summaryText}>
@@ -403,26 +520,57 @@ const createBookingAfterPayment = async (
               </View>
             ) : null}
 
-            {time ? (
+            {!isWeekly && time ? (
               <View style={styles.summaryRow}>
                 <Ionicons name="time-outline" size={15} color="#7C5F46" />
                 <Text style={styles.summaryText}>{time}</Text>
               </View>
             ) : null}
 
-            {seats !== null ? (
+            {!isWeekly && seats !== null ? (
               <View style={styles.summaryRow}>
                 <Ionicons name="people-outline" size={15} color="#7C5F46" />
                 <Text style={styles.summaryText}>{seats} seats</Text>
               </View>
             ) : null}
 
+            {isWeekly ? (
+              <View style={styles.weeklyDaysBox}>
+                <Text style={styles.weeklyDaysTitle}>Selected days</Text>
+
+                {selectedWeeklyDays.map((dayItem) => (
+                  <View key={dayItem.date} style={styles.weeklyDayRow}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={15}
+                      color="#7C5F46"
+                    />
+                    <Text style={styles.summaryText}>
+                      {dayItem.dayName} — {dayItem.date} · {dayItem.time} ·{" "}
+                      {dayItem.seats} seats · {dayItem.price} ₪
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
             <View style={styles.amountRow}>
               <Text style={styles.amountLabel}>Amount</Text>
               <Text style={styles.amountValue}>
-                {price !== null ? `${price} ₪` : "—"}
+                {isWeekly
+                  ? `${weeklyTotal} ₪`
+                  : price !== null
+                    ? `${price} ₪`
+                    : "—"}
               </Text>
             </View>
+
+            {isWeekly ? (
+              <Text style={styles.weeklyHint}>
+                Card total = price × seats, summed across selected days. For
+                cash, pay each day directly to the driver.
+              </Text>
+            ) : null}
           </View>
 
           <Text style={styles.sectionTitle}>Payment Method</Text>
@@ -626,6 +774,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     flexShrink: 1,
+  },
+  weeklyDaysBox: {
+    marginTop: 4,
+    marginBottom: 4,
+    gap: 6,
+  },
+  weeklyDaysTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 2,
+  },
+  weeklyDayRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  weeklyHint: {
+    color: "#7C5F46",
+    fontSize: 12,
+    marginTop: 8,
   },
   amountRow: {
     flexDirection: "row",

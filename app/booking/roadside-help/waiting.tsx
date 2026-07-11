@@ -2,11 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   collection,
+  doc,
+  getDoc,
   onSnapshot,
   query,
   where,
 } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +22,9 @@ import {
 } from "react-native";
 
 import { db } from "../../../firebase";
+import { normalizeLanguagesFromAccount } from "../../driver/create/driverHelpers";
+import DriverReviewsSection from "../DriverReviewsSection";
+import { getOfferDriverId } from "../driverReviewsLib";
 import { acceptOffer, rejectOffer } from "./roadsideLib";
 
 type Offer = {
@@ -28,11 +33,25 @@ type Offer = {
   driverName?: string;
   driverGender?: string;
   driverPhone?: string;
-  driverRating?: number;
-  price?: number;
-  etaMinutes?: number;
+  offeredPrice?: number;
+  estimatedArrivalMinutes?: number;
   status?: string;
   createdAt?: { seconds?: number } | null;
+};
+
+// users/{driverId} — languages + the driver's global rating, loaded once
+// per driver and reused across every offer card for that same driver.
+type DriverProfileInfo = {
+  languages: string[];
+  ratingAverage: number;
+  ratingCount: number;
+};
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  ar: "Arabic",
+  he: "Hebrew",
+  en: "English",
+  ru: "Russian",
 };
 
 const genderLabel = (value?: string) => {
@@ -51,10 +70,23 @@ export default function RoadsideWaitingScreen() {
   const address = String(params.address || "");
   const lat = String(params.lat || "");
   const lng = String(params.lng || "");
+  // Set when opened from a "roadside_offer_received" notification — the
+  // matching offer card is scrolled to and briefly highlighted.
+  const highlightOfferId = String(params.highlightOfferId || params.offerId || "");
 
   const [offers, setOffers] = useState<Offer[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
+  const [flashOfferId, setFlashOfferId] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const offerCardRefs = useRef<Record<string, View | null>>({});
+
+  // Driver name/rating/languages, keyed by the driver's real UID
+  // (getOfferDriverId) — loaded once per driver, not once per offer.
+  const [driverProfiles, setDriverProfiles] = useState<
+    Record<string, DriverProfileInfo>
+  >({});
+  const fetchedDriverIdsRef = useRef<Set<string>>(new Set());
 
   // Listen to offers for this request in real time (sorted client-side so no
   // Firestore composite index is required).
@@ -89,13 +121,118 @@ export default function RoadsideWaitingScreen() {
   const visibleOffers = useMemo(
     () =>
       offers
-        .filter((o) => o.status === "sent" || o.status === "accepted_by_passenger")
+        .filter((o) => o.status === "pending" || o.status === "accepted")
         .sort(
           (a, b) =>
             (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0),
         ),
     [offers],
   );
+
+  // Deep link from "roadside_offer_received": once this offer shows up in
+  // the list, scroll to it and flash it briefly.
+  useEffect(() => {
+    if (!highlightOfferId) return;
+    if (!visibleOffers.some((o) => o.id === highlightOfferId)) return;
+
+    setFlashOfferId(highlightOfferId);
+
+    const scrollTimer = setTimeout(() => {
+      const cardNode = offerCardRefs.current[highlightOfferId];
+      const scrollNode = scrollRef.current as any;
+      if (!cardNode || !scrollNode) return;
+
+      cardNode.measure((
+        _x: number,
+        _y: number,
+        _w: number,
+        _h: number,
+        pageX: number,
+        pageY: number,
+      ) => {
+        scrollNode.measure((
+          _sx: number,
+          _sy: number,
+          _sw: number,
+          _sh: number,
+          _spx: number,
+          scrollPageY: number,
+        ) => {
+          scrollNode.scrollTo({
+            y: Math.max(pageY - scrollPageY - 16, 0),
+            animated: true,
+          });
+        });
+      });
+    }, 350);
+
+    const clearTimer = setTimeout(() => setFlashOfferId(null), 2600);
+
+    return () => {
+      clearTimeout(scrollTimer);
+      clearTimeout(clearTimer);
+    };
+  }, [highlightOfferId, visibleOffers]);
+
+  // Rating summary + language chips load with the driver profile (not
+  // gated behind anything) — only the review LIST itself is lazy-loaded,
+  // inside DriverReviewsSection, when the user expands it.
+  useEffect(() => {
+    const idsToLoad = Array.from(
+      new Set(
+        visibleOffers
+          .map((offer) => getOfferDriverId(offer))
+          .filter((id) => id && !fetchedDriverIdsRef.current.has(id)),
+      ),
+    );
+
+    if (idsToLoad.length === 0) return;
+
+    idsToLoad.forEach((id) => fetchedDriverIdsRef.current.add(id));
+
+    let cancelled = false;
+
+    (async () => {
+      const entries = await Promise.all(
+        idsToLoad.map(async (id): Promise<[string, DriverProfileInfo]> => {
+          try {
+            const snap = await getDoc(doc(db, "users", id));
+
+            if (!snap.exists()) {
+              return [id, { languages: [], ratingAverage: 0, ratingCount: 0 }];
+            }
+
+            const data = snap.data();
+
+            return [
+              id,
+              {
+                languages: normalizeLanguagesFromAccount(data),
+                ratingAverage: Number(data.ratingAverage) || 0,
+                ratingCount: Number(data.ratingCount) || 0,
+              },
+            ];
+          } catch {
+            return [id, { languages: [], ratingAverage: 0, ratingCount: 0 }];
+          }
+        }),
+      );
+
+      if (cancelled) return;
+
+      setDriverProfiles((prev) => {
+        const next = { ...prev };
+        entries.forEach(([id, info]) => {
+          next[id] = info;
+        });
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [visibleOffers]);
 
   const handleAccept = async (offer: Offer) => {
     if (busyOfferId) return;
@@ -107,8 +244,9 @@ export default function RoadsideWaitingScreen() {
         id: offer.id,
         driverId: offer.driverId,
         driverName: offer.driverName,
-        price: offer.price,
-        etaMinutes: offer.etaMinutes,
+        driverPhone: offer.driverPhone,
+        price: offer.offeredPrice,
+        etaMinutes: offer.estimatedArrivalMinutes,
       });
 
       // Continue to the live tracking screen (reuses the existing map screen).
@@ -120,7 +258,7 @@ export default function RoadsideWaitingScreen() {
           lat,
           lng,
           helperName: offer.driverName || "Your helper",
-          helperEta: String(offer.etaMinutes || ""),
+          helperEta: String(offer.estimatedArrivalMinutes || ""),
         },
       } as any);
     } catch (error: any) {
@@ -151,7 +289,7 @@ export default function RoadsideWaitingScreen() {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={22} color="#7C5F46" />
           <Text style={styles.backText}>Back</Text>
@@ -204,9 +342,23 @@ export default function RoadsideWaitingScreen() {
             {visibleOffers.map((offer) => {
               const busy = busyOfferId === offer.id;
               const gender = genderLabel(offer.driverGender);
+              const driverId = getOfferDriverId(offer);
+              const profile = driverId ? driverProfiles[driverId] : undefined;
+              const languages = profile?.languages || [];
+              const ratingCount = profile?.ratingCount ?? 0;
+              const ratingAverage = profile?.ratingAverage ?? 0;
 
               return (
-                <View key={offer.id} style={styles.card}>
+                <View
+                  key={offer.id}
+                  ref={(node) => {
+                    offerCardRefs.current[offer.id] = node;
+                  }}
+                  style={[
+                    styles.card,
+                    flashOfferId === offer.id && styles.cardHighlight,
+                  ]}
+                >
                   <View style={styles.topRow}>
                     <View style={styles.driverInfoRow}>
                       <View style={styles.avatar}>
@@ -225,21 +377,54 @@ export default function RoadsideWaitingScreen() {
 
                     <View style={styles.ratingBox}>
                       <Ionicons name="star" size={15} color="#B86115" />
-                      <Text style={styles.ratingText}>
-                        {offer.driverRating ?? 4.8}
-                      </Text>
+                      {ratingCount > 0 ? (
+                        <>
+                          <Text style={styles.ratingText}>
+                            {ratingAverage.toFixed(1)}
+                          </Text>
+                          <Text style={styles.ratingCountText}>
+                            ({ratingCount})
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={styles.ratingCountText}>New driver</Text>
+                      )}
                     </View>
+                  </View>
+
+                  <View style={styles.languagesRow}>
+                    <Ionicons
+                      name="language-outline"
+                      size={15}
+                      color="#7C5F46"
+                    />
+
+                    {languages.length > 0 ? (
+                      languages.map((lang) => (
+                        <View key={lang} style={styles.languageBadge}>
+                          <Text style={styles.languageText}>
+                            {LANGUAGE_LABELS[lang] || lang}
+                          </Text>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.languagesEmptyText}>
+                        Languages not available
+                      </Text>
+                    )}
                   </View>
 
                   <View style={styles.metaRow}>
                     <View style={styles.metaItem}>
                       <Ionicons name="cash-outline" size={17} color="#F58220" />
-                      <Text style={styles.metaText}>{offer.price ?? "--"} ₪</Text>
+                      <Text style={styles.metaText}>
+                        {offer.offeredPrice ?? "--"} ₪
+                      </Text>
                     </View>
                     <View style={styles.metaItem}>
                       <Ionicons name="time-outline" size={17} color="#F58220" />
                       <Text style={styles.metaText}>
-                        {offer.etaMinutes ?? "--"} min
+                        {offer.estimatedArrivalMinutes ?? "--"} min
                       </Text>
                     </View>
                   </View>
@@ -253,6 +438,11 @@ export default function RoadsideWaitingScreen() {
                       <Text style={styles.phoneText}>{offer.driverPhone}</Text>
                     </Pressable>
                   ) : null}
+
+                  <DriverReviewsSection
+                    driverId={driverId}
+                    reviewCountHint={ratingCount}
+                  />
 
                   <View style={styles.actionsRow}>
                     <Pressable
@@ -386,6 +576,11 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 2,
   },
+  cardHighlight: {
+    borderColor: "#F58220",
+    borderWidth: 2,
+    backgroundColor: "#FFF8F2",
+  },
   topRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -433,6 +628,36 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#111827",
     fontSize: 14,
+  },
+  ratingCountText: {
+    color: "#7C5F46",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  languagesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 16,
+  },
+  languageBadge: {
+    backgroundColor: "#EAF8F5",
+    borderWidth: 1,
+    borderColor: "#9DDDD2",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+  },
+  languageText: {
+    color: "#178C7B",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  languagesEmptyText: {
+    color: "#7C5F46",
+    fontSize: 13,
+    fontWeight: "700",
   },
   metaRow: {
     flexDirection: "row",

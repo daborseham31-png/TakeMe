@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   Alert,
   Pressable,
@@ -12,15 +12,19 @@ import {
   View,
 } from "react-native";
 
+import CurrentLocationButton, {
+  CurrentLocationResult,
+} from "../CurrentLocationButton";
 import DateInput, { TimeInput } from "../../driver/create/DateInput";
 import {
-  dayNames,
   getDayFromDateText,
   isTimeAvailableForDate,
   normalizeDateToYMD,
   normalizeTime,
   styles as weeklyStyles,
 } from "../../driver/create/driverHelpers";
+import WeeklyDaysCard from "../../driver/create/WeeklyDaysCard";
+import { validateWeeklyRows, WeekDayRow } from "../weeklyBookingLib";
 
 const LANGUAGES_LIST = [
   { key: "ar", label: "العربية" },
@@ -28,16 +32,6 @@ const LANGUAGES_LIST = [
   { key: "en", label: "English" },
   { key: "ru", label: "Русский" },
 ];
-
-const DAY_INDEX: Record<string, number> = {
-  Sun: 0,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
-};
 
 const getTodayDate = () => {
   const today = new Date();
@@ -49,54 +43,22 @@ const getTodayDate = () => {
   return `${year}-${month}-${day}`;
 };
 
-const formatDate = (date: Date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-};
-
-const getNextDateFromStartDate = (
-  startDateText: string,
-  dayKey: string,
-  timeText = "07:30",
-) => {
-  const cleanStartDate = normalizeDateToYMD(startDateText);
-
-  if (!cleanStartDate) return "";
-
-  const [year, month, day] = cleanStartDate.split("-").map(Number);
-  const startDate = new Date(year, month - 1, day);
-
-  const targetDay = DAY_INDEX[dayKey];
-  let daysToAdd = targetDay - startDate.getDay();
-
-  if (daysToAdd < 0) {
-    daysToAdd += 7;
-  }
-
-  const result = new Date(startDate);
-  result.setDate(startDate.getDate() + daysToAdd);
-
-  const cleanTime = normalizeTime(timeText) || "07:30";
-  const [hours, minutes] = cleanTime.split(":").map(Number);
-
-  result.setHours(hours, minutes, 0, 0);
-
-  const now = new Date();
-
-  if (result <= now) {
-    result.setDate(result.getDate() + 7);
-  }
-
-  return formatDate(result);
-};
-
 export default function SchoolRideScreen() {
   const [schoolName, setSchoolName] = useState("");
-  const [pickupLocation, setPickupLocation] = useState("");
+  // Manual matching field ("Nazareth") — this is what driver search compares
+  // against driver.from/driver.to. It is NEVER auto-filled with an exact GPS
+  // address, and using "Use my current location" below never touches it.
+  const [fromAddress, setFromAddress] = useState("");
   const [schoolLocation, setSchoolLocation] = useState("");
+
+  // Separate "pickup location for driver navigation" — an exact GPS point
+  // (+ readable address) used ONLY so the driver can navigate to the
+  // passenger. Never sent to driver matching, never written into `from`.
+  const [navAddress, setNavAddress] = useState("");
+  const [navCoords, setNavCoords] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
 
   const [tripDate, setTripDate] = useState(getTodayDate());
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
@@ -107,12 +69,7 @@ export default function SchoolRideScreen() {
   const [seats, setSeats] = useState(1);
 
   const [weeklyBooking, setWeeklyBooking] = useState(false);
-  const [selectedDays, setSelectedDays] = useState<string[]>([]);
-  const [dayTimes, setDayTimes] = useState<Record<string, string>>({});
-  const [daySeats, setDaySeats] = useState<Record<string, number>>({});
-  const [openWeeklyTimePickerDay, setOpenWeeklyTimePickerDay] = useState<
-    string | null
-  >(null);
+  const [weeklyRows, setWeeklyRows] = useState<WeekDayRow[]>([]);
 
   const [genderPref, setGenderPref] = useState<"any" | "male" | "female">(
     "any",
@@ -128,20 +85,6 @@ export default function SchoolRideScreen() {
     setSeats((prev) => Math.min(8, prev + 1));
   };
 
-  const decreaseSeatsForDay = (day: string) => {
-    setDaySeats((prev) => ({
-      ...prev,
-      [day]: Math.max(1, (prev[day] || 1) - 1),
-    }));
-  };
-
-  const increaseSeatsForDay = (day: string) => {
-    setDaySeats((prev) => ({
-      ...prev,
-      [day]: Math.min(8, (prev[day] || 1) + 1),
-    }));
-  };
-
   const toggleLanguage = (lang: string) => {
     if (selectedLanguages.includes(lang)) {
       setSelectedLanguages(selectedLanguages.filter((item) => item !== lang));
@@ -150,11 +93,9 @@ export default function SchoolRideScreen() {
     }
   };
 
-  const clearWeeklyDays = () => {
-    setSelectedDays([]);
-    setDayTimes({});
-    setDaySeats({});
-    setOpenWeeklyTimePickerDay(null);
+  const handleUseCurrentLocation = (result: CurrentLocationResult) => {
+    setNavAddress(result.address);
+    setNavCoords({ latitude: result.latitude, longitude: result.longitude });
   };
 
   const toggleWeeklyBooking = () => {
@@ -163,62 +104,63 @@ export default function SchoolRideScreen() {
     setWeeklyBooking(nextValue);
 
     if (!nextValue) {
-      clearWeeklyDays();
+      setWeeklyRows([]);
     }
   };
-
-  const toggleDay = (day: string) => {
-    if (selectedDays.includes(day)) {
-      setSelectedDays((prev) => prev.filter((item) => item !== day));
-
-      setDayTimes((prev) => {
-        const next = { ...prev };
-        delete next[day];
-        return next;
-      });
-
-      setDaySeats((prev) => {
-        const next = { ...prev };
-        delete next[day];
-        return next;
-      });
-
-      if (openWeeklyTimePickerDay === day) {
-        setOpenWeeklyTimePickerDay(null);
-      }
-
-      return;
-    }
-
-    setSelectedDays((prev) => [...prev, day]);
-    setDayTimes((prev) => ({ ...prev, [day]: "07:30" }));
-    setDaySeats((prev) => ({ ...prev, [day]: 1 }));
-  };
-
-  useEffect(() => {
-    if (!weeklyBooking) return;
-
-    const startDay = getDayFromDateText(tripDate);
-
-    if (!startDay) return;
-
-    setSelectedDays((prev) =>
-      prev.includes(startDay) ? prev : [...prev, startDay],
-    );
-
-    setDayTimes((prev) =>
-      prev[startDay] ? prev : { ...prev, [startDay]: "07:30" },
-    );
-
-    setDaySeats((prev) => (prev[startDay] ? prev : { ...prev, [startDay]: 1 }));
-  }, [tripDate, weeklyBooking]);
 
   const handleSearch = () => {
-    if (!schoolName.trim() || !pickupLocation.trim() || !schoolLocation.trim()) {
+    if (!schoolName.trim() || !fromAddress.trim() || !schoolLocation.trim()) {
       Alert.alert(
         "Missing details",
         "Please enter school name, pickup location, and school location.",
       );
+      return;
+    }
+
+    const baseParams: Record<string, string> = {
+      category: "school",
+      schoolName: schoolName.trim(),
+      // Manual matching fields only — driver search compares these, never
+      // the GPS pickup point below.
+      from: fromAddress.trim(),
+      to: schoolLocation.trim(),
+      genderPref,
+      languages: selectedLanguages.join(","),
+      // Separate navigation-only pickup point (optional) — passed through
+      // untouched to ride-payment/the booking doc, never used for matching.
+      ...(navCoords
+        ? {
+            pickupLatitude: String(navCoords.latitude),
+            pickupLongitude: String(navCoords.longitude),
+            pickupAddress: navAddress,
+          }
+        : {}),
+    };
+
+    if (weeklyBooking) {
+      const cleanedDays = validateWeeklyRows(weeklyRows, {
+        requirePrice: false,
+      });
+
+      if (!cleanedDays) return;
+
+      router.push({
+        pathname: "/booking/driverresults",
+        params: {
+          ...baseParams,
+          bookingType: "weekly",
+          weeklyDays: JSON.stringify(
+            cleanedDays.map(({ dayKey, dayName, date, time, seats }) => ({
+              dayKey,
+              dayName,
+              date,
+              time,
+              seats,
+            })),
+          ),
+        },
+      } as any);
+
       return;
     }
 
@@ -233,97 +175,6 @@ export default function SchoolRideScreen() {
     }
 
     const tripDay = getDayFromDateText(cleanDate);
-
-    const baseParams: Record<string, string> = {
-      category: "school",
-      schoolName: schoolName.trim(),
-      from: pickupLocation.trim(),
-      to: schoolLocation.trim(),
-      genderPref,
-      languages: selectedLanguages.join(","),
-    };
-
-    if (weeklyBooking) {
-      if (selectedDays.length === 0) {
-        Alert.alert("Missing days", "Please choose at least one day.");
-        return;
-      }
-
-      const cleanedDayTimes: Record<string, string> = {};
-      const cleanedDaySeats: Record<string, number> = {};
-      const cleanedDayDates: Record<string, string> = {};
-
-      const weeklyTrips: {
-        day: string;
-        date: string;
-        time: string;
-        seats: number;
-      }[] = [];
-
-      for (const day of selectedDays) {
-        const cleanTime = normalizeTime(dayTimes[day] || "");
-
-        if (!cleanTime) {
-          Alert.alert(
-            "Invalid time",
-            `Please choose a valid time for ${day}.`,
-          );
-          return;
-        }
-
-        const seatsValue = daySeats[day] || 1;
-
-        if (seatsValue < 1 || seatsValue > 8) {
-          Alert.alert(
-            "Invalid seats",
-            `Seats for ${day} must be between 1 and 8.`,
-          );
-          return;
-        }
-
-        const dateForDay = getNextDateFromStartDate(cleanDate, day, cleanTime);
-
-        cleanedDayTimes[day] = cleanTime;
-        cleanedDaySeats[day] = seatsValue;
-        cleanedDayDates[day] = dateForDay;
-
-        weeklyTrips.push({
-          day,
-          date: dateForDay,
-          time: cleanTime,
-          seats: seatsValue,
-        });
-      }
-
-      const maxSeatsNeeded = Math.max(...Object.values(cleanedDaySeats));
-      const firstTrip = weeklyTrips[0];
-
-      router.push({
-        pathname: "/booking/driverresults",
-        params: {
-          ...baseParams,
-
-          bookForWholeWeek: "true",
-          bookingType: "weekly",
-
-          startDate: cleanDate,
-          startDay: tripDay,
-
-          days: selectedDays.join(","),
-          dayTimes: JSON.stringify(cleanedDayTimes),
-          daySeats: JSON.stringify(cleanedDaySeats),
-          dayDates: JSON.stringify(cleanedDayDates),
-          weeklyTrips: JSON.stringify(weeklyTrips),
-
-          tripDate: firstTrip?.date || cleanDate,
-          tripDay: firstTrip?.day || tripDay,
-          time: firstTrip?.time || "",
-          seats: String(maxSeatsNeeded),
-        },
-      } as any);
-
-      return;
-    }
 
     const cleanTime = normalizeTime(tripTime);
 
@@ -398,10 +249,10 @@ export default function SchoolRideScreen() {
                 <Ionicons name="home-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Home address"
+                  placeholder="e.g. Nazareth"
                   placeholderTextColor="#8B7B6B"
-                  value={pickupLocation}
-                  onChangeText={setPickupLocation}
+                  value={fromAddress}
+                  onChangeText={setFromAddress}
                 />
               </View>
             </View>
@@ -421,40 +272,61 @@ export default function SchoolRideScreen() {
             </View>
           </View>
 
-          <DateInput
-            label={weeklyBooking ? "Start Date" : "Trip Date"}
-            value={tripDate}
-            onChange={setTripDate}
-            showPicker={showTripDatePicker}
-            setShowPicker={setShowTripDatePicker}
-          />
-          {!weeklyBooking ? (
-            <View style={styles.twoColumns}>
-              <View style={styles.column}>
-                <TimeInput
-                  label="Trip Time"
-                  value={tripTime}
-                  onChange={setTripTime}
-                  showPicker={showTripTimePicker}
-                  setShowPicker={setShowTripTimePicker}
-                />
+          <View style={styles.navPickupBox}>
+            <Text style={styles.label}>Pickup location for driver navigation</Text>
+            <Text style={styles.navPickupHint}>
+              Optional — used only to guide your driver to your exact spot.
+              Does not affect which drivers you see.
+            </Text>
+
+            <CurrentLocationButton onLocated={handleUseCurrentLocation} />
+
+            {navAddress ? (
+              <View style={styles.navPickupResult}>
+                <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
+                <Text style={styles.navPickupSavedText}>Location saved</Text>
               </View>
+            ) : null}
+          </View>
 
-              <View style={styles.column}>
-                <Text style={weeklyStyles.label}>Seats</Text>
-                <View style={styles.seatsRow}>
-                  <Pressable style={styles.seatButton} onPress={decreaseSeats}>
-                    <Ionicons name="remove" size={20} color="#111827" />
-                  </Pressable>
+          {!weeklyBooking ? (
+            <>
+              <DateInput
+                label="Trip Date"
+                value={tripDate}
+                onChange={setTripDate}
+                showPicker={showTripDatePicker}
+                setShowPicker={setShowTripDatePicker}
+              />
 
-                  <Text style={styles.seatsNumber}>{seats}</Text>
+              <View style={styles.twoColumns}>
+                <View style={styles.column}>
+                  <TimeInput
+                    label="Trip Time"
+                    value={tripTime}
+                    onChange={setTripTime}
+                    showPicker={showTripTimePicker}
+                    setShowPicker={setShowTripTimePicker}
+                    associatedDate={tripDate}
+                  />
+                </View>
 
-                  <Pressable style={styles.seatButton} onPress={increaseSeats}>
-                    <Ionicons name="add" size={20} color="#111827" />
-                  </Pressable>
+                <View style={styles.column}>
+                  <Text style={weeklyStyles.label}>Seats</Text>
+                  <View style={styles.seatsRow}>
+                    <Pressable style={styles.seatButton} onPress={decreaseSeats}>
+                      <Ionicons name="remove" size={20} color="#111827" />
+                    </Pressable>
+
+                    <Text style={styles.seatsNumber}>{seats}</Text>
+
+                    <Pressable style={styles.seatButton} onPress={increaseSeats}>
+                      <Ionicons name="add" size={20} color="#111827" />
+                    </Pressable>
+                  </View>
                 </View>
               </View>
-            </View>
+            </>
           ) : null}
 
           <Pressable style={styles.weeklyRow} onPress={toggleWeeklyBooking}>
@@ -469,112 +341,12 @@ export default function SchoolRideScreen() {
 
           {weeklyBooking ? (
             <View style={styles.weeklyBox}>
-              <Text style={styles.label}>Choose Repeat Days</Text>
-
-              <View style={weeklyStyles.languageRow}>
-                {dayNames.map((day) => {
-                  const active = selectedDays.includes(day);
-
-                  return (
-                    <Pressable
-                      key={day}
-                      style={[
-                        weeklyStyles.languageButton,
-                        active && weeklyStyles.languageButtonActive,
-                      ]}
-                      onPress={() => toggleDay(day)}
-                    >
-                      <Text
-                        style={[
-                          weeklyStyles.languageText,
-                          active && weeklyStyles.languageTextActive,
-                        ]}
-                      >
-                        {day}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              {selectedDays.length > 0 ? (
-                <View style={weeklyStyles.daySettingsBox}>
-                  {selectedDays.map((day, index) => {
-                    const currentSeats = daySeats[day] || 1;
-                    const isLast = index === selectedDays.length - 1;
-
-                    return (
-                      <View
-                        key={day}
-                        style={[
-                          weeklyStyles.dayItem,
-                          !isLast && weeklyStyles.dayItemDivider,
-                        ]}
-                      >
-                        <Text style={weeklyStyles.dayTitle}>
-                          {day} -{" "}
-                          {getNextDateFromStartDate(
-                            tripDate,
-                            day,
-                            dayTimes[day] || "07:30",
-                          )}
-                        </Text>
-
-                        <View style={weeklyStyles.dayFieldsRow}>
-                          <View style={weeklyStyles.dayFieldColumn}>
-                            <TimeInput
-                              label="Time"
-                              value={dayTimes[day] || "07:30"}
-                              onChange={(value) =>
-                                setDayTimes((prev) => ({
-                                  ...prev,
-                                  [day]: value,
-                                }))
-                              }
-                              showPicker={openWeeklyTimePickerDay === day}
-                              setShowPicker={(value) =>
-                                setOpenWeeklyTimePickerDay(value ? day : null)
-                              }
-                            />
-                          </View>
-
-                          <View style={weeklyStyles.dayFieldColumn}>
-                            <Text style={weeklyStyles.label}>Seats</Text>
-
-                            <View style={weeklyStyles.weeklySeatsRow}>
-                              <Pressable
-                                style={weeklyStyles.weeklySeatButton}
-                                onPress={() => decreaseSeatsForDay(day)}
-                              >
-                                <Ionicons
-                                  name="remove"
-                                  size={20}
-                                  color="#111827"
-                                />
-                              </Pressable>
-
-                              <Text style={weeklyStyles.weeklySeatsNumber}>
-                                {currentSeats}
-                              </Text>
-
-                              <Pressable
-                                style={weeklyStyles.weeklySeatButton}
-                                onPress={() => increaseSeatsForDay(day)}
-                              >
-                                <Ionicons
-                                  name="add"
-                                  size={20}
-                                  color="#111827"
-                                />
-                              </Pressable>
-                            </View>
-                          </View>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              ) : null}
+              <WeeklyDaysCard
+                rows={weeklyRows}
+                onChange={setWeeklyRows}
+                defaultTime="07:30"
+                mode="passenger"
+              />
             </View>
           ) : null}
         </View>
@@ -733,6 +505,37 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 6,
     color: "#111827",
+  },
+  navPickupBox: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#F0E5DC",
+  },
+  navPickupHint: {
+    fontSize: 12,
+    color: "#7C5F46",
+    marginTop: -4,
+    marginBottom: 4,
+  },
+  navPickupResult: {
+    marginTop: 10,
+    backgroundColor: "#F1FBF4",
+    borderWidth: 1,
+    borderColor: "#BBE7C6",
+    borderRadius: 10,
+    padding: 10,
+  },
+  navPickupResultText: {
+    color: "#111827",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  navPickupSavedText: {
+    color: "#166534",
+    fontWeight: "900",
+    fontSize: 12,
+    marginTop: 2,
   },
   dayText: {
     marginTop: -2,

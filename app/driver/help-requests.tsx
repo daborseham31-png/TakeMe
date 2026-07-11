@@ -1,12 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+  writeBatch,
+} from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -17,10 +25,12 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../firebase";
+import RoadsideAcceptedCard from "../booking/roadside-help/RoadsideAcceptedCard";
 import {
-  completeRoadsideHelp,
   markNotificationRead,
+  normalizeRoadsideRequest,
   rejectNotification,
+  RoadsideRequestRecord,
   sendDriverOffer,
 } from "../booking/roadside-help/roadsideLib";
 
@@ -46,6 +56,9 @@ type Notification = {
   etaMinutes?: number;
   status?: string;
   read?: boolean;
+  // Soft delete — this document belongs only to this driver (driverId), so
+  // hiding it here never affects anyone else's data.
+  deletedForDriver?: boolean;
   createdAt?: { seconds?: number } | null;
 };
 
@@ -54,22 +67,23 @@ type Notification = {
 const statusPriority = (status?: string) =>
   status === "accepted" ? 3 : status === "offered" ? 2 : 1;
 
-// One notification per driver per request. Its `status` is what changes as the
-// flow progresses (new -> offered -> accepted / rejected / completed), so the
-// same card just updates instead of new duplicate cards appearing.
-const isAccepted = (n: Notification) =>
-  n.status === "accepted" || n.type === "roadside_accepted";
-
 export default function DriverHelpRequestsScreen() {
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Accepted requests — same roadsideRequests/{requestId} source of truth,
+  // same shared card, as My Bookings -> Driver tab (see bookings.tsx).
+  const [acceptedRequests, setAcceptedRequests] = useState<
+    RoadsideRequestRecord[]
+  >([]);
 
   // Offer form state (keyed by the notification being answered).
   const [offerForId, setOfferForId] = useState<string | null>(null);
   const [price, setPrice] = useState("");
   const [eta, setEta] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [clearingAll, setClearingAll] = useState(false);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (user) => {
@@ -103,11 +117,38 @@ export default function DriverHelpRequestsScreen() {
     return unsubscribe;
   }, [uid]);
 
-  // Hide rejected + completed, then keep only ONE card per request (the most
-  // advanced status), so there are never duplicate cards for the same request.
+  // Same source of truth as My Bookings -> Driver tab (roadsideRequests
+  // where I'm the selected driver), so both screens always agree in
+  // real time with zero extra plumbing.
+  useEffect(() => {
+    if (!uid) return;
+
+    const q = query(
+      collection(db, "roadsideRequests"),
+      where("selectedDriverId", "==", uid),
+    );
+
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setAcceptedRequests(
+        snap.docs.map((d) => normalizeRoadsideRequest(d.id, d.data())),
+      );
+    });
+
+    return unsubscribe;
+  }, [uid]);
+
+  // Hide rejected/completed/accepted. Once a passenger accepts an offer,
+  // that request moves entirely to My Bookings -> Driver tab (Go help /
+  // Finished Help live there now), so it no longer shows in this discovery
+  // list. Keep only ONE card per request (the most advanced remaining
+  // status), so there are never duplicate cards for the same request.
   const visible = useMemo(() => {
     const active = notifications.filter(
-      (n) => n.status !== "rejected" && n.status !== "completed",
+      (n) =>
+        n.deletedForDriver !== true &&
+        n.status !== "rejected" &&
+        n.status !== "completed" &&
+        n.status !== "accepted",
     );
 
     const byRequest = new Map<string, Notification>();
@@ -190,52 +231,72 @@ export default function DriverHelpRequestsScreen() {
     }
   };
 
-  const handleFinish = (notification: Notification) => {
-    if (!notification.requestId) return;
+  // Soft delete only — the document belongs to this driver alone, so this
+  // never affects the passenger's own request.
+  const deleteRequest = async (notification: Notification) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
 
+    await updateDoc(doc(db, "driverNotifications", notification.id), {
+      deletedForDriver: true,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const confirmDeleteRequest = (notification: Notification) => {
     Alert.alert(
-      "Finished Help",
-      "Mark this roadside help as completed? It will move to My Bookings.",
+      "Delete request",
+      "Delete this request from your list?",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Yes, finished",
-          onPress: async () => {
-            try {
-              setBusyId(notification.id);
-              await completeRoadsideHelp({
-                requestId: notification.requestId!,
-                notificationId: notification.id,
-                offerId: notification.offerId,
-              });
-            } catch (error: any) {
-              Alert.alert(
-                "Error",
-                error?.message || "Could not complete the help.",
-              );
-            } finally {
-              setBusyId(null);
-            }
-          },
+          text: "Delete",
+          style: "destructive",
+          onPress: () => deleteRequest(notification).catch(() => {}),
         },
       ],
     );
   };
 
-  const openLocation = (notification: Notification) => {
-    const loc = notification.passengerLocation;
-    if (!loc?.latitude || !loc?.longitude) return;
+  const handleClearAll = () => {
+    if (visible.length === 0 || clearingAll) return;
 
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${loc.latitude},${loc.longitude}`;
-    Linking.openURL(url).catch(() =>
-      Alert.alert("Error", "Could not open maps."),
-    );
-  };
+    Alert.alert(
+      "Clear all",
+      "Clear all help requests from your list?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear All",
+          style: "destructive",
+          onPress: async () => {
+            const ids = visible.map((n) => n.id);
 
-  const callPassenger = (phone?: string) => {
-    if (!phone) return;
-    Linking.openURL(`tel:${phone}`).catch(() =>
-      Alert.alert("Error", "Could not start the call."),
+            setClearingAll(true);
+            setNotifications((prev) => prev.filter((n) => !ids.includes(n.id)));
+
+            try {
+              // Firestore batched writes cap at 500 operations — chunk
+              // defensively even though this list is realistically small.
+              for (let i = 0; i < ids.length; i += 450) {
+                const batch = writeBatch(db);
+
+                ids.slice(i, i + 450).forEach((id) => {
+                  batch.update(doc(db, "driverNotifications", id), {
+                    deletedForDriver: true,
+                    updatedAt: serverTimestamp(),
+                  });
+                });
+
+                await batch.commit();
+              }
+            } catch (error: any) {
+              Alert.alert("Error", error?.message || "Could not clear all.");
+            } finally {
+              setClearingAll(false);
+            }
+          },
+        },
+      ],
     );
   };
 
@@ -265,6 +326,13 @@ export default function DriverHelpRequestsScreen() {
             ) : null}
           </View>
           {!n.read ? <View style={styles.newDot} /> : null}
+          <Pressable
+            style={styles.deleteButton}
+            onPress={() => confirmDeleteRequest(n)}
+            hitSlop={8}
+          >
+            <Ionicons name="trash-outline" size={18} color="#B91C1C" />
+          </Pressable>
         </View>
 
         <View style={styles.tagRow}>
@@ -363,109 +431,6 @@ export default function DriverHelpRequestsScreen() {
     );
   };
 
-  const renderAcceptedCard = (n: Notification) => {
-    const loc = n.passengerLocation;
-    const address =
-      loc?.address ||
-      (loc?.latitude && loc?.longitude
-        ? `${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`
-        : "Unknown location");
-
-    return (
-      <View key={n.id} style={[styles.card, styles.acceptedCard]}>
-        <View style={styles.cardHeader}>
-          <View style={[styles.iconBadge, styles.iconBadgeGreen]}>
-            <Ionicons name="checkmark-done" size={20} color="#16A34A" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>Passenger accepted your offer</Text>
-            <Text style={styles.cardSub}>
-              Go help {n.passengerName || "the passenger"}
-            </Text>
-          </View>
-          <View style={styles.acceptedPill}>
-            <Text style={styles.acceptedPillText}>Accepted</Text>
-          </View>
-        </View>
-
-        <View style={styles.tagRow}>
-          {(n.problemTypes || []).map((p) => (
-            <View key={p} style={styles.tag}>
-              <Text style={styles.tagText}>{p}</Text>
-            </View>
-          ))}
-        </View>
-
-        {n.description ? (
-          <Text style={styles.description}>{n.description}</Text>
-        ) : null}
-
-        <View style={styles.infoRow}>
-          <Ionicons name="person-outline" size={16} color="#7C5F46" />
-          <Text style={styles.infoText}>{n.passengerName || "Passenger"}</Text>
-        </View>
-
-        {n.passengerPhone ? (
-          <Pressable
-            style={styles.infoRow}
-            onPress={() => callPassenger(n.passengerPhone)}
-          >
-            <Ionicons name="call-outline" size={16} color="#F58220" />
-            <Text style={[styles.infoText, styles.phoneText]}>
-              {n.passengerPhone}
-            </Text>
-          </Pressable>
-        ) : null}
-
-        <View style={styles.infoRow}>
-          <Ionicons name="location-outline" size={16} color="#7C5F46" />
-          <Text style={styles.infoText}>{address}</Text>
-        </View>
-
-        <View style={styles.metaRow}>
-          {typeof n.price === "number" ? (
-            <View style={styles.metaItem}>
-              <Ionicons name="cash-outline" size={16} color="#F58220" />
-              <Text style={styles.metaText}>{n.price} ₪</Text>
-            </View>
-          ) : null}
-          {typeof n.etaMinutes === "number" ? (
-            <View style={styles.metaItem}>
-              <Ionicons name="time-outline" size={16} color="#F58220" />
-              <Text style={styles.metaText}>{n.etaMinutes} min</Text>
-            </View>
-          ) : null}
-        </View>
-
-        <Pressable
-          style={styles.primaryButtonFull}
-          onPress={() => {
-            if (!n.read) markNotificationRead(n.id).catch(() => {});
-            openLocation(n);
-          }}
-        >
-          <Ionicons name="navigate" size={18} color="#FFFFFF" />
-          <Text style={styles.primaryText}>Go help passenger</Text>
-        </Pressable>
-
-        <Pressable
-          style={[styles.finishButton, busyId === n.id && styles.buttonDisabled]}
-          onPress={() => handleFinish(n)}
-          disabled={busyId === n.id}
-        >
-          {busyId === n.id ? (
-            <ActivityIndicator color="#166534" />
-          ) : (
-            <>
-              <Ionicons name="checkmark-done" size={18} color="#166534" />
-              <Text style={styles.finishButtonText}>Finished Help</Text>
-            </>
-          )}
-        </Pressable>
-      </View>
-    );
-  };
-
   return (
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -474,9 +439,19 @@ export default function DriverHelpRequestsScreen() {
           <Text style={styles.backText}>Back</Text>
         </Pressable>
 
-        <View style={styles.header}>
-          <Ionicons name="help-buoy" size={26} color="#F58220" />
-          <Text style={styles.title}>Help Requests</Text>
+        <View style={styles.headerRow}>
+          <View style={styles.header}>
+            <Ionicons name="help-buoy" size={26} color="#F58220" />
+            <Text style={styles.title}>Help Requests</Text>
+          </View>
+
+          {visible.length > 0 ? (
+            <Pressable onPress={handleClearAll} disabled={clearingAll} hitSlop={8}>
+              <Text style={styles.clearAllText}>
+                {clearingAll ? "Clearing..." : "Clear All"}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
         <Text style={styles.subtitle}>
           Roadside help requests from passengers near your routes
@@ -486,7 +461,7 @@ export default function DriverHelpRequestsScreen() {
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color="#F58220" />
           </View>
-        ) : visible.length === 0 ? (
+        ) : visible.length === 0 && acceptedRequests.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="mail-open-outline" size={40} color="#8B7B6B" />
             <Text style={styles.emptyTitle}>No requests yet</Text>
@@ -497,9 +472,10 @@ export default function DriverHelpRequestsScreen() {
           </View>
         ) : (
           <View style={styles.list}>
-            {visible.map((n) =>
-              isAccepted(n) ? renderAcceptedCard(n) : renderRequestCard(n),
-            )}
+            {acceptedRequests.map((r) => (
+              <RoadsideAcceptedCard key={r.id} request={r} />
+            ))}
+            {visible.map((n) => renderRequestCard(n))}
           </View>
         )}
       </ScrollView>
@@ -528,6 +504,11 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 15,
   },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -537,6 +518,11 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "900",
     color: "#111827",
+  },
+  clearAllText: {
+    color: "#F58220",
+    fontWeight: "900",
+    fontSize: 14,
   },
   subtitle: {
     color: "#7C5F46",
@@ -592,6 +578,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     marginBottom: 14,
+  },
+  deleteButton: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
   },
   iconBadge: {
     width: 42,

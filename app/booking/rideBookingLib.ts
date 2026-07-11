@@ -27,7 +27,12 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
-import { DriverLiveLocation, TripTrackingStatus } from "./bookingsLib";
+import {
+  canStartTrip,
+  DriverLiveLocation,
+  getStartTripBlockedReason,
+  TripTrackingStatus,
+} from "./bookingsLib";
 import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
 export const RIDE_CATEGORY = "personal_ride";
@@ -236,6 +241,13 @@ export const hideRideBookingForDriver = async (
 // ---------------------------------------------------------------------------
 
 export const startRide = async (bookingId: string, booking: RideBooking) => {
+  if (!canStartTrip(booking)) {
+    throw new Error(
+      getStartTripBlockedReason(booking) ||
+        "You can start this trip only on the trip date.",
+    );
+  }
+
   await updateDoc(doc(db, "bookings", bookingId), {
     status: "on_the_way",
     tripStatus: "driver_on_way" as TripTrackingStatus,
@@ -320,7 +332,16 @@ export const submitRideRating = async (
 ) => {
   const cleanComment = comment.trim();
 
-  if (!booking.driverId) {
+  // driverId must be the driver's real Firebase UID — never this booking's
+  // own id or its routeId. Treat a suspicious value the same as "no
+  // driver": still save the passenger's rating on the booking, just skip
+  // creating a driverReviews doc / crediting the wrong profile.
+  const hasValidDriverId =
+    !!booking.driverId &&
+    booking.driverId !== bookingId &&
+    booking.driverId !== booking.routeId;
+
+  if (!hasValidDriverId) {
     await updateDoc(doc(db, "bookings", bookingId), {
       rating,
       reviewComment: cleanComment || null,

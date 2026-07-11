@@ -239,7 +239,13 @@ export default function ErrandsBookScreen() {
 
                   <Ionicons name="star" size={14} color="#F58220" />
 
-                  <Text style={styles.smallText}>{driver.rating}</Text>
+                  {driver.reviews > 0 ? (
+                    <Text style={styles.smallText}>
+                      {driver.rating.toFixed(1)} ({driver.reviews})
+                    </Text>
+                  ) : (
+                    <Text style={styles.smallText}>New driver</Text>
+                  )}
                 </View>
               </View>
             </View>

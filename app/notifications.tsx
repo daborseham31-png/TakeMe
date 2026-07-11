@@ -6,6 +6,7 @@ import {
   doc,
   onSnapshot,
   query,
+  serverTimestamp,
   updateDoc,
   where,
   writeBatch,
@@ -36,12 +37,21 @@ type Notification = {
   bookingId?: string | null;
 
   kind?: "work" | "errand" | null;
+  category?: string | null;
 
   // Canonical field for routing. openBookingTab/roleTarget are kept for
   // backwards compatibility with older notification documents.
   targetTab?: BookingTab | null;
   roleTarget?: BookingTab | null;
   openBookingTab?: BookingTab | null;
+
+  // Roadside Help only — see notify()'s requestId/offerId/targetPage/amount.
+  requestId?: string | null;
+  offerId?: string | null;
+  targetPage?: string | null;
+  amount?: number | null;
+  driverId?: string | null;
+  passengerId?: string | null;
 
   read?: boolean;
   deleted?: boolean;
@@ -50,6 +60,7 @@ type Notification = {
 
 const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
   request_received: "mail-outline",
+  new_booking_request: "mail-outline",
   request_accepted: "checkmark-circle-outline",
   request_rejected: "close-circle-outline",
   payment_confirmed: "card-outline",
@@ -64,12 +75,19 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
   ride_arrived: "location-outline",
   ride_completed: "trophy-outline",
   ride_trip_completed: "star-outline",
+
+  roadside_offer_received: "construct-outline",
+  roadside_offer_accepted: "checkmark-done-outline",
+  roadside_driver_on_way: "navigate-outline",
+  roadside_payment_required: "card-outline",
+  roadside_payment_received: "cash-outline",
 };
 
 export default function NotificationsScreen() {
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [clearingAll, setClearingAll] = useState(false);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (user) => {
@@ -129,10 +147,13 @@ export default function NotificationsScreen() {
     // إشعارات عادة بتوصل للسائق
     const driverTypes = [
       "request_received",
+      "new_booking_request",
       "payment_confirmed",
       "personal_ride_booking",
       "school_ride_booking",
       "ride_completed",
+      "roadside_offer_accepted",
+      "roadside_payment_received",
     ];
 
     if (driverTypes.includes(n.type || "")) {
@@ -150,6 +171,7 @@ export default function NotificationsScreen() {
       "ride_on_the_way",
       "ride_arrived",
       "ride_trip_completed",
+      "roadside_driver_on_way",
     ];
 
     if (passengerTypes.includes(n.type || "")) {
@@ -161,7 +183,10 @@ export default function NotificationsScreen() {
 
   const onPressNotification = (n: Notification) => {
     if (!n.read) {
-      updateDoc(doc(db, "notifications", n.id), { read: true }).catch(() => {});
+      updateDoc(doc(db, "notifications", n.id), {
+        read: true,
+        readAt: serverTimestamp(),
+      }).catch(() => {});
     }
 
     if (needsPayment(n) && n.applicationId && n.kind) {
@@ -175,6 +200,35 @@ export default function NotificationsScreen() {
       return;
     }
 
+    // A driver just offered help — open Finding Help with this exact offer
+    // highlighted. Never Home, never another category.
+    if (n.type === "roadside_offer_received") {
+      router.push({
+        pathname: "/booking/roadside-help/waiting",
+        params: {
+          requestId: n.requestId || "",
+          highlightOfferId: n.offerId || "",
+        },
+      } as any);
+      return;
+    }
+
+    // The driver finished the help — open the Roadside Help payment page
+    // directly (never My Bookings first).
+    if (n.type === "roadside_payment_required") {
+      router.push({
+        pathname: "/booking/roadside-help/payment",
+        params: {
+          requestId: n.requestId || "",
+          offerId: n.offerId || "",
+          bookingId: n.bookingId || "",
+          amount: n.amount != null ? String(n.amount) : "",
+          category: "roadside",
+        },
+      } as any);
+      return;
+    }
+
     const tab = getBookingTabFromNotification(n);
 
     router.push({
@@ -183,20 +237,29 @@ export default function NotificationsScreen() {
         tab,
         bookingId: n.bookingId || "",
         applicationId: n.applicationId || "",
+        requestId: n.requestId || "",
+        offerId: n.offerId || "",
+        category: n.category || "",
         type: n.type || "",
         kind: n.kind || "",
       },
     } as any);
   };
 
+  // Notification documents belong only to the receiving user (userId), so
+  // it's safe to permanently delete them — but a soft `deleted` flag is used
+  // instead, matching every other list in the app, and so a stray
+  // `notifications` query anywhere else never has to special-case this one.
   const deleteOne = (n: Notification) => {
+    setItems((prev) => prev.filter((item) => item.id !== n.id));
+
     updateDoc(doc(db, "notifications", n.id), { deleted: true }).catch(
       () => {},
     );
   };
 
   const clearAll = () => {
-    if (visible.length === 0) return;
+    if (visible.length === 0 || clearingAll) return;
 
     Alert.alert("Clear all", "Hide all notifications?", [
       { text: "Cancel", style: "cancel" },
@@ -204,16 +267,31 @@ export default function NotificationsScreen() {
         text: "Clear all",
         style: "destructive",
         onPress: async () => {
+          const ids = visible.map((n) => n.id);
+
+          setClearingAll(true);
+          setItems((prev) => prev.filter((item) => !ids.includes(item.id)));
+
           try {
-            const batch = writeBatch(db);
+            // Firestore batched writes cap at 500 operations — chunk
+            // defensively so a very large notification list never fails.
+            for (let i = 0; i < ids.length; i += 450) {
+              const batch = writeBatch(db);
 
-            visible.forEach((n) =>
-              batch.update(doc(db, "notifications", n.id), { deleted: true }),
-            );
+              ids
+                .slice(i, i + 450)
+                .forEach((id) =>
+                  batch.update(doc(db, "notifications", id), {
+                    deleted: true,
+                  }),
+                );
 
-            await batch.commit();
+              await batch.commit();
+            }
           } catch (error: any) {
             Alert.alert("Error", error?.message || "Could not clear.");
+          } finally {
+            setClearingAll(false);
           }
         },
       },
@@ -235,8 +313,10 @@ export default function NotificationsScreen() {
           </View>
 
           {visible.length > 0 ? (
-            <Pressable onPress={clearAll} hitSlop={8}>
-              <Text style={styles.clearAll}>Clear all</Text>
+            <Pressable onPress={clearAll} disabled={clearingAll} hitSlop={8}>
+              <Text style={styles.clearAll}>
+                {clearingAll ? "Clearing..." : "Clear all"}
+              </Text>
             </Pressable>
           ) : null}
         </View>
