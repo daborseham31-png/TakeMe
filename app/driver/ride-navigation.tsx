@@ -85,13 +85,52 @@ export default function RideNavigationScreen() {
     return unsub;
   }, [id]);
 
+  // Exact GPS pickup point, if the passenger captured one — checked across
+  // every field name this has ever been saved under. This is completely
+  // separate from booking.from/to (the manual matching fields).
   const coords = (b: any) => {
-    const lat = b?.pickup?.latitude ?? b?.pickupCoords?.latitude;
-    const lng = b?.pickup?.longitude ?? b?.pickupCoords?.longitude;
+    const lat =
+      b?.pickupLatitude ??
+      b?.pickup?.latitude ??
+      b?.pickupCoords?.latitude ??
+      b?.pickupLocation?.latitude ??
+      b?.passengerPickupLocation?.latitude;
+    const lng =
+      b?.pickupLongitude ??
+      b?.pickup?.longitude ??
+      b?.pickupCoords?.longitude ??
+      b?.pickupLocation?.longitude ??
+      b?.passengerPickupLocation?.longitude;
 
     if (typeof lat !== "number" || typeof lng !== "number") return null;
 
     return { lat, lng };
+  };
+
+  // The exact readable address, if one was captured (independent of the
+  // coordinates above — used only as a last-resort navigation target).
+  const pickupAddressText = (b: any): string =>
+    b?.pickupAddress || b?.pickup?.address || b?.passengerPickupLocation?.address || "";
+
+  // Navigation destination with the exact fallback chain: precise
+  // coordinates -> exact pickup address text -> manual From address. This
+  // is ONLY for guiding the driver to the passenger — never used to decide
+  // which drivers a passenger sees (that's from/to matching, elsewhere).
+  type NavTarget =
+    | { kind: "coords"; lat: number; lng: number }
+    | { kind: "text"; text: string }
+    | null;
+
+  const getNavTarget = (b: any): NavTarget => {
+    const c = coords(b);
+    if (c) return { kind: "coords", lat: c.lat, lng: c.lng };
+
+    const address = pickupAddressText(b);
+    if (address) return { kind: "text", text: address };
+
+    if (b?.from) return { kind: "text", text: b.from };
+
+    return null;
   };
 
   const updateDriverLocationOnce = async () => {
@@ -300,14 +339,17 @@ useEffect(() => {
   };
 
   const openMaps = (b: RideBooking) => {
-    const c = coords(b);
+    const target = getNavTarget(b);
 
-    if (!c) {
-      Alert.alert("Location", "Exact pickup location is not available.");
+    if (!target) {
+      Alert.alert("Location", "Pickup location is not available.");
       return;
     }
 
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}`;
+    const url =
+      target.kind === "coords"
+        ? `https://www.google.com/maps/dir/?api=1&destination=${target.lat},${target.lng}`
+        : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(target.text)}`;
 
     Linking.openURL(url).catch(() =>
       Alert.alert("Error", "Could not open maps."),
@@ -315,14 +357,17 @@ useEffect(() => {
   };
 
   const openWaze = (b: RideBooking) => {
-    const c = coords(b);
+    const target = getNavTarget(b);
 
-    if (!c) {
-      Alert.alert("Location", "Exact pickup location is not available.");
+    if (!target) {
+      Alert.alert("Location", "Pickup location is not available.");
       return;
     }
 
-    const url = `https://waze.com/ul?ll=${c.lat},${c.lng}&navigate=yes`;
+    const url =
+      target.kind === "coords"
+        ? `https://waze.com/ul?ll=${target.lat},${target.lng}&navigate=yes`
+        : `https://waze.com/ul?q=${encodeURIComponent(target.text)}&navigate=yes`;
 
     Linking.openURL(url).catch(() =>
       Alert.alert("Error", "Could not open Waze."),
@@ -541,9 +586,9 @@ useEffect(() => {
             <Ionicons name="navigate-circle-outline" size={16} color="#7C5F46" />
             <Text style={styles.infoText}>
               {c
-                ? (booking as any).pickup?.address ||
+                ? pickupAddressText(booking) ||
                   `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`
-                : "Exact pickup not available"}
+                : pickupAddressText(booking) || "Exact pickup not available"}
             </Text>
           </View>
 

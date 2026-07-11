@@ -1,12 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import {
   DAY_KEY_LABEL,
-  getCurrentWeekBounds,
+  getAllowedWeeklyDateRange,
   getDayKeyFromDate,
+  getLocalNowInIsrael,
+  isDateInAllowedWeek,
+  isNextWeekOpen,
   makeEmptyWeekDayRow,
+  WeekChoice,
   WeekDayRow,
 } from "../../booking/weeklyBookingLib";
 import DateInput, { TimeInput } from "./DateInput";
@@ -19,9 +23,14 @@ type Props = {
   mode: "passenger" | "driver";
 };
 
-const parseYMDToDate = (ymd: string) => {
+const parseYMDToEndOfDay = (ymd: string) => {
   const [year, month, day] = ymd.split("-").map(Number);
   return new Date(year, month - 1, day, 23, 59, 59);
+};
+
+const parseYMDToStartOfDay = (ymd: string) => {
+  const [year, month, day] = ymd.split("-").map(Number);
+  return new Date(year, month - 1, day, 0, 0, 0);
 };
 
 export default function WeeklyDaysCard({
@@ -32,9 +41,33 @@ export default function WeeklyDaysCard({
 }: Props) {
   const [openDatePickerId, setOpenDatePickerId] = useState<string | null>(null);
   const [openTimePickerId, setOpenTimePickerId] = useState<string | null>(null);
+  const [selectedWeek, setSelectedWeek] = useState<WeekChoice>("current");
 
-  const { endYMD } = getCurrentWeekBounds();
-  const maximumDate = parseYMDToDate(endYMD);
+  const nextWeekOpen = isNextWeekOpen();
+
+  // The next-week window only lasts through Saturday — if it closes again
+  // while "next" is still selected (e.g. this screen was left open across
+  // midnight), fall back to "current" instead of silently showing a locked
+  // week's dates.
+  useEffect(() => {
+    if (!nextWeekOpen && selectedWeek === "next") {
+      setSelectedWeek("current");
+      onChange([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextWeekOpen]);
+
+  const { startYMD, endYMD } = getAllowedWeeklyDateRange(selectedWeek);
+  const todayYMD = (() => {
+    const now = getLocalNowInIsrael();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  })();
+  const effectiveStartYMD = startYMD > todayYMD ? startYMD : todayYMD;
+  const minimumDate = parseYMDToStartOfDay(effectiveStartYMD);
+  const maximumDate = parseYMDToEndOfDay(endYMD);
 
   const updateRow = (id: string, patch: Partial<WeekDayRow>) => {
     onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -52,6 +85,15 @@ export default function WeeklyDaysCard({
     onChange([...rows, makeEmptyWeekDayRow(defaultTime)]);
   };
 
+  const switchWeek = (week: WeekChoice) => {
+    if (week === selectedWeek) return;
+
+    // Dates picked for one week don't carry over to the other — clearing
+    // avoids silently leaving a now-out-of-range date in the list.
+    setSelectedWeek(week);
+    onChange([]);
+  };
+
   const handleDateChange = (id: string, value: string) => {
     const duplicate = rows.some(
       (row) => row.id !== id && row.date && row.date === value,
@@ -61,6 +103,14 @@ export default function WeeklyDaysCard({
       Alert.alert(
         "Already added",
         "You already added this day. Please choose a different date.",
+      );
+      return;
+    }
+
+    if (value && !isDateInAllowedWeek(value, selectedWeek)) {
+      Alert.alert(
+        "Booking unavailable",
+        "Booking for this week is not available yet.",
       );
       return;
     }
@@ -77,12 +127,55 @@ export default function WeeklyDaysCard({
   return (
     <View style={styles.container}>
       <Text style={sharedStyles.label}>
-        {mode === "driver" ? "Weekly Trip Days" : "Choose Days (This Week)"}
+        {mode === "driver" ? "Weekly Trip Days" : "Choose Days"}
       </Text>
       <Text style={styles.hint}>
-        Weekly booking only covers the current week (Sunday to Saturday). Past
-        days can&apos;t be selected.
+        Weekly booking covers one Sunday-to-Saturday week at a time. Past days
+        can&apos;t be selected.
       </Text>
+      <Text style={styles.hint}>
+        {nextWeekOpen
+          ? "Next week booking is now available."
+          : "Next week booking opens Saturday at 07:00."}
+      </Text>
+
+      {nextWeekOpen ? (
+        <View style={styles.weekToggleRow}>
+          <Pressable
+            style={[
+              styles.weekToggleButton,
+              selectedWeek === "current" && styles.weekToggleButtonActive,
+            ]}
+            onPress={() => switchWeek("current")}
+          >
+            <Text
+              style={[
+                styles.weekToggleText,
+                selectedWeek === "current" && styles.weekToggleTextActive,
+              ]}
+            >
+              This week
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.weekToggleButton,
+              selectedWeek === "next" && styles.weekToggleButtonActive,
+            ]}
+            onPress={() => switchWeek("next")}
+          >
+            <Text
+              style={[
+                styles.weekToggleText,
+                selectedWeek === "next" && styles.weekToggleTextActive,
+              ]}
+            >
+              Next week
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {rows.length === 0 ? (
         <View style={styles.emptyBox}>
@@ -123,6 +216,7 @@ export default function WeeklyDaysCard({
               setShowPicker={(value) =>
                 setOpenDatePickerId(value ? row.id : null)
               }
+              minimumDate={minimumDate}
               maximumDate={maximumDate}
             />
 
@@ -207,7 +301,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#7C5F46",
     marginTop: -4,
-    marginBottom: 10,
+    marginBottom: 6,
+  },
+  weekToggleRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  weekToggleButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  weekToggleButtonActive: {
+    backgroundColor: "#F58220",
+    borderColor: "#F58220",
+  },
+  weekToggleText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  weekToggleTextActive: {
+    color: "#FFFFFF",
   },
   emptyBox: {
     borderWidth: 1,

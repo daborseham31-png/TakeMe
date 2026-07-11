@@ -12,6 +12,9 @@ import {
   View,
 } from "react-native";
 
+import CurrentLocationButton, {
+  CurrentLocationResult,
+} from "../CurrentLocationButton";
 import DateInput, { TimeInput } from "../../driver/create/DateInput";
 import {
   getDayFromDateText,
@@ -42,8 +45,20 @@ const getTodayDate = () => {
 
 export default function SchoolRideScreen() {
   const [schoolName, setSchoolName] = useState("");
-  const [pickupLocation, setPickupLocation] = useState("");
+  // Manual matching field ("Nazareth") — this is what driver search compares
+  // against driver.from/driver.to. It is NEVER auto-filled with an exact GPS
+  // address, and using "Use my current location" below never touches it.
+  const [fromAddress, setFromAddress] = useState("");
   const [schoolLocation, setSchoolLocation] = useState("");
+
+  // Separate "pickup location for driver navigation" — an exact GPS point
+  // (+ readable address) used ONLY so the driver can navigate to the
+  // passenger. Never sent to driver matching, never written into `from`.
+  const [navAddress, setNavAddress] = useState("");
+  const [navCoords, setNavCoords] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
 
   const [tripDate, setTripDate] = useState(getTodayDate());
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
@@ -78,6 +93,11 @@ export default function SchoolRideScreen() {
     }
   };
 
+  const handleUseCurrentLocation = (result: CurrentLocationResult) => {
+    setNavAddress(result.address);
+    setNavCoords({ latitude: result.latitude, longitude: result.longitude });
+  };
+
   const toggleWeeklyBooking = () => {
     const nextValue = !weeklyBooking;
 
@@ -89,7 +109,7 @@ export default function SchoolRideScreen() {
   };
 
   const handleSearch = () => {
-    if (!schoolName.trim() || !pickupLocation.trim() || !schoolLocation.trim()) {
+    if (!schoolName.trim() || !fromAddress.trim() || !schoolLocation.trim()) {
       Alert.alert(
         "Missing details",
         "Please enter school name, pickup location, and school location.",
@@ -100,10 +120,21 @@ export default function SchoolRideScreen() {
     const baseParams: Record<string, string> = {
       category: "school",
       schoolName: schoolName.trim(),
-      from: pickupLocation.trim(),
+      // Manual matching fields only — driver search compares these, never
+      // the GPS pickup point below.
+      from: fromAddress.trim(),
       to: schoolLocation.trim(),
       genderPref,
       languages: selectedLanguages.join(","),
+      // Separate navigation-only pickup point (optional) — passed through
+      // untouched to ride-payment/the booking doc, never used for matching.
+      ...(navCoords
+        ? {
+            pickupLatitude: String(navCoords.latitude),
+            pickupLongitude: String(navCoords.longitude),
+            pickupAddress: navAddress,
+          }
+        : {}),
     };
 
     if (weeklyBooking) {
@@ -218,10 +249,10 @@ export default function SchoolRideScreen() {
                 <Ionicons name="home-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Home address"
+                  placeholder="e.g. Nazareth"
                   placeholderTextColor="#8B7B6B"
-                  value={pickupLocation}
-                  onChangeText={setPickupLocation}
+                  value={fromAddress}
+                  onChangeText={setFromAddress}
                 />
               </View>
             </View>
@@ -239,6 +270,23 @@ export default function SchoolRideScreen() {
                 />
               </View>
             </View>
+          </View>
+
+          <View style={styles.navPickupBox}>
+            <Text style={styles.label}>Pickup location for driver navigation</Text>
+            <Text style={styles.navPickupHint}>
+              Optional — used only to guide your driver to your exact spot.
+              Does not affect which drivers you see.
+            </Text>
+
+            <CurrentLocationButton onLocated={handleUseCurrentLocation} />
+
+            {navAddress ? (
+              <View style={styles.navPickupResult}>
+                <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
+                <Text style={styles.navPickupSavedText}>Location saved</Text>
+              </View>
+            ) : null}
           </View>
 
           {!weeklyBooking ? (
@@ -457,6 +505,37 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 6,
     color: "#111827",
+  },
+  navPickupBox: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#F0E5DC",
+  },
+  navPickupHint: {
+    fontSize: 12,
+    color: "#7C5F46",
+    marginTop: -4,
+    marginBottom: 4,
+  },
+  navPickupResult: {
+    marginTop: 10,
+    backgroundColor: "#F1FBF4",
+    borderWidth: 1,
+    borderColor: "#BBE7C6",
+    borderRadius: 10,
+    padding: 10,
+  },
+  navPickupResultText: {
+    color: "#111827",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  navPickupSavedText: {
+    color: "#166534",
+    fontWeight: "900",
+    fontSize: 12,
+    marginTop: 2,
   },
   dayText: {
     marginTop: -2,

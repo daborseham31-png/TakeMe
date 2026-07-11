@@ -11,8 +11,9 @@ import {
   serverTimestamp,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -31,14 +32,15 @@ import { auth, db } from "../../firebase";
 import {
   BookingItem,
   canStartTrip,
-  compareBookingsByDate,
+  DriverCollection,
   DriverTripItem,
   getCategoryMeta,
   getStartTripBlockedReason,
+  isCompletedItem,
   markCompleted,
   normalizeBooking,
   normalizeDriverTrip,
-  sortBookingsByDate,
+  sortMyBookings,
 } from "../booking/bookingsLib";
 import {
   arriveRide,
@@ -58,6 +60,7 @@ import {
   arriveJob,
   cancelApplication,
   cancelBlockedReason,
+  enrichApplicationWithCustomerAge,
   finishJob,
   isAwaitingPayment,
   normalizeApplication,
@@ -66,7 +69,13 @@ import {
   startJob,
   startState,
   STATUS_LABEL,
+  submitApplicationRating,
 } from "../booking/work-errand/workErrandLib";
+import RoadsideAcceptedCard from "../booking/roadside-help/RoadsideAcceptedCard";
+import {
+  normalizeRoadsideRequest,
+  RoadsideRequestRecord,
+} from "../booking/roadside-help/roadsideLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
 
 type Tab = "passenger" | "driver";
@@ -142,27 +151,88 @@ const enrichRideWithRouteDetails = async (ride: RideBooking) => {
   }
 };
 
-type DriverRow =
-  | {
-      kind: "trip";
-      key: string;
-      createdAtSeconds: number;
-      searchText: string;
-      trip: DriverTripItem;
-    }
-  | {
-      kind: "booking";
-      key: string;
-      createdAtSeconds: number;
-      searchText: string;
-      booking: BookingItem;
-    };
+// One combined chronological list mixes every category and every source
+// (personal_ride live-tracking "rides", general "bookings", driver-owned
+// "trip" listings, and Work/Errand "applications") — each variant is tagged
+// with its own real object (via `_kind`) plus its ORIGINAL fields, so the
+// shared sortMyBookings() helper can read `.date`/`.time`/`.status`/
+// `.tripStatus` straight off it with no per-category special-casing.
+type TaggedRide = RideBooking & { _kind: "ride" };
+type TaggedTrip = DriverTripItem & { _kind: "trip" };
+type TaggedBooking = BookingItem & { _kind: "booking" };
+// NormalizedApplication has no `.time` field (it uses `.startTime`) — alias
+// it here so the generic date/time sort helpers work unchanged.
+type TaggedApplication = NormalizedApplication & {
+  _kind: "application";
+  time: string;
+};
+
+type CombinedRow = TaggedRide | TaggedTrip | TaggedBooking | TaggedApplication;
+
+const tagRide = (r: RideBooking): TaggedRide => ({ ...r, _kind: "ride" });
+const tagTrip = (t: DriverTripItem): TaggedTrip => ({ ...t, _kind: "trip" });
+const tagBooking = (b: BookingItem): TaggedBooking => ({
+  ...b,
+  _kind: "booking",
+});
+const tagApplication = (a: NormalizedApplication): TaggedApplication => ({
+  ...a,
+  _kind: "application",
+  time: a.startTime,
+});
+
+// ---------------------------------------------------------------------------
+// Driver tab ONLY: classifies each row into "Booked & Active" vs
+// "Created — Waiting for Booking". The passenger tab is never split — every
+// passenger row is a real booking by construction, so this classification
+// simply doesn't apply there.
+//
+// ride/booking/application rows only ever exist because someone actually
+// booked or applied for something (there is no "unclaimed" version of any
+// of these three) — they always belong in "Booked & Active". Only "trip"
+// rows (the driver's own driverRoutes/workJobs/errandJobs listing) can go
+// either way.
+//
+// IMPORTANT: `status` on a normalized DriverTripItem is NEVER usable as
+// booking evidence — normalizeDriverTrip (bookingsLib.ts) collapses every
+// non-completed driverRoutes/workJobs/errandJobs document to status
+// "ongoing" regardless of whether anyone booked/accepted it (a freshly
+// created, never-booked route has the exact same "ongoing" status as one
+// with a passenger). Classifying on status here previously caused every
+// unbooked created listing to show up as "Booked & Active". Real evidence
+// only ever comes from a matching document elsewhere:
+//   - driverRoutes: a `bookings` doc whose routeId matches (bookedRouteIds)
+//   - workJobs: acceptedWorkersCount > 0 on the job itself (kept as ONE
+//     card even while still open for more workers — never split/duplicated)
+//   - errandJobs: an accepted-or-further workApplications/errandApplications
+//     doc whose sourceId matches (bookedJobSourceIds) — errand has no
+//     capacity concept, so once accepted the original listing is dropped
+//     from `driverTrips` entirely in favor of the application row, and never
+//     reaches this classifier as a "trip" row at all.
+// By the time a "trip" row reaches this function it is therefore guaranteed
+// to have no real booking evidence unless acceptedWorkersCount says so.
+// ---------------------------------------------------------------------------
+const isTripBookedOrActive = (t: DriverTripItem): boolean => {
+  if (isCompletedItem(t)) return true;
+
+  const acceptedWorkersCount =
+    typeof t.acceptedWorkersCount === "number" ? t.acceptedWorkersCount : 0;
+
+  return acceptedWorkersCount > 0;
+};
+
+const isDriverRowBookedOrActive = (row: CombinedRow): boolean => {
+  if (row._kind !== "trip") return true;
+
+  return isTripBookedOrActive(row);
+};
 
 export default function BookingsScreen() {
   const params = useLocalSearchParams<{
     tab?: string | string[];
     bookingId?: string | string[];
     applicationId?: string | string[];
+    requestId?: string | string[];
     type?: string | string[];
     kind?: string | string[];
   }>();
@@ -172,8 +242,24 @@ export default function BookingsScreen() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
+  // Deep-link from a notification ("open the driver tab, find this pending
+  // request, scroll to it and flash it briefly").
+  const [pendingScrollAppId, setPendingScrollAppId] = useState<string | null>(
+    null,
+  );
+  const [highlightAppId, setHighlightAppId] = useState<string | null>(null);
+  const mainScrollRef = useRef<ScrollView>(null);
+  const scrollOffsetRef = useRef(0);
+  const appCardRefs = useRef<Record<string, View | null>>({});
+
   const [bookings, setBookings] = useState<BookingItem[]>([]);
   const [driverRoadside, setDriverRoadside] = useState<BookingItem[]>([]);
+  // Same roadsideRequests/{requestId} source of truth as the driver's Help
+  // Requests screen — both subscribe independently, so any change either
+  // screen makes shows up on the other in real time (see roadsideLib.ts).
+  const [driverRoadsideRequests, setDriverRoadsideRequests] = useState<
+    RoadsideRequestRecord[]
+  >([]);
 
   const [passengerRides, setPassengerRides] = useState<RideBooking[]>([]);
   const [driverRides, setDriverRides] = useState<RideBooking[]>([]);
@@ -181,6 +267,8 @@ export default function BookingsScreen() {
   const [ratingBooking, setRatingBooking] = useState<RideBooking | null>(null);
   const [schoolRatingBooking, setSchoolRatingBooking] =
     useState<BookingItem | null>(null);
+  const [appRatingBooking, setAppRatingBooking] =
+    useState<NormalizedApplication | null>(null);
   const [ratedSchoolBookingIds, setRatedSchoolBookingIds] = useState<string[]>(
     [],
   );
@@ -202,6 +290,7 @@ export default function BookingsScreen() {
     NormalizedApplication[]
   >([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [clearingAll, setClearingAll] = useState(false);
 
   const [rebook, setRebook] = useState<{
     category: string;
@@ -233,7 +322,19 @@ export default function BookingsScreen() {
     if (requestedTab === "passenger") {
       setTab("passenger");
     }
-  }, [params.tab]);
+
+    // Roadside notifications route with requestId/offerId (see spec item 8),
+    // not always a bookingId — fall back to requestId so the accepted /
+    // completed Roadside card can still be found and highlighted.
+    const targetId =
+      getParamString(params.bookingId) ||
+      getParamString(params.applicationId) ||
+      getParamString(params.requestId);
+
+    if (targetId) {
+      setPendingScrollAppId(targetId);
+    }
+  }, [params.tab, params.bookingId, params.applicationId, params.requestId]);
 
   useEffect(() => {
     if (!uid) return;
@@ -356,6 +457,18 @@ const subscribe = (
       () => setLoading(false),
     );
 
+    const unsubDriverRoadsideRequests = onSnapshot(
+      query(
+        collection(db, "roadsideRequests"),
+        where("selectedDriverId", "==", uid),
+      ),
+      (snap) => {
+        setDriverRoadsideRequests(
+          snap.docs.map((d) => normalizeRoadsideRequest(d.id, d.data())),
+        );
+      },
+    );
+
     const unsubRoutes = subscribe("driverRoutes", "driverId", setRoutes);
     const unsubWork = subscribe("workJobs", "employerId", setWorkJobs);
     const unsubErrands = subscribe("errandJobs", "ownerId", setErrandJobs);
@@ -369,14 +482,21 @@ const subscribe = (
     ) =>
       onSnapshot(
         query(collection(db, collectionName), where(field, "==", uid)),
-        (snap) => {
+        async (snap) => {
           const deleteField =
             viewer === "passenger" ? "deletedForPassenger" : "deletedForDriver";
 
+          const items = snap.docs
+            .filter((d) => d.data()[deleteField] !== true)
+            .map((d) => normalizeApplication(d.id, d.data(), kind));
+
+          // Only the driver's pending-request card needs the passenger's
+          // age, so only bother fetching it for driver-viewed lists (and
+          // only for the ones missing it — see enrichApplicationWithCustomerAge).
           setter(
-            snap.docs
-              .filter((d) => d.data()[deleteField] !== true)
-              .map((d) => normalizeApplication(d.id, d.data(), kind)),
+            viewer === "driver"
+              ? await Promise.all(items.map(enrichApplicationWithCustomerAge))
+              : items,
           );
 
           setLoading(false);
@@ -419,6 +539,7 @@ const subscribe = (
     return () => {
       unsubBookings();
       unsubDriverRoadside();
+      unsubDriverRoadsideRequests();
       unsubRoutes();
       unsubWork();
       unsubErrands();
@@ -445,6 +566,43 @@ const subscribe = (
     [asProviderWork, asProviderErrand],
   );
 
+  const scrollToAppCard = (id: string) => {
+    const cardNode = appCardRefs.current[id];
+    const scrollNode = mainScrollRef.current;
+
+    if (!cardNode || !scrollNode) return;
+
+    // measure() gives page-absolute coordinates for both the card and the
+    // ScrollView, so the target offset can be computed in plain JS without
+    // relying on a fragile native-handle relationship between the two.
+    // (ScrollView's TS type doesn't declare `measure`, though the
+    // underlying native component always supports it — hence the `any`.)
+    const scrollNodeAny = scrollNode as any;
+
+    cardNode.measure((
+      _x: number,
+      _y: number,
+      _width: number,
+      _height: number,
+      pageX: number,
+      pageY: number,
+    ) => {
+      scrollNodeAny.measure((
+        _sx: number,
+        _sy: number,
+        _sw: number,
+        _sh: number,
+        _spx: number,
+        scrollPageY: number,
+      ) => {
+        const targetY =
+          scrollOffsetRef.current + (pageY - scrollPageY) - 16;
+
+        scrollNode.scrollTo({ y: Math.max(targetY, 0), animated: true });
+      });
+    });
+  };
+
 const bookedRouteIds = useMemo(() => {
   const ids = new Set<string>();
 
@@ -463,103 +621,146 @@ const bookedRouteIds = useMemo(() => {
   return ids;
 }, [driverRoadside, driverRides]);
 
-const driverTrips = useMemo(
-  () =>
-    sortBookingsByDate(
+  // Errand has no multi-worker capacity concept (unlike Work) — once a
+  // request is accepted (or further along: payment-pending, on the way,
+  // arrived, completed...), the job is effectively taken by exactly one
+  // customer. The accepted application already renders its own card, so the
+  // original errandJobs listing must be dropped here to avoid a duplicate
+  // "still waiting" card for a job that's actually in progress.
+  const bookedErrandJobIds = useMemo(() => {
+    const ids = new Set<string>();
+
+    asProviderErrand.forEach((a) => {
+      if (a.sourceId && a.status !== "pending" && a.status !== "rejected") {
+        ids.add(a.sourceId);
+      }
+    });
+
+    return ids;
+  }, [asProviderErrand]);
+
+  // Driver-owned listings not yet booked by anyone (school/personal routes,
+  // work jobs, errand jobs). Once a route/errand IS booked, its original
+  // listing card is hidden here in favor of the actual booking/application
+  // card. Work jobs are never excluded this way — they legitimately keep
+  // showing while still open for more workers even after some are accepted.
+  const driverTrips = useMemo(
+    () =>
       [...routes, ...workJobs, ...errandJobs].filter((t) => {
-        // إذا رحلة مدرسة انحجزت، لا تعرض كرت driverRoutes الأصلي
         if (t.collectionName === "driverRoutes" && bookedRouteIds.has(t.id)) {
+          return false;
+        }
+
+        if (t.collectionName === "errandJobs" && bookedErrandJobIds.has(t.id)) {
           return false;
         }
 
         return true;
       }),
-    ),
-  [routes, workJobs, errandJobs, bookedRouteIds],
-);
-
-  const driverRows = useMemo<DriverRow[]>(() => {
-    const rows: DriverRow[] = [
-      ...driverTrips.map((t) => ({
-        kind: "trip" as const,
-        key: `${t.collectionName}-${t.id}`,
-        createdAtSeconds: t.createdAtSeconds,
-        searchText: t.searchText,
-        trip: t,
-      })),
-      ...driverRoadside.map((b) => ({
-        kind: "booking" as const,
-        key: `booking-${b.id}`,
-        createdAtSeconds: b.createdAtSeconds,
-        searchText: b.searchText,
-        booking: b,
-      })),
-    ];
-
-    return rows.sort((a, b) =>
-      compareBookingsByDate(
-        a.kind === "trip" ? a.trip : a.booking,
-        b.kind === "trip" ? b.trip : b.booking,
-      ),
-    );
-  }, [driverTrips, driverRoadside]);
-
-  const sortedBookings = useMemo(
-    () => sortBookingsByDate(bookings),
-    [bookings],
+    [routes, workJobs, errandJobs, bookedRouteIds, bookedErrandJobIds],
   );
+
+  // ONE combined, chronologically sorted list per tab — School, Personal,
+  // Work, Errand, Roadside, and driver-listing cards are all mixed together
+  // by real trip date/time only (see sortMyBookings in bookingsLib.ts).
+  // Never sort each category separately and concatenate the results.
+  const combinedPassengerRows = useMemo<CombinedRow[]>(
+    () =>
+      sortMyBookings([
+        ...passengerRides.map(tagRide),
+        ...bookings.map(tagBooking),
+        ...passengerApps.map(tagApplication),
+      ]),
+    [passengerRides, bookings, passengerApps],
+  );
+
+  const combinedDriverRows = useMemo<CombinedRow[]>(
+    () =>
+      sortMyBookings([
+        ...driverRides.map(tagRide),
+        ...driverTrips.map(tagTrip),
+        ...driverRoadside.map(tagBooking),
+        ...driverApps.map(tagApplication),
+      ]),
+    [driverRides, driverTrips, driverRoadside, driverApps],
+  );
+
+  // requestId -> live roadsideRequests record, so a roadside booking row can
+  // render the SAME synchronized RoadsideAcceptedCard used on Help Requests
+  // instead of its own status snapshot.
+  const driverRoadsideRequestsById = useMemo(() => {
+    const map = new Map<string, RoadsideRequestRecord>();
+    driverRoadsideRequests.forEach((r) => map.set(r.id, r));
+    return map;
+  }, [driverRoadsideRequests]);
 
   const q = search.trim().toLowerCase();
 
-  const filteredBookings = useMemo(
+  const filteredPassengerRows = useMemo(
     () =>
       q
-        ? sortedBookings.filter((b) => b.searchText.includes(q))
-        : sortedBookings,
-    [sortedBookings, q],
+        ? combinedPassengerRows.filter((r) => r.searchText.includes(q))
+        : combinedPassengerRows,
+    [combinedPassengerRows, q],
   );
 
   const filteredDriverRows = useMemo(
-    () => (q ? driverRows.filter((r) => r.searchText.includes(q)) : driverRows),
-    [driverRows, q],
-  );
-
-  const sortedPassengerRides = useMemo(
-    () => sortBookingsByDate(passengerRides),
-    [passengerRides],
-  );
-
-  const sortedDriverRides = useMemo(
-    () => sortBookingsByDate(driverRides),
-    [driverRides],
-  );
-
-  const filteredPassengerRides = useMemo(
     () =>
       q
-        ? sortedPassengerRides.filter((r) => r.searchText.includes(q))
-        : sortedPassengerRides,
-    [sortedPassengerRides, q],
+        ? combinedDriverRows.filter((r) => r.searchText.includes(q))
+        : combinedDriverRows,
+    [combinedDriverRows, q],
   );
 
-  const filteredDriverRides = useMemo(
-    () =>
-      q
-        ? sortedDriverRides.filter((r) => r.searchText.includes(q))
-        : sortedDriverRides,
-    [sortedDriverRides, q],
+  // Both lists are simple filters of the already-sorted filteredDriverRows
+  // (sortMyBookings already put non-completed first / nearest-date-first /
+  // completed-last across the whole list — filtering preserves that
+  // relative order, so neither section needs its own separate sort call).
+  const driverActiveRows = useMemo(
+    () => filteredDriverRows.filter(isDriverRowBookedOrActive),
+    [filteredDriverRows],
   );
 
-  const filteredPassengerApps = useMemo(
-    () =>
-      q ? passengerApps.filter((a) => a.searchText.includes(q)) : passengerApps,
-    [passengerApps, q],
+  const driverCreatedRows = useMemo(
+    () => filteredDriverRows.filter((row) => !isDriverRowBookedOrActive(row)),
+    [filteredDriverRows],
   );
 
-  const filteredDriverApps = useMemo(
-    () => (q ? driverApps.filter((a) => a.searchText.includes(q)) : driverApps),
-    [driverApps, q],
-  );
+  // Notification deep link: once the target combined list (whichever tab the
+  // notification targeted) contains the target id, scroll to it and flash
+  // it briefly. Roadside notifications may only carry a requestId (see spec
+  // item 8) rather than the booking's own id, so booking rows also match on
+  // their `requestId` — the row's real `.id` is always what gets highlighted
+  // (that's what appCardRefs is keyed by).
+  useEffect(() => {
+    if (!pendingScrollAppId) return;
+
+    const candidates =
+      tab === "driver" ? combinedDriverRows : combinedPassengerRows;
+
+    const match = candidates.find(
+      (row) =>
+        row.id === pendingScrollAppId ||
+        (row._kind === "booking" && row.requestId === pendingScrollAppId),
+    );
+    if (!match) return;
+
+    const id = match.id;
+    setPendingScrollAppId(null);
+    setHighlightAppId(id);
+
+    // Give the just-switched tab/list a moment to finish laying out before
+    // measuring card positions.
+    const scrollTimer = setTimeout(() => scrollToAppCard(id), 350);
+    const clearTimer = setTimeout(() => {
+      setHighlightAppId((prev) => (prev === id ? null : prev));
+    }, 2600);
+
+    return () => {
+      clearTimeout(scrollTimer);
+      clearTimeout(clearTimer);
+    };
+  }, [pendingScrollAppId, tab, combinedDriverRows, combinedPassengerRows]);
 
   const runApp = async (id: string, fn: () => Promise<void>) => {
     try {
@@ -660,18 +861,36 @@ const driverTrips = useMemo(
     );
   };
 
+  // Deleting a card only ever hides it from the current user's own list — it
+  // never cancels/changes the booking itself (status/tripStatus/paymentStatus
+  // are untouched). Active/upcoming items get an extra-explicit warning so
+  // that's never mistaken for a cancellation.
+  const REMOVE_ACTIVE_MESSAGE =
+    "Removing this card will only hide it from your list. It will not cancel the booking.";
+
+  const removeConfirmMessage = (item: any, label: string) =>
+    isCompletedItem(item)
+      ? `Remove this ${label} from your list?`
+      : REMOVE_ACTIVE_MESSAGE;
+
   const confirmHideRideBooking = (ride: RideBooking, viewer: Tab) => {
-    Alert.alert("Remove booking", "Remove this booking from your list?", [
+    Alert.alert("Remove booking", removeConfirmMessage(ride, "booking"), [
       { text: "Cancel", style: "cancel" },
       {
         text: "Remove",
         style: "destructive",
         onPress: () =>
-          runApp(ride.id, () =>
-            viewer === "passenger"
+          runApp(ride.id, () => {
+            if (viewer === "passenger") {
+              setPassengerRides((prev) => prev.filter((r) => r.id !== ride.id));
+            } else {
+              setDriverRides((prev) => prev.filter((r) => r.id !== ride.id));
+            }
+
+            return viewer === "passenger"
               ? hideRideBookingForPassenger(ride.id)
-              : hideRideBookingForDriver(ride.id, ride.routeId),
-          ),
+              : hideRideBookingForDriver(ride.id, ride.routeId);
+          }),
       },
     ]);
   };
@@ -712,17 +931,17 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
 };
 
   const confirmHideGeneralBooking = (
-    bookingId: string,
+    booking: BookingItem,
     viewer: Tab,
     label = "booking",
   ) => {
-    Alert.alert("Remove booking", `Remove this ${label} from your list?`, [
+    Alert.alert("Remove booking", removeConfirmMessage(booking, label), [
       { text: "Cancel", style: "cancel" },
       {
         text: "Remove",
         style: "destructive",
         onPress: () =>
-          runApp(bookingId, () => hideGeneralBooking(bookingId, viewer)),
+          runApp(booking.id, () => hideGeneralBooking(booking.id, viewer)),
       },
     ]);
   };
@@ -734,6 +953,18 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     const collectionName =
       app.kind === "work" ? "workApplications" : "errandApplications";
 
+    if (viewer === "passenger") {
+      if (app.kind === "work") {
+        setMyWorkApps((prev) => prev.filter((a) => a.id !== app.id));
+      } else {
+        setMyErrandApps((prev) => prev.filter((a) => a.id !== app.id));
+      }
+    } else if (app.kind === "work") {
+      setAsProviderWork((prev) => prev.filter((a) => a.id !== app.id));
+    } else {
+      setAsProviderErrand((prev) => prev.filter((a) => a.id !== app.id));
+    }
+
     await updateDoc(doc(db, collectionName, app.id), {
       [viewer === "passenger" ? "deletedForPassenger" : "deletedForDriver"]:
         true,
@@ -742,7 +973,7 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
   };
 
   const confirmHideApplication = (app: NormalizedApplication, viewer: Tab) => {
-    Alert.alert("Remove booking", "Remove this booking from your list?", [
+    Alert.alert("Remove booking", removeConfirmMessage(app, "booking"), [
       { text: "Cancel", style: "cancel" },
       {
         text: "Remove",
@@ -757,6 +988,21 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     router.push({
       pathname: "/booking/payment",
       params: { kind: a.kind, id: a.id },
+    } as any);
+
+  // Work only — driver pays the passenger/worker AFTER the job is finished.
+  const goToWorkPayment = (a: NormalizedApplication) =>
+    router.push({
+      pathname: "/booking/work-errand/work/payment",
+      params: {
+        bookingId: a.id,
+        amount: String(a.price ?? a.hourlyPay ?? 0),
+        payerId: a.providerId,
+        payerName: a.providerName,
+        payeeId: a.customerId,
+        payeeName: a.customerName,
+        category: "work",
+      },
     } as any);
 
   const openNavigation = (a: NormalizedApplication) =>
@@ -788,7 +1034,17 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         { text: "Cancel", style: "cancel" },
         {
           text: "Yes, finish",
-          onPress: () => runApp(a.id, () => finishJob(a.kind, a.id, a)),
+          onPress: () =>
+            runApp(a.id, async () => {
+              await finishJob(a.kind, a.id, a);
+
+              // Work is paid after completion — send the driver straight to
+              // the "pay worker" screen. Errand's payment already happened
+              // before the service started, so nothing more to do here.
+              if (a.kind === "work") {
+                goToWorkPayment(a);
+              }
+            }),
         },
       ],
     );
@@ -843,6 +1099,176 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
           ),
       },
     ]);
+  };
+
+  // A driver-owned listing (driverRoutes/workJobs/errandJobs) belongs only to
+  // that driver — deleting it only ever hides it from their own list, the
+  // same deletedForDriver convention as every other card.
+  const deleteTrip = async (t: DriverTripItem) => {
+    if (t.collectionName === "driverRoutes") {
+      setRoutes((prev) => prev.filter((r) => r.id !== t.id));
+    } else if (t.collectionName === "workJobs") {
+      setWorkJobs((prev) => prev.filter((r) => r.id !== t.id));
+    } else {
+      setErrandJobs((prev) => prev.filter((r) => r.id !== t.id));
+    }
+
+    await updateDoc(doc(db, t.collectionName, t.id), {
+      deletedForDriver: true,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const confirmDeleteTrip = (t: DriverTripItem) => {
+    Alert.alert("Remove listing", removeConfirmMessage(t, "listing"), [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => runApp(t.id, () => deleteTrip(t)),
+      },
+    ]);
+  };
+
+  // "Clear All" hides every card currently shown on this tab for the current
+  // user only — it never touches status/tripStatus/paymentStatus, never
+  // deletes the shared document, and never affects the other side's list.
+  const runClearAllBookings = async (rows: CombinedRow[], viewer: Tab) => {
+    setClearingAll(true);
+
+    const field = viewer === "passenger" ? "deletedForPassenger" : "deletedForDriver";
+
+    const rideIds = new Set(
+      rows.filter((r) => r._kind === "ride").map((r) => r.id),
+    );
+    const bookingIds = new Set(
+      rows.filter((r) => r._kind === "booking").map((r) => r.id),
+    );
+    const workAppIds = new Set(
+      rows
+        .filter((r) => r._kind === "application" && r.kind === "work")
+        .map((r) => r.id),
+    );
+    const errandAppIds = new Set(
+      rows
+        .filter((r) => r._kind === "application" && r.kind === "errand")
+        .map((r) => r.id),
+    );
+    const tripIdsByCollection: Record<DriverCollection, Set<string>> = {
+      driverRoutes: new Set(),
+      workJobs: new Set(),
+      errandJobs: new Set(),
+    };
+    rows.forEach((r) => {
+      if (r._kind === "trip") tripIdsByCollection[r.collectionName].add(r.id);
+    });
+    // Booked routes hide their original driverRoutes listing card too, same
+    // as the individual delete button does (see hideGeneralBooking above) —
+    // otherwise it would reappear once the booking is hidden.
+    const routeIdsToHide = new Set(
+      rows
+        .filter((r): r is TaggedBooking => r._kind === "booking")
+        .map((r) => r.routeId)
+        .filter((id): id is string => !!id),
+    );
+
+    // Optimistic local removal first so the UI updates immediately and
+    // never waits on a round trip (or a restart) to reflect the change.
+    if (viewer === "passenger") {
+      setPassengerRides((prev) => prev.filter((r) => !rideIds.has(r.id)));
+      setBookings((prev) => prev.filter((b) => !bookingIds.has(b.id)));
+      setMyWorkApps((prev) => prev.filter((a) => !workAppIds.has(a.id)));
+      setMyErrandApps((prev) => prev.filter((a) => !errandAppIds.has(a.id)));
+    } else {
+      setDriverRides((prev) => prev.filter((r) => !rideIds.has(r.id)));
+      setDriverRoadside((prev) => prev.filter((b) => !bookingIds.has(b.id)));
+      setAsProviderWork((prev) => prev.filter((a) => !workAppIds.has(a.id)));
+      setAsProviderErrand((prev) =>
+        prev.filter((a) => !errandAppIds.has(a.id)),
+      );
+      setRoutes((prev) =>
+        prev.filter(
+          (t) =>
+            !tripIdsByCollection.driverRoutes.has(t.id) &&
+            !routeIdsToHide.has(t.id),
+        ),
+      );
+      setWorkJobs((prev) =>
+        prev.filter((t) => !tripIdsByCollection.workJobs.has(t.id)),
+      );
+      setErrandJobs((prev) =>
+        prev.filter((t) => !tripIdsByCollection.errandJobs.has(t.id)),
+      );
+    }
+
+    try {
+      const ops: { collectionName: string; id: string; field: string }[] = [];
+
+      rows.forEach((row) => {
+        if (row._kind === "ride" || row._kind === "booking") {
+          ops.push({ collectionName: "bookings", id: row.id, field });
+        } else if (row._kind === "application") {
+          ops.push({
+            collectionName:
+              row.kind === "work" ? "workApplications" : "errandApplications",
+            id: row.id,
+            field,
+          });
+        } else {
+          ops.push({
+            collectionName: row.collectionName,
+            id: row.id,
+            field: "deletedForDriver",
+          });
+        }
+      });
+
+      if (viewer === "driver") {
+        routeIdsToHide.forEach((routeId) => {
+          ops.push({
+            collectionName: "driverRoutes",
+            id: routeId,
+            field: "deletedForDriver",
+          });
+        });
+      }
+
+      // Firestore batched writes cap at 500 operations — chunk defensively.
+      for (let i = 0; i < ops.length; i += 450) {
+        const batch = writeBatch(db);
+
+        ops.slice(i, i + 450).forEach((op) => {
+          batch.update(doc(db, op.collectionName, op.id), {
+            [op.field]: true,
+            updatedAt: serverTimestamp(),
+          });
+        });
+
+        await batch.commit();
+      }
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not clear all.");
+    } finally {
+      setClearingAll(false);
+    }
+  };
+
+  const handleClearAllBookings = () => {
+    const rows = tab === "passenger" ? filteredPassengerRows : filteredDriverRows;
+    if (rows.length === 0 || clearingAll) return;
+
+    Alert.alert(
+      "Clear all",
+      "Clear all bookings from your list? Removing these cards will only hide them — it will not cancel any booking.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear All",
+          style: "destructive",
+          onPress: () => runClearAllBookings(rows, tab),
+        },
+      ],
+    );
   };
 
   const openRebook = (booking: BookingItem) => {
@@ -928,7 +1354,9 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
 
   const handleRideFinish = (r: RideBooking) =>
     runApp(r.id, () => finishRide(r.id, r));
-    const bookingNeedsRating = (b: BookingItem | RideBooking) => {
+    const bookingNeedsRating = (
+    b: BookingItem | RideBooking | NormalizedApplication,
+  ) => {
     const item: any = b;
 
     if (ratedSchoolBookingIds.includes(b.id)) {
@@ -940,13 +1368,24 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
       item.needsPassengerRating === true &&
       item.ratingSubmitted !== true &&
       typeof item.rating !== "number" &&
-      !!item.driverId
+      // BookingItem/RideBooking carry driverId; NormalizedApplication
+      // (work/errand) carries providerId — the driver/service owner either way.
+      !!(item.driverId || item.providerId)
     );
   };
 
 const openSchoolRatingModal = (b: BookingItem) => {
   setSchoolRatingBooking(b);
   setRatingBooking(null);
+  setAppRatingBooking(null);
+  setRatingStars(0);
+  setRatingComment("");
+};
+
+const openAppRatingModal = (a: NormalizedApplication) => {
+  setAppRatingBooking(a);
+  setRatingBooking(null);
+  setSchoolRatingBooking(null);
   setRatingStars(0);
   setRatingComment("");
 };
@@ -964,7 +1403,10 @@ const submitSchoolRating = async (
 
   const item: any = booking;
 
-  if (!item.driverId) {
+  // driverId must be the driver's real Firebase UID — never this booking's
+  // own id or its routeId — so the rating is never attributed to the wrong
+  // profile.
+  if (!item.driverId || item.driverId === booking.id || item.driverId === item.routeId) {
     throw new Error("Missing driver id.");
   }
 
@@ -1041,6 +1483,8 @@ const submitSchoolRating = async (
 
   const openRatingModal = (r: RideBooking) => {
     setRatingBooking(r);
+    setSchoolRatingBooking(null);
+    setAppRatingBooking(null);
     setRatingStars(0);
     setRatingComment("");
   };
@@ -1085,6 +1529,51 @@ const submitRating = async () => {
       return;
     }
 
+    if (appRatingBooking) {
+      const appToRate = appRatingBooking;
+      const ratedId = appToRate.id;
+      const stars = ratingStars;
+      const comment = ratingComment.trim();
+
+      // Close the rating popup immediately and block it from reopening
+      // while Firestore is saving the rating.
+      setRatedSchoolBookingIds((prev) =>
+        prev.includes(ratedId) ? prev : [...prev, ratedId],
+      );
+
+      const patchApp = (list: NormalizedApplication[]) =>
+        list.map((a) =>
+          a.id === ratedId
+            ? {
+                ...a,
+                rating: stars,
+                reviewComment: comment,
+                ratingSubmitted: true,
+                needsPassengerRating: false,
+              }
+            : a,
+        );
+
+      if (appToRate.kind === "work") {
+        setMyWorkApps(patchApp);
+      } else {
+        setMyErrandApps(patchApp);
+      }
+
+      setAppRatingBooking(null);
+      setRatingStars(0);
+      setRatingComment("");
+
+      await submitApplicationRating(
+        appToRate.kind,
+        appToRate.id,
+        appToRate,
+        stars,
+        comment,
+      );
+      return;
+    }
+
     if (ratingBooking) {
       const bookingToRate = ratingBooking;
       const ratedId = bookingToRate.id;
@@ -1126,7 +1615,9 @@ const submitRating = async () => {
 
 useEffect(() => {
   if (tab !== "passenger") return;
-  if (ratingBooking || schoolRatingBooking || ratingBusy) return;
+  if (ratingBooking || schoolRatingBooking || appRatingBooking || ratingBusy) {
+    return;
+  }
 
   const pendingRideRating = passengerRides.find((r) => bookingNeedsRating(r));
 
@@ -1139,13 +1630,22 @@ useEffect(() => {
 
   if (pendingSchoolRating) {
     openSchoolRatingModal(pendingSchoolRating);
+    return;
+  }
+
+  const pendingAppRating = passengerApps.find((a) => bookingNeedsRating(a));
+
+  if (pendingAppRating) {
+    openAppRatingModal(pendingAppRating);
   }
 }, [
   bookings,
   passengerRides,
+  passengerApps,
   tab,
   ratingBooking,
   schoolRatingBooking,
+  appRatingBooking,
   ratingBusy,
   ratedSchoolBookingIds,
 ]);
@@ -1411,7 +1911,7 @@ useEffect(() => {
     );
   };
 
-  const renderStatus = (status: string) => (
+  const renderStatus = (status: string, label?: string) => (
     <View
       style={[
         styles.statusPill,
@@ -1431,7 +1931,7 @@ useEffect(() => {
             : styles.statusTextOngoing,
         ]}
       >
-        {status === "completed" ? "Completed" : "Ongoing"}
+        {label || (status === "completed" ? "Completed" : "Ongoing")}
       </Text>
     </View>
   );
@@ -1488,7 +1988,7 @@ useEffect(() => {
           <View style={styles.cardTopActions}>
             {renderBookingTripStatus(b)}
             {renderDeleteButton(() =>
-              confirmHideGeneralBooking(b.id, viewer),
+              confirmHideGeneralBooking(b, viewer),
             )}
           </View>
         </View>
@@ -1648,6 +2148,7 @@ useEffect(() => {
     const meta = getCategoryMeta(t.category);
     const done = t.status === "completed";
     const daysText = t.days.length > 0 ? t.days.join(", ") : "";
+    const waitingForBooking = !done && !isTripBookedOrActive(t);
 
     return (
       <View
@@ -1664,7 +2165,13 @@ useEffect(() => {
             </Text>
           </View>
 
-          {renderStatus(t.status)}
+          <View style={styles.cardTopActions}>
+            {renderStatus(
+              t.status,
+              waitingForBooking ? "Waiting for booking" : undefined,
+            )}
+            {renderDeleteButton(() => confirmDeleteTrip(t))}
+          </View>
         </View>
 
         {t.title ? <Text style={styles.tripTitle}>{t.title}</Text> : null}
@@ -1700,7 +2207,41 @@ useEffect(() => {
             </View>
           ) : null}
 
-          {typeof t.seats === "number" ? (
+          {t.collectionName === "workJobs" ? (
+            <>
+              {typeof t.totalSeats === "number" ? (
+                <View style={styles.metaItem}>
+                  <Ionicons name="people-outline" size={15} color="#F58220" />
+                  <Text style={styles.metaText}>
+                    Workers needed: {t.totalSeats}
+                  </Text>
+                </View>
+              ) : null}
+
+              {typeof t.acceptedWorkersCount === "number" &&
+              t.acceptedWorkersCount > 0 ? (
+                <View style={styles.metaItem}>
+                  <Ionicons name="person-add-outline" size={15} color="#F58220" />
+                  <Text style={styles.metaText}>
+                    Accepted: {t.acceptedWorkersCount}
+                  </Text>
+                </View>
+              ) : null}
+
+              {typeof t.remainingSeats === "number" ? (
+                <View style={styles.metaItem}>
+                  <Ionicons
+                    name="checkmark-done-outline"
+                    size={15}
+                    color="#F58220"
+                  />
+                  <Text style={styles.metaText}>
+                    Places remaining: {t.remainingSeats}
+                  </Text>
+                </View>
+              ) : null}
+            </>
+          ) : typeof t.seats === "number" ? (
             <View style={styles.metaItem}>
               <Ionicons name="people-outline" size={15} color="#F58220" />
               <Text style={styles.metaText}>{t.seats}</Text>
@@ -1721,12 +2262,37 @@ useEffect(() => {
     );
   };
 
+  const goToRoadsidePayment = (b: BookingItem) => {
+    router.push({
+      pathname: "/booking/roadside-help/payment",
+      params: {
+        bookingId: b.id,
+        requestId: b.requestId,
+        offerId: b.offerId,
+        driverId: b.driverId,
+        driverName: b.driverName,
+        amount: typeof b.price === "number" ? String(b.price) : "",
+        category: "roadside",
+      },
+    } as any);
+  };
+
   const renderRoadsideCard = (b: BookingItem, viewer: Tab) => {
     const meta = getCategoryMeta("roadside");
     const otherName = viewer === "passenger" ? b.driverName : b.passengerName;
+    const otherPhone = viewer === "passenger" ? b.driverPhone : b.passengerPhone;
+    const isDriverView = viewer === "driver";
+
+    const isAccepted = b.status !== "completed" && !b.helpCompleted;
+    const isCompletedUnpaid =
+      (b.status === "completed" || b.helpCompleted) && b.paymentStatus !== "paid";
+    const isPaid = b.paymentStatus === "paid";
 
     return (
-      <View key={`roadside-${b.id}`} style={[styles.card, styles.cardDone]}>
+      <View
+        key={`roadside-${b.id}`}
+        style={[styles.card, !isAccepted && styles.cardDone]}
+      >
         <View style={styles.cardTop}>
           <View
             style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}
@@ -1738,9 +2304,30 @@ useEffect(() => {
           </View>
 
           <View style={styles.cardTopActions}>
-            {renderStatus(b.status)}
+            {isPaid ? (
+              <View style={[styles.statusPill, styles.statusDone]}>
+                <Ionicons name="cash" size={13} color="#166534" />
+                <Text style={[styles.statusText, styles.statusTextDone]}>
+                  Payment received
+                </Text>
+              </View>
+            ) : isCompletedUnpaid ? (
+              <View style={[styles.statusPill, styles.statusOngoing]}>
+                <Ionicons name="time" size={13} color="#B86115" />
+                <Text style={[styles.statusText, styles.statusTextOngoing]}>
+                  Waiting for payment
+                </Text>
+              </View>
+            ) : (
+              <View style={[styles.statusPill, styles.statusOngoing]}>
+                <Ionicons name="checkmark-circle" size={13} color="#B86115" />
+                <Text style={[styles.statusText, styles.statusTextOngoing]}>
+                  Accepted
+                </Text>
+              </View>
+            )}
             {renderDeleteButton(() =>
-              confirmHideGeneralBooking(b.id, viewer, "roadside help"),
+              confirmHideGeneralBooking(b, viewer, "roadside help"),
             )}
           </View>
         </View>
@@ -1771,6 +2358,13 @@ useEffect(() => {
           <Text style={styles.infoText}>{otherName}</Text>
         </View>
 
+        {otherPhone ? (
+          <Pressable style={styles.infoRow} onPress={() => callPhone(otherPhone)}>
+            <Ionicons name="call-outline" size={15} color="#F58220" />
+            <Text style={styles.infoText}>{otherPhone}</Text>
+          </Pressable>
+        ) : null}
+
         <View style={styles.metaRow}>
           {typeof b.price === "number" ? (
             <View style={styles.metaItem}>
@@ -1786,6 +2380,16 @@ useEffect(() => {
             </View>
           ) : null}
         </View>
+
+        {!isDriverView && isCompletedUnpaid ? (
+          <Pressable
+            style={styles.primaryButtonFull}
+            onPress={() => goToRoadsidePayment(b)}
+          >
+            <Ionicons name="card" size={18} color="#FFFFFF" />
+            <Text style={styles.primaryButtonText}>Pay Now</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   };
@@ -1820,61 +2424,77 @@ useEffect(() => {
     );
   };
 
-  const renderGeneralBookingItems = (items: BookingItem[], viewer: Tab) => {
+  const renderWithCardRef = (id: string, node: React.ReactNode) => (
+    <View
+      key={`ref-${id}`}
+      ref={(n) => {
+        appCardRefs.current[id] = n;
+      }}
+      style={highlightAppId === id ? styles.highlightWrap : undefined}
+    >
+      {node}
+    </View>
+  );
+
+  // Single dispatcher for the ONE combined, already-sorted list — never
+  // re-groups or re-sorts by category. `rows` is whatever order
+  // sortMyBookings produced; this only picks the right card renderer per row.
+  const renderCombinedRows = (rows: CombinedRow[], viewer: Tab) => {
     const renderedGroupIds = new Set<string>();
 
-    return items.map((b) => {
-      if (b.category === "roadside") {
-        return renderRoadsideCard(b, viewer);
+    return rows.map((row) => {
+      if (row._kind === "ride") {
+        return renderRideCard(row, viewer);
       }
 
-      if (b.bookingGroupId) {
-        if (renderedGroupIds.has(b.bookingGroupId)) return null;
+      if (row._kind === "trip") {
+        return renderTripCard(row);
+      }
 
-        renderedGroupIds.add(b.bookingGroupId);
+      if (row._kind === "application") {
+        return renderWithCardRef(row.id, renderApplicationCard(row, viewer));
+      }
 
-        const groupItems = items.filter(
-          (item) => item.bookingGroupId === b.bookingGroupId,
+      // row._kind === "booking"
+      if (row.category === "roadside") {
+        // Driver side renders the SAME shared card + SAME roadsideRequests
+        // source of truth as Help Requests (see roadsideLib.ts). Passenger
+        // side keeps its own card (payment button, no driver actions).
+        const liveRequest =
+          viewer === "driver" && row.requestId
+            ? driverRoadsideRequestsById.get(row.requestId)
+            : undefined;
+
+        if (liveRequest) {
+          return renderWithCardRef(
+            row.id,
+            <RoadsideAcceptedCard
+              key={`live-${row.id}`}
+              request={liveRequest}
+              onDelete={() =>
+                confirmHideGeneralBooking(row, viewer, "roadside help")
+              }
+            />,
+          );
+        }
+
+        return renderWithCardRef(row.id, renderRoadsideCard(row, viewer));
+      }
+
+      if (row.bookingGroupId) {
+        if (renderedGroupIds.has(row.bookingGroupId)) return null;
+
+        renderedGroupIds.add(row.bookingGroupId);
+
+        const groupItems: BookingItem[] = rows.filter(
+          (r): r is TaggedBooking =>
+            r._kind === "booking" && r.bookingGroupId === row.bookingGroupId,
         );
 
         return renderWeeklyGroup(groupItems, viewer);
       }
 
-      return renderBookingCard(b, viewer);
-    });
-  };
-
-  const renderDriverRowItems = (rows: DriverRow[]) => {
-    const renderedGroupIds = new Set<string>();
-
-    return rows.map((r) => {
-      if (r.kind === "trip") {
-        return renderTripCard(r.trip);
-      }
-
-      const b = r.booking;
-
-      if (b.category === "roadside") {
-        return renderRoadsideCard(b, "driver");
-      }
-
-      if (b.bookingGroupId) {
-        if (renderedGroupIds.has(b.bookingGroupId)) return null;
-
-        renderedGroupIds.add(b.bookingGroupId);
-
-        const groupItems = rows
-          .filter(
-            (row) =>
-              row.kind === "booking" &&
-              row.booking.bookingGroupId === b.bookingGroupId,
-          )
-          .map((row) => (row as Extract<DriverRow, { kind: "booking" }>).booking);
-
-        return renderWeeklyGroup(groupItems, "driver");
-      }
-
-      return renderBookingCard(b, "driver");
+      return renderBookingCard(row, viewer);
     });
   };
 
@@ -1957,31 +2577,61 @@ useEffect(() => {
           </View>
         ) : null}
 
-        <View style={styles.metaRow}>
-          {a.price !== null ? (
+        {viewer === "driver" && a.status === "pending" ? (
+          // Pending Accept/Reject decision: show the passenger's age instead
+          // of the price/wage — the driver needs the age to decide, not the
+          // price. Price/hourlyPay stay in Firestore untouched for payment
+          // later; they're just not the headline here.
+          <View style={styles.metaRow}>
             <View style={styles.metaItem}>
-              <Ionicons name="cash-outline" size={15} color="#F58220" />
-              <Text style={styles.metaText}>{a.price} ₪</Text>
+              <Ionicons name="person-outline" size={15} color="#F58220" />
+              <Text style={styles.metaText}>
+                {a.customerAge !== null
+                  ? `Passenger age: ${a.customerAge} years`
+                  : "Passenger age not available"}
+              </Text>
             </View>
-          ) : null}
+          </View>
+        ) : (
+          <View style={styles.metaRow}>
+            {a.price !== null ? (
+              <View style={styles.metaItem}>
+                <Ionicons name="cash-outline" size={15} color="#F58220" />
+                <Text style={styles.metaText}>{a.price} ₪</Text>
+              </View>
+            ) : null}
 
-          {a.hourlyPay !== null ? (
-            <View style={styles.metaItem}>
-              <Ionicons name="cash-outline" size={15} color="#F58220" />
-              <Text style={styles.metaText}>{a.hourlyPay} ₪/hr</Text>
-            </View>
-          ) : null}
-        </View>
+            {a.hourlyPay !== null ? (
+              <View style={styles.metaItem}>
+                <Ionicons name="cash-outline" size={15} color="#F58220" />
+                <Text style={styles.metaText}>{a.hourlyPay} ₪/hr</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
 
         <View style={styles.payRow}>
           <Ionicons name="card-outline" size={14} color="#7C5F46" />
           <Text style={styles.payText}>
-            {a.paymentMethod
-              ? `${a.paymentMethod === "cash" ? "Cash" : "Card"} · ${
-                  a.paymentStatus
-                }`
-              : "Payment: unpaid"}
-            {a.cardLast4 ? ` (•••• ${a.cardLast4})` : ""}
+            {a.kind === "work"
+              ? // Work is paid in reverse (driver -> passenger, after
+                // completion) — say so plainly instead of reusing the
+                // generic "paymentStatus" wording, which means the opposite
+                // thing for every other booking type.
+                a.driverPaymentStatus === "paid"
+                ? `Paid to worker${
+                    a.paymentMethod
+                      ? ` · ${a.paymentMethod === "cash" ? "Cash" : "Card"}`
+                      : ""
+                  }${a.cardLast4 ? ` (•••• ${a.cardLast4})` : ""}`
+                : a.status === "completed"
+                  ? "Payment to worker: pending"
+                  : "Payment to worker: due after Finish Work"
+              : a.paymentMethod
+                ? `${a.paymentMethod === "cash" ? "Cash" : "Card"} · ${
+                    a.paymentStatus
+                  }${a.cardLast4 ? ` (•••• ${a.cardLast4})` : ""}`
+                : "Payment: unpaid"}
           </Text>
         </View>
 
@@ -1999,13 +2649,25 @@ useEffect(() => {
               </Pressable>
             ) : null}
 
-            {a.kind === "work" && a.status === "payment_pending_driver" ? (
+            {a.kind === "work" &&
+            a.status === "completed" &&
+            a.driverPaymentStatus !== "paid" ? (
               <View style={styles.waitBanner}>
                 <Ionicons name="time-outline" size={16} color="#B86115" />
                 <Text style={styles.waitText}>
                   Waiting for employer payment
                 </Text>
               </View>
+            ) : null}
+
+            {a.status === "completed" && bookingNeedsRating(a) ? (
+              <Pressable
+                style={styles.primaryButton}
+                onPress={() => openAppRatingModal(a)}
+              >
+                <Ionicons name="star-outline" size={17} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>Rate Driver</Text>
+              </Pressable>
             ) : null}
 
             {!cancelBlocked &&
@@ -2038,18 +2700,6 @@ useEffect(() => {
                   <Text style={styles.startButtonText}>Accept</Text>
                 </Pressable>
               </View>
-            ) : null}
-
-            {a.kind === "work" && a.status === "payment_pending_driver" ? (
-              <Pressable
-                style={styles.primaryButton}
-                onPress={() => goToPayment(a)}
-              >
-                <Ionicons name="card" size={16} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>
-                  Complete payment to confirm worker
-                </Text>
-              </Pressable>
             ) : null}
 
             {a.kind === "errand" && a.status === "payment_pending_passenger" ? (
@@ -2114,6 +2764,33 @@ useEffect(() => {
               </Pressable>
             ) : null}
 
+            {a.kind === "work" &&
+            a.status === "completed" &&
+            a.driverPaymentStatus !== "paid" ? (
+              // Fallback re-entry in case the driver left the payment screen
+              // without paying right after Finish Work.
+              <Pressable
+                style={styles.primaryButton}
+                onPress={() => goToWorkPayment(a)}
+              >
+                <Ionicons name="cash-outline" size={16} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>Pay Worker</Text>
+              </Pressable>
+            ) : null}
+
+            {a.kind === "work" &&
+            a.status === "completed" &&
+            a.driverPaymentStatus === "paid" ? (
+              <View style={styles.waitBanner}>
+                <Ionicons
+                  name="checkmark-circle-outline"
+                  size={16}
+                  color="#166534"
+                />
+                <Text style={styles.waitText}>Worker paid</Text>
+              </View>
+            ) : null}
+
             {!cancelBlocked &&
             (a.status === "accepted" || isAwaitingPayment(a.status)) ? (
               <Pressable
@@ -2131,17 +2808,34 @@ useEffect(() => {
 
   const isEmpty =
     tab === "passenger"
-      ? filteredBookings.length === 0 &&
-        filteredPassengerApps.length === 0 &&
-        filteredPassengerRides.length === 0
-      : filteredDriverRows.length === 0 &&
-        filteredDriverApps.length === 0 &&
-        filteredDriverRides.length === 0;
+      ? filteredPassengerRows.length === 0
+      : filteredDriverRows.length === 0;
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>My Bookings</Text>
+      <ScrollView
+        ref={mainScrollRef}
+        contentContainerStyle={styles.scroll}
+        onScroll={(e) => {
+          scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
+      >
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>My Bookings</Text>
+
+          {!isEmpty ? (
+            <Pressable
+              onPress={handleClearAllBookings}
+              disabled={clearingAll}
+              hitSlop={8}
+            >
+              <Text style={styles.clearAllText}>
+                {clearingAll ? "Clearing..." : "Clear All"}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
 
         <View style={styles.toggle}>
           <Pressable
@@ -2234,28 +2928,46 @@ useEffect(() => {
                 : "Trips and jobs you create as a driver will appear here."}
             </Text>
           </View>
-        ) : (
+        ) : tab === "passenger" ? (
           <View style={styles.list}>
-            {tab === "passenger" ? (
-              <>
-                {filteredPassengerRides.map((r) =>
-                  renderRideCard(r, "passenger"),
-                )}
-                {filteredPassengerApps.map((a) =>
-                  renderApplicationCard(a, "passenger"),
-                )}
-                {renderGeneralBookingItems(filteredBookings, "passenger")}
-              </>
-            ) : (
-              <>
-                {filteredDriverRides.map((r) => renderRideCard(r, "driver"))}
-                {filteredDriverApps.map((a) =>
-                  renderApplicationCard(a, "driver"),
-                )}
-                {renderDriverRowItems(filteredDriverRows)}
-              </>
-            )}
+            {renderCombinedRows(filteredPassengerRows, "passenger")}
           </View>
+        ) : (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <Ionicons name="flash" size={16} color="#166534" />
+              <Text style={styles.sectionHeaderText}>Booked &amp; Active</Text>
+            </View>
+
+            {driverActiveRows.length > 0 ? (
+              <View style={styles.list}>
+                {renderCombinedRows(driverActiveRows, "driver")}
+              </View>
+            ) : (
+              <Text style={styles.sectionEmptyText}>
+                No booked or active trips yet.
+              </Text>
+            )}
+
+            <View style={styles.sectionSeparator} />
+
+            <View style={styles.sectionHeaderRow}>
+              <Ionicons name="create-outline" size={16} color="#B86115" />
+              <Text style={styles.sectionHeaderText}>
+                Created — Waiting for Booking
+              </Text>
+            </View>
+
+            {driverCreatedRows.length > 0 ? (
+              <View style={styles.list}>
+                {renderCombinedRows(driverCreatedRows, "driver")}
+              </View>
+            ) : (
+              <Text style={styles.sectionEmptyText}>
+                Nothing you&apos;ve created is waiting for a booking right now.
+              </Text>
+            )}
+          </>
         )}
       </ScrollView>
 
@@ -2348,12 +3060,13 @@ useEffect(() => {
       </Modal>
 
       <Modal
-        visible={!!ratingBooking || !!schoolRatingBooking}
+        visible={!!ratingBooking || !!schoolRatingBooking || !!appRatingBooking}
         transparent
         animationType="fade"
         onRequestClose={() => {
           setRatingBooking(null);
           setSchoolRatingBooking(null);
+          setAppRatingBooking(null);
         }}
       >
         <View style={styles.ratingBackdrop}>
@@ -2362,6 +3075,7 @@ useEffect(() => {
             onPress={() => {
               setRatingBooking(null);
               setSchoolRatingBooking(null);
+              setAppRatingBooking(null);
             }}
           />
 
@@ -2426,6 +3140,14 @@ useEffect(() => {
 }
 
 const styles = StyleSheet.create({
+  highlightWrap: {
+    borderWidth: 2,
+    borderColor: "#F58220",
+    borderRadius: 26,
+    backgroundColor: "rgba(245,130,32,0.08)",
+    padding: 2,
+    marginBottom: -2,
+  },
   weeklyGroupBox: {
     borderWidth: 1,
     borderColor: "#F58220",
@@ -2460,7 +3182,17 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "900",
     color: "#111827",
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 18,
+  },
+  clearAllText: {
+    color: "#F58220",
+    fontWeight: "900",
+    fontSize: 14,
   },
   toggle: {
     flexDirection: "row",
@@ -2539,6 +3271,28 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: 14,
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginBottom: 12,
+  },
+  sectionHeaderText: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  sectionSeparator: {
+    height: 1,
+    backgroundColor: "#E7DCD1",
+    marginVertical: 22,
+  },
+  sectionEmptyText: {
+    color: "#7C5F46",
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 8,
   },
   card: {
     backgroundColor: "#FFFFFF",
@@ -2702,6 +3456,36 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "900",
     fontSize: 15,
+  },
+  primaryButtonFull: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#16A34A",
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginTop: 4,
+  },
+  finishButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#BBE7C6",
+    backgroundColor: "#F1FBF4",
+    borderRadius: 14,
+    paddingVertical: 13,
+    marginTop: 10,
+  },
+  finishButtonText: {
+    color: "#166534",
+    fontWeight: "900",
+    fontSize: 15,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   statusDead: {
     backgroundColor: "#F1E7E7",

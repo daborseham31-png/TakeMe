@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,6 +14,8 @@ import {
 } from "react-native";
 
 import { db } from "../../../../firebase";
+import DriverReviewsSection from "../../DriverReviewsSection";
+import { getDisplayedDriverId } from "../../driverReviewsLib";
 
 type JobListing = {
   id: string;
@@ -29,6 +31,7 @@ type JobListing = {
   dayEn: string;
   date: string;
   workersNeeded: number;
+  remainingSeats: number;
   locationEn: string;
   rating: number;
   ratingCount: number;
@@ -74,9 +77,40 @@ export default function FindWorkScreen() {
 
       const snapshot = await getDocs(collection(db, "workJobs"));
 
-      const jobs: JobListing[] = snapshot.docs
-        .map((docSnap) => {
+      // The employer's rating is their overall driverReviews-backed rating
+      // (users/{employerId}.ratingAverage/ratingCount) — the SAME number
+      // shown for School/Personal/Errand — never a value cached on the job
+      // listing itself, so it stays correct after every future rating.
+      const jobs = await Promise.all(
+        snapshot.docs.map(async (docSnap) => {
           const data = docSnap.data();
+
+          const totalSeats = Number(
+            data.totalSeats ?? data.seats ?? data.workersNeeded ?? 1,
+          );
+          const remainingSeats =
+            typeof data.remainingSeats === "number"
+              ? data.remainingSeats
+              : totalSeats;
+
+          let ratingAverage = 0;
+          let ratingCount = 0;
+
+          if (data.employerId) {
+            try {
+              const profileSnap = await getDoc(
+                doc(db, "users", data.employerId),
+              );
+
+              if (profileSnap.exists()) {
+                const profile = profileSnap.data();
+                ratingAverage = Number(profile.ratingAverage) || 0;
+                ratingCount = Number(profile.ratingCount) || 0;
+              }
+            } catch {
+              // Keep 0/0 -> renders as "New driver" below.
+            }
+          }
 
           return {
             id: docSnap.id,
@@ -93,14 +127,35 @@ export default function FindWorkScreen() {
             workHoursTo: data.endTime || "",
             dayEn: data.day || "",
             date: data.date || "",
-            workersNeeded: Number(data.workersNeeded || 1),
+            workersNeeded: totalSeats,
+            remainingSeats,
             locationEn: data.location || "",
-            rating: Number(data.rating || 4.8),
-            ratingCount: Number(data.reviews || 0),
+            rating: ratingAverage,
+            ratingCount,
             languages: Array.isArray(data.languages) ? data.languages : [],
+
+            // Filter-only fields, stripped back off below.
+            available: data.available !== false,
+            status: data.status || "available",
+            deletedForDriver: data.deletedForDriver === true,
           };
-        })
-        .filter((job) => isTodayOrFuture(job.date))
+        }),
+      );
+
+      const filteredJobs = jobs
+        // A Work job stays visible to passengers for as long as it has
+        // open places — it must NOT disappear after the first accepted
+        // worker, only once remainingSeats actually reaches 0.
+        .filter(
+          (job) =>
+            isTodayOrFuture(job.date) &&
+            job.available &&
+            job.remainingSeats > 0 &&
+            job.status !== "full" &&
+            job.status !== "completed" &&
+            !job.deletedForDriver,
+        )
+        .map(({ available, status, deletedForDriver, ...job }): JobListing => job)
         .sort((a, b) => {
           if (a.date === b.date) {
             return a.workHoursFrom.localeCompare(b.workHoursFrom);
@@ -109,7 +164,7 @@ export default function FindWorkScreen() {
           return a.date.localeCompare(b.date);
         });
 
-      setListings(jobs);
+      setListings(filteredJobs);
     } catch (error: any) {
       console.log("Load work jobs error:", error.message);
       Alert.alert("Error", "Could not load work jobs.");
@@ -179,10 +234,18 @@ export default function FindWorkScreen() {
 
                   <View style={styles.ratingBox}>
                     <Ionicons name="star" size={16} color="#F58220" />
-                    <Text style={styles.ratingNumber}>{listing.rating}</Text>
-                    <Text style={styles.ratingCount}>
-                      ({listing.ratingCount})
-                    </Text>
+                    {listing.ratingCount > 0 ? (
+                      <>
+                        <Text style={styles.ratingNumber}>
+                          {listing.rating.toFixed(1)}
+                        </Text>
+                        <Text style={styles.ratingCount}>
+                          ({listing.ratingCount})
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={styles.ratingCount}>New driver</Text>
+                    )}
                   </View>
                 </View>
 
@@ -219,7 +282,18 @@ export default function FindWorkScreen() {
                   <View style={styles.detail}>
                     <Ionicons name="people-outline" size={16} color="#7A665C" />
                     <Text style={styles.detailText}>
-                      {listing.workersNeeded} workers needed
+                      Workers needed: {listing.workersNeeded}
+                    </Text>
+                  </View>
+
+                  <View style={styles.detail}>
+                    <Ionicons
+                      name="checkmark-done-outline"
+                      size={16}
+                      color="#7A665C"
+                    />
+                    <Text style={styles.detailText}>
+                      Places remaining: {listing.remainingSeats}
                     </Text>
                   </View>
 
@@ -244,6 +318,13 @@ export default function FindWorkScreen() {
                     </View>
                   ))}
                 </View>
+
+                <View style={styles.divider} />
+
+                <DriverReviewsSection
+                  driverId={getDisplayedDriverId(listing)}
+                  reviewCountHint={listing.ratingCount}
+                />
 
                 <Pressable
                   style={styles.applyButton}
@@ -412,6 +493,11 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     marginTop: 16,
     marginBottom: 16,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#F0E5DC",
+    marginBottom: 14,
   },
   languageBadge: {
     backgroundColor: "#2F9B95",

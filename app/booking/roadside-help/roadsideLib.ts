@@ -4,8 +4,22 @@
 // This module centralises everything the passenger and driver screens need so
 // the UI files stay small and consistent. It talks to these collections:
 //   - roadsideRequests    (one doc per passenger help request)
-//   - driverNotifications (one doc per driver, per event)
+//   - driverNotifications (one doc per driver, per new-request event — feeds
+//                          the driver's "Help Requests" discovery screen)
 //   - roadsideOffers      (one doc per driver offer on a request)
+//   - bookings            (one doc per ACCEPTED request — created the moment
+//                          the passenger accepts an offer, then updated in
+//                          place through "driver on the way" -> "completed"
+//                          -> "completed_paid". This is the SAME collection
+//                          School/Personal/etc bookings live in, so My
+//                          Bookings shows it automatically for both sides.)
+//   - notifications        (the single canonical in-app notification feed —
+//                          see notify() in workErrandLib.ts)
+//
+// Status vocabulary (spec):
+//   roadsideOffers.status  : "pending" | "accepted" | "not_selected" | "completed"
+//   roadsideRequests.status: "pending" | "accepted" | "completed" | "completed_paid"
+//   roadsideRequests.paymentStatus: "not_due" | "pending" | "paid"
 //
 // Matching a passenger to nearby drivers uses driver route coordinates when
 // they exist (fromLat/fromLng/toLat/toLng), and falls back to geocoding the
@@ -21,12 +35,14 @@ import {
   getDoc,
   getDocs,
   query,
+  runTransaction,
   serverTimestamp,
   updateDoc,
   where,
 } from "firebase/firestore";
 
 import { auth, db } from "../../../firebase";
+import { notify } from "../work-errand/workErrandLib";
 
 export type LatLng = { latitude: number; longitude: number };
 
@@ -116,6 +132,35 @@ export const geocodePlace = async (place?: string): Promise<LatLng | null> => {
     return coord;
   } catch {
     geocodeCache[key] = null;
+    return null;
+  }
+};
+
+// Google Maps turn-by-turn directions link, matching the pattern already
+// used in app/driver/ride-navigation.tsx. Includes the driver's current
+// location as the origin when it's known (best effort, never blocking).
+export const buildDirectionsUrl = (
+  destination: LatLng,
+  origin?: LatLng | null,
+) => {
+  const originParam = origin
+    ? `&origin=${origin.latitude},${origin.longitude}`
+    : "";
+
+  return `https://www.google.com/maps/dir/?api=1${originParam}&destination=${destination.latitude},${destination.longitude}`;
+};
+
+export const getCurrentPositionBestEffort = async (): Promise<LatLng | null> => {
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== "granted") return null;
+
+    const pos = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+
+    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+  } catch {
     return null;
   }
 };
@@ -257,10 +302,20 @@ export const createRoadsideRequest = async (
     problemKeys: input.problemKeys,
     description: input.description,
     location,
+    // Top-level lat/lng too (in addition to location.latitude/longitude) so
+    // "Go help passenger" can read either shape directly off the request.
+    latitude: location.latitude,
+    longitude: location.longitude,
     status: "pending",
-    selectedDriverId: null,
     selectedOfferId: null,
+    selectedDriverId: null,
+    selectedDriverName: null,
+    agreedPrice: null,
+    etaMinutes: null,
+    paymentStatus: "not_due",
+    helpCompleted: false,
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
 
   const matches = await findMatchingDrivers(
@@ -294,6 +349,10 @@ export const createRoadsideRequest = async (
 
 // ---------------------------------------------------------------------------
 // Driver: send an offer / reject a request
+//
+// Sending an offer notifies the passenger through the shared notifications
+// feed (roadside_offer_received), so tapping it opens Finding Help with this
+// exact offer highlighted — see notifications.tsx / waiting.tsx.
 // ---------------------------------------------------------------------------
 
 export type SendOfferInput = {
@@ -310,7 +369,6 @@ export const sendDriverOffer = async (input: SendOfferInput) => {
   let driverName = user.displayName || "Driver";
   let driverGender = "";
   let driverPhone = "";
-  const driverRating = 4.8;
 
   try {
     const snap = await getDoc(doc(db, "users", user.uid));
@@ -324,35 +382,50 @@ export const sendDriverOffer = async (input: SendOfferInput) => {
     // Use the fallbacks above.
   }
 
+  const reqSnap = await getDoc(doc(db, "roadsideRequests", input.requestId));
+  const req: any = reqSnap.exists() ? reqSnap.data() : null;
+  const passengerId = req?.passengerId || null;
+  const passengerName = req?.passengerName || "Passenger";
+
   // The driver phone is stored on the offer so the passenger can see/contact
   // the driver as soon as the offer arrives.
   const offerRef = await addDoc(collection(db, "roadsideOffers"), {
     requestId: input.requestId,
+    passengerId,
+    passengerName,
     driverId: user.uid,
     driverName,
     driverGender,
     driverPhone,
-    driverRating,
-    price: input.price,
-    etaMinutes: input.etaMinutes,
-    status: "sent",
+    offeredPrice: input.price,
+    estimatedArrivalMinutes: input.etaMinutes,
+    status: "pending",
+    paymentStatus: "unpaid",
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
 
-  // This driver's notification becomes "offered".
+  // This driver's notification becomes "offered" (removes it from the
+  // pending list in the Help Requests discovery screen).
   await updateDoc(doc(db, "driverNotifications", input.notificationId), {
     status: "offered",
     read: true,
     offerId: offerRef.id,
   });
 
-  // Move the request forward (best effort – it may already be further along).
-  try {
-    await updateDoc(doc(db, "roadsideRequests", input.requestId), {
-      status: "offer_received",
+  if (passengerId) {
+    await notify({
+      receiverId: passengerId,
+      senderId: user.uid,
+      type: "roadside_offer_received",
+      title: "New help offer",
+      message: `${driverName} offered to help you.`,
+      category: "roadside",
+      requestId: input.requestId,
+      offerId: offerRef.id,
+      driverId: user.uid,
+      targetPage: "finding-help",
     });
-  } catch {
-    // Non-fatal.
   }
 
   return offerRef.id;
@@ -373,225 +446,483 @@ export const markNotificationRead = async (notificationId: string) => {
 
 // ---------------------------------------------------------------------------
 // Passenger: accept / reject an offer
+//
+// Accepting creates the ONE `bookings` document that represents this
+// accepted roadside help for the rest of its life (accepted -> completed ->
+// completed_paid). Both the passenger (passengerId) and the driver
+// (driverId) read it via the exact same "bookings" listeners School/
+// Personal/Work/Errand already use in My Bookings, so no separate roadside
+// listener is needed there.
 // ---------------------------------------------------------------------------
 
 export type AcceptableOffer = {
   id: string;
   driverId: string;
   driverName?: string;
+  driverPhone?: string;
   price?: number;
   etaMinutes?: number;
 };
 
+// Accepting is a single Firestore transaction across every sibling offer +
+// the request + the new booking doc, so it's never possible for one
+// document to say "accepted" while another still says "pending" (spec #9).
+// The sibling offer ids are looked up with a plain query first (Firestore
+// transactions can't run queries), then every actual read/write for those
+// specific doc refs happens inside the transaction.
 export const acceptOffer = async (
   requestId: string,
   offer: AcceptableOffer,
-) => {
+): Promise<string> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error("You must be logged in.");
+
   const reqRef = doc(db, "roadsideRequests", requestId);
-  const reqSnap = await getDoc(reqRef);
-  const req: any = reqSnap.exists() ? reqSnap.data() : {};
 
-  // Accept the chosen offer.
-  await updateDoc(doc(db, "roadsideOffers", offer.id), {
-    status: "accepted_by_passenger",
-  });
-
-  // Reject every other offer on this request.
   const offersSnap = await getDocs(
     query(collection(db, "roadsideOffers"), where("requestId", "==", requestId)),
   );
+  const offerRefs = offersSnap.docs.map((d) => doc(db, "roadsideOffers", d.id));
 
-  await Promise.all(
-    offersSnap.docs
-      .filter((d) => d.id !== offer.id)
-      .map((d) =>
-        updateDoc(doc(db, "roadsideOffers", d.id), {
-          status: "rejected_by_passenger",
-        }),
-      ),
-  );
+  const bookingRef = doc(collection(db, "bookings"));
+  let passengerName = "The passenger";
 
-  // Update the request with the selected driver / offer.
-  await updateDoc(reqRef, {
-    status: "driver_selected",
-    selectedDriverId: offer.driverId,
-    selectedOfferId: offer.id,
+  await runTransaction(db, async (transaction) => {
+    const reqSnap = await transaction.get(reqRef);
+
+    if (!reqSnap.exists()) throw new Error("This request no longer exists.");
+
+    const req: any = reqSnap.data();
+    passengerName = req.passengerName || passengerName;
+
+    if (req.passengerId !== user.uid) {
+      throw new Error("Only the passenger who sent this request can accept.");
+    }
+
+    if (req.status && req.status !== "pending") {
+      throw new Error("This request has already been handled.");
+    }
+
+    offerRefs.forEach((ref) => {
+      if (ref.id === offer.id) {
+        transaction.update(ref, {
+          status: "accepted",
+          acceptedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        transaction.update(ref, {
+          status: "not_selected",
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
+
+    const price = offer.price ?? null;
+    const etaMinutes = offer.etaMinutes ?? null;
+    const location = req.location || null;
+    const address = location?.address || req.address || "";
+    const latitude =
+      typeof req.latitude === "number" ? req.latitude : (location?.latitude ?? null);
+    const longitude =
+      typeof req.longitude === "number" ? req.longitude : (location?.longitude ?? null);
+    const serviceType =
+      req.serviceType ||
+      (Array.isArray(req.problemTypes) ? req.problemTypes.join(", ") : "") ||
+      "Roadside Help";
+
+    transaction.update(reqRef, {
+      status: "accepted",
+      selectedOfferId: offer.id,
+      selectedDriverId: offer.driverId,
+      selectedDriverName: offer.driverName || "Driver",
+      selectedDriverPhone: offer.driverPhone || "",
+      passengerId: req.passengerId,
+      passengerName: req.passengerName || "Passenger",
+      passengerPhone: req.passengerPhone || "",
+      serviceType,
+      address,
+      latitude,
+      longitude,
+      agreedPrice: price,
+      etaMinutes,
+      estimatedArrivalMinutes: etaMinutes,
+      paymentStatus: "not_due",
+      bookingId: bookingRef.id,
+      acceptedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    transaction.set(bookingRef, {
+      type: "roadside_help",
+      category: "roadside",
+
+      passengerId: req.passengerId || null,
+      passengerName: req.passengerName || "Passenger",
+      passengerPhone: req.passengerPhone || "",
+
+      driverId: offer.driverId,
+      driverName: offer.driverName || "Driver",
+      driverPhone: offer.driverPhone || "",
+
+      problemTypes: req.problemTypes || [],
+      description: req.description || "",
+      location,
+      address,
+      latitude,
+      longitude,
+
+      price,
+      etaMinutes,
+
+      status: "ongoing",
+      tripStatus: "booked",
+      roleType: "roadside_accepted",
+      requestId,
+      offerId: offer.id,
+      paymentStatus: "not_due",
+      helpCompleted: false,
+
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
   });
 
-  // Reveal the passenger contact details + final offer terms on the driver's
-  // notification. These fields are the same on both the update and create paths.
-  const acceptedFields = {
-    type: "roadside_help",
-    status: "accepted",
-    title: "Passenger accepted your help",
-    message: "The passenger accepted your offer. Go help them.",
-    problemTypes: req.problemTypes || [],
-    description: req.description || "",
-    passengerName: req.passengerName || "Passenger",
-    passengerPhone: req.passengerPhone || "",
-    passengerLocation: req.location || null,
-    price: offer.price ?? null,
-    etaMinutes: offer.etaMinutes ?? null,
+  await notify({
+    receiverId: offer.driverId,
+    senderId: user.uid,
+    type: "roadside_offer_accepted",
+    title: "Passenger accepted your offer",
+    message: `${passengerName} accepted your Roadside Help offer.`,
+    category: "roadside",
+    requestId,
     offerId: offer.id,
-    read: false,
-  };
+    bookingId: bookingRef.id,
+    passengerId: user.uid,
+    targetTab: "driver",
+  });
 
-  // Update the SAME notification the driver already has for this request, so
-  // its card just changes status to "accepted" instead of a duplicate appearing.
-  const notifsSnap = await getDocs(
-    query(
-      collection(db, "driverNotifications"),
-      where("requestId", "==", requestId),
-    ),
-  );
-
-  const existing = notifsSnap.docs.find(
-    (d) => d.data().driverId === offer.driverId,
-  );
-
-  if (existing) {
-    await updateDoc(doc(db, "driverNotifications", existing.id), acceptedFields);
-  } else {
-    // Fallback only (e.g. the original notification was deleted): create one so
-    // the acceptance is never lost.
-    await addDoc(collection(db, "driverNotifications"), {
-      driverId: offer.driverId,
-      requestId,
-      ...acceptedFields,
-      createdAt: serverTimestamp(),
-    });
-  }
+  return bookingRef.id;
 };
 
 export const rejectOffer = async (offerId: string) => {
   await updateDoc(doc(db, "roadsideOffers", offerId), {
-    status: "rejected_by_passenger",
+    status: "not_selected",
+    updatedAt: serverTimestamp(),
   });
 };
 
 // ---------------------------------------------------------------------------
-// Driver: mark an accepted roadside help as completed
-//
-// Sets status "completed" on the request, offer and notification, then writes a
-// single completed `bookings` document that is visible to BOTH the passenger
-// (passengerId) and the driver (driverId) under My Bookings. The completed
-// notification is filtered out of the driver's active Help Requests list.
+// Driver-facing "accepted request" record — the single source of truth read
+// by BOTH the Help Requests screen and My Bookings -> Driver tab (shared
+// RoadsideAcceptedCard component). Both screens subscribe to
+// `roadsideRequests` where selectedDriverId == me with their own onSnapshot
+// listener, normalize with this same function, and render with the same
+// component, so there is exactly one status/action code path regardless of
+// which screen the driver is on.
 // ---------------------------------------------------------------------------
 
-export const completeRoadsideHelp = async (params: {
+export type RoadsideRequestRecord = {
+  id: string; // requestId
+  bookingId: string;
+  selectedOfferId: string;
+  passengerId: string;
+  passengerName: string;
+  passengerPhone: string;
+  serviceType: string;
+  problemTypes: string[];
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  agreedPrice: number | null;
+  estimatedArrivalMinutes: number | null;
+  // "accepted" | "driver_on_the_way" | "completed" | "completed_paid"
+  status: string;
+  // "not_due" | "pending" | "paid"
+  paymentStatus: string;
+  helpCompleted: boolean;
+  paidAmount: number | null;
+};
+
+export const normalizeRoadsideRequest = (
+  id: string,
+  data: any,
+): RoadsideRequestRecord => ({
+  id,
+  bookingId: data.bookingId || "",
+  selectedOfferId: data.selectedOfferId || "",
+  passengerId: data.passengerId || "",
+  passengerName: data.passengerName || "Passenger",
+  passengerPhone: data.passengerPhone || "",
+  serviceType:
+    data.serviceType ||
+    (Array.isArray(data.problemTypes) ? data.problemTypes.join(", ") : "") ||
+    "Roadside Help",
+  problemTypes: Array.isArray(data.problemTypes) ? data.problemTypes : [],
+  address: data.address || data.location?.address || "",
+  latitude:
+    typeof data.latitude === "number"
+      ? data.latitude
+      : (data.location?.latitude ?? null),
+  longitude:
+    typeof data.longitude === "number"
+      ? data.longitude
+      : (data.location?.longitude ?? null),
+  agreedPrice: typeof data.agreedPrice === "number" ? data.agreedPrice : null,
+  estimatedArrivalMinutes:
+    typeof data.estimatedArrivalMinutes === "number"
+      ? data.estimatedArrivalMinutes
+      : typeof data.etaMinutes === "number"
+        ? data.etaMinutes
+        : null,
+  status: data.status || "pending",
+  paymentStatus: data.paymentStatus || "not_due",
+  helpCompleted: data.helpCompleted === true,
+  paidAmount: typeof data.paidAmount === "number" ? data.paidAmount : null,
+});
+
+// ---------------------------------------------------------------------------
+// Driver: "Go help passenger" — opens turn-by-turn directions and (best
+// effort) tells the passenger the driver is on the way.
+// ---------------------------------------------------------------------------
+
+export const markDriverOnTheWay = async (params: {
+  bookingId: string;
   requestId: string;
-  notificationId: string;
-  offerId?: string | null;
 }) => {
   const user = auth.currentUser;
   if (!user) throw new Error("You must be logged in.");
 
   const reqRef = doc(db, "roadsideRequests", params.requestId);
   const reqSnap = await getDoc(reqRef);
-  const req: any = reqSnap.exists() ? reqSnap.data() : {};
 
-  // Guard against creating a duplicate booking if it was already completed.
-  if (req.status === "completed") {
-    await updateDoc(doc(db, "driverNotifications", params.notificationId), {
-      status: "completed",
-      read: true,
-    });
-    return;
+  if (!reqSnap.exists()) throw new Error("This request no longer exists.");
+
+  const req: any = reqSnap.data();
+
+  if (req.selectedDriverId !== user.uid) {
+    throw new Error("Only the accepted driver can do this.");
   }
 
-  // Resolve the accepted offer (prefer the id we already have).
-  let offerId = params.offerId || req.selectedOfferId || null;
-  let offer: any = {};
+  const driverName = req.selectedDriverName || "The driver";
 
-  if (offerId) {
-    const offerSnap = await getDoc(doc(db, "roadsideOffers", offerId));
-    if (offerSnap.exists()) offer = offerSnap.data();
-  } else {
-    const offersSnap = await getDocs(
-      query(
-        collection(db, "roadsideOffers"),
-        where("requestId", "==", params.requestId),
-      ),
-    );
-    const mine =
-      offersSnap.docs.find(
-        (d) =>
-          d.data().driverId === user.uid &&
-          d.data().status === "accepted_by_passenger",
-      ) || offersSnap.docs.find((d) => d.data().driverId === user.uid);
-
-    if (mine) {
-      offerId = mine.id;
-      offer = mine.data();
-    }
-  }
-
-  // Driver identity for the booking (offer values first, users doc as backup).
-  let driverName = offer.driverName || user.displayName || "Driver";
-  let driverPhone = offer.driverPhone || "";
-
-  if (!driverPhone) {
-    try {
-      const us = await getDoc(doc(db, "users", user.uid));
-      if (us.exists()) {
-        const d = us.data();
-        driverName = offer.driverName || d.name || driverName;
-        driverPhone = d.phone || "";
-      }
-    } catch {
-      // Keep fallbacks.
-    }
-  }
-
-  // 1) request -> completed
   await updateDoc(reqRef, {
-    status: "completed",
-    completedAt: serverTimestamp(),
+    status: "driver_on_the_way",
+    driverOnTheWayAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
 
-  // 2) offer -> completed
-  if (offerId) {
-    await updateDoc(doc(db, "roadsideOffers", offerId), {
+  if (req.passengerId) {
+    await notify({
+      receiverId: req.passengerId,
+      senderId: user.uid,
+      type: "roadside_driver_on_way",
+      title: "Driver is on the way",
+      message: `${driverName} is on the way to help you.`,
+      category: "roadside",
+      requestId: params.requestId,
+      bookingId: params.bookingId,
+      driverId: user.uid,
+      targetTab: "passenger",
+    });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Driver: mark an accepted roadside help as completed ("Finished Help").
+//
+// Sets status "completed" on the request, offer and booking, opens the
+// passenger's payment gate, and notifies them to pay. Guarded so the same
+// help can never be completed twice.
+// ---------------------------------------------------------------------------
+
+export const finishRoadsideHelp = async (bookingId: string) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error("You must be logged in.");
+
+  const bookingRef = doc(db, "bookings", bookingId);
+
+  let requestId = "";
+  let offerId = "";
+  let passengerId = "";
+  let driverName = "The driver";
+  let agreedPrice: number | null = null;
+
+  await runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+
+    if (!bookingSnap.exists()) {
+      throw new Error("Booking not found.");
+    }
+
+    const booking: any = bookingSnap.data();
+
+    if (booking.driverId !== user.uid) {
+      throw new Error("Only the accepted driver can finish this help.");
+    }
+
+    if (booking.helpCompleted === true || booking.status === "completed") {
+      throw new Error("This help was already marked finished.");
+    }
+
+    requestId = booking.requestId || "";
+    offerId = booking.offerId || "";
+    driverName = booking.driverName || driverName;
+    agreedPrice = typeof booking.price === "number" ? booking.price : null;
+
+    const reqRef = doc(db, "roadsideRequests", requestId);
+    const reqSnap = await transaction.get(reqRef);
+    const req: any = reqSnap.exists() ? reqSnap.data() : {};
+    passengerId = req.passengerId || booking.passengerId || "";
+
+    if (reqSnap.exists()) {
+      transaction.update(reqRef, {
+        status: "completed",
+        helpCompleted: true,
+        paymentStatus: "pending",
+        completedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    if (offerId) {
+      transaction.update(doc(db, "roadsideOffers", offerId), {
+        status: "completed",
+        paymentStatus: "pending",
+        completedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    transaction.update(bookingRef, {
       status: "completed",
+      tripStatus: "completed",
+      helpCompleted: true,
+      paymentStatus: "pending",
       completedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  if (passengerId) {
+    await notify({
+      receiverId: passengerId,
+      senderId: user.uid,
+      type: "roadside_payment_required",
+      title: "Roadside Help completed",
+      message: `${driverName} finished helping you. Please complete the payment.`,
+      category: "roadside",
+      requestId,
+      offerId,
+      bookingId,
+      driverId: user.uid,
+      amount: agreedPrice ?? undefined,
+      targetPage: "roadside-payment",
+    });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Passenger: pay for completed roadside help.
+//
+// The amount is always read from the live `roadsideRequests.agreedPrice`
+// field inside the transaction — never trusted purely from route params.
+// Blocked unless request.status === "completed" && paymentStatus === "pending".
+// ---------------------------------------------------------------------------
+
+export type RoadsidePaymentMethod = "cash" | "card";
+
+export const payRoadsideHelp = async (
+  bookingId: string,
+  method: RoadsidePaymentMethod,
+): Promise<{ amount: number; driverId: string }> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error("You must be logged in.");
+
+  const bookingRef = doc(db, "bookings", bookingId);
+
+  let requestId = "";
+  let offerId = "";
+  let driverId = "";
+  let passengerName = "The passenger";
+  let amount = 0;
+
+  await runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+
+    if (!bookingSnap.exists()) {
+      throw new Error("Booking not found.");
+    }
+
+    const booking: any = bookingSnap.data();
+
+    if (booking.passengerId !== user.uid) {
+      throw new Error("Only the passenger can pay for this help.");
+    }
+
+    requestId = booking.requestId || "";
+    offerId = booking.offerId || "";
+    driverId = booking.driverId || "";
+    passengerName = booking.passengerName || passengerName;
+
+    const reqRef = doc(db, "roadsideRequests", requestId);
+    const reqSnap = await transaction.get(reqRef);
+
+    if (!reqSnap.exists()) {
+      throw new Error("This request no longer exists.");
+    }
+
+    const req: any = reqSnap.data();
+
+    if (req.status !== "completed" || req.paymentStatus !== "pending") {
+      throw new Error("This help is not ready for payment.");
+    }
+
+    amount = typeof req.agreedPrice === "number" ? req.agreedPrice : 0;
+
+    transaction.update(reqRef, {
+      status: "completed_paid",
+      paymentStatus: "paid",
+      paidBy: user.uid,
+      paidTo: driverId,
+      paidAmount: amount,
+      paidAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    if (offerId) {
+      transaction.update(doc(db, "roadsideOffers", offerId), {
+        paymentStatus: "paid",
+        paidAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    transaction.update(bookingRef, {
+      paymentStatus: "paid",
+      paymentMethod: method,
+      paidAmount: amount,
+      paidAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  if (driverId) {
+    await notify({
+      receiverId: driverId,
+      senderId: user.uid,
+      type: "roadside_payment_received",
+      title: "Payment received",
+      message: `${passengerName} paid ₪${amount} for the Roadside Help service.`,
+      category: "roadside",
+      requestId,
+      offerId,
+      bookingId,
+      passengerId: user.uid,
+      amount,
+      targetTab: "driver",
     });
   }
 
-  // 3) notification -> completed (removes it from the active list)
-  await updateDoc(doc(db, "driverNotifications", params.notificationId), {
-    status: "completed",
-    read: true,
-    completedAt: serverTimestamp(),
-  });
-
-  // 4) create the completed booking (shared by passenger + driver tabs)
-  const location = req.location || null;
-
-  await addDoc(collection(db, "bookings"), {
-    type: "roadside_help",
-    category: "roadside",
-
-    passengerId: req.passengerId || null,
-    passengerName: req.passengerName || "Passenger",
-    passengerPhone: req.passengerPhone || "",
-
-    driverId: user.uid,
-    driverName,
-    driverPhone,
-
-    problemTypes: req.problemTypes || [],
-    description: req.description || "",
-    location,
-    address: location?.address || "",
-
-    price: offer.price ?? null,
-    etaMinutes: offer.etaMinutes ?? null,
-
-    status: "completed",
-    roleType: "roadside_completed",
-    requestId: params.requestId,
-
-    createdAt: serverTimestamp(),
-    completedAt: serverTimestamp(),
-  });
+  return { amount, driverId };
 };

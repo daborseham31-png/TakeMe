@@ -1,13 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -23,6 +16,8 @@ import {
 
 import { db } from "../../firebase";
 import { createPassengerBooking } from "./bookingsLib";
+import DriverReviewsSection from "./DriverReviewsSection";
+import { getDisplayedDriverId } from "./driverReviewsLib";
 import {
   buildBookingDayFromMatch,
   computeWeeklyTotal,
@@ -43,13 +38,6 @@ type DriverProfile = {
   spokenLanguages?: string[];
   ratingAverage?: number;
   ratingCount?: number;
-};
-
-type DriverComment = {
-  user: string;
-  text: string;
-  stars: number;
-  createdAtSeconds: number;
 };
 
 type DriverRoute = {
@@ -89,7 +77,6 @@ type DriverRoute = {
   reviews?: number;
   eta?: number;
   active?: boolean;
-  comments?: DriverComment[];
 };
 
 const LANGUAGES: Record<string, string> = {
@@ -228,37 +215,9 @@ const getDriverPhone = (driver: DriverRoute) => {
   return driver.profile?.phone || driver.phone || "";
 };
 
-const getReviewCreatedAtSeconds = (createdAt: any) => {
-  if (!createdAt) return 0;
-  if (typeof createdAt.seconds === "number") return createdAt.seconds;
-  return 0;
-};
-
-const getDriverReviews = async (driverId: string) => {
-  const reviewsSnap = await getDocs(
-    query(collection(db, "driverReviews"), where("driverId", "==", driverId)),
-  );
-
-  return reviewsSnap.docs
-    .map((reviewDoc) => {
-      const data = reviewDoc.data();
-
-      return {
-        user:
-          String(
-            data.passengerName || data.user || data.userName || "",
-          ).trim() || "Passenger",
-        text: String(
-          data.comment || data.reviewComment || data.text || "",
-        ).trim(),
-        stars: Number(data.rating || data.stars || 0),
-        createdAtSeconds: getReviewCreatedAtSeconds(data.createdAt),
-      };
-    })
-    .filter((review) => review.stars > 0)
-    .sort((a, b) => b.createdAtSeconds - a.createdAtSeconds);
-};
-
+// The driver's overall saved rating — always from users/{driverId}, never
+// computed client-side from whatever reviews happen to be loaded for this
+// card. Reviews themselves are lazy-loaded by DriverReviewsSection.
 const getDriverRating = (
   driver: DriverRoute,
 ): { average: number; count: number } | null => {
@@ -269,14 +228,7 @@ const getDriverRating = (
     return { average: profileAverage, count: profileCount };
   }
 
-  const comments = driver.comments || [];
-
-  if (comments.length === 0) return null;
-
-  const total = comments.reduce((sum, comment) => sum + comment.stars, 0);
-  const average = total / comments.length;
-
-  return { average, count: comments.length };
+  return null;
 };
 
 const getDateText = (driver: DriverRoute) => {
@@ -299,7 +251,6 @@ export default function DriverResultsScreen() {
     Record<string, WeeklyDayMatch[]>
   >({});
   const [loading, setLoading] = useState(true);
-  const [expandedDriver, setExpandedDriver] = useState<string | null>(null);
   const [bookingBusy, setBookingBusy] = useState(false);
 
   const [dayPickerDriver, setDayPickerDriver] = useState<DriverRoute | null>(
@@ -314,6 +265,29 @@ export default function DriverResultsScreen() {
   const category = String(params.category || "");
   const genderPref = String(params.genderPref || "any");
   const seats = Number(params.seats || 1);
+
+  // "Pickup location for driver navigation" on the booking form — an
+  // optional, SEPARATE GPS point passed straight through to ride-payment
+  // (which is the only screen that actually writes the booking document —
+  // see handleBookDriver / confirmWeeklyDayPicker below). This is never used
+  // for driver matching above (matching only ever compares `from`/`to`
+  // text — see commonFiltered below), only for driver navigation later.
+  const pickupLatParam =
+    params.pickupLatitude !== undefined ? Number(params.pickupLatitude) : null;
+  const pickupLngParam =
+    params.pickupLongitude !== undefined ? Number(params.pickupLongitude) : null;
+  const pickupAddressParam = String(params.pickupAddress || "");
+  const pickupCoordsParams =
+    pickupLatParam !== null &&
+    pickupLngParam !== null &&
+    !Number.isNaN(pickupLatParam) &&
+    !Number.isNaN(pickupLngParam)
+      ? {
+          pickupLatitude: String(pickupLatParam),
+          pickupLongitude: String(pickupLngParam),
+          pickupAddress: pickupAddressParam,
+        }
+      : {};
 
   const requestedTime = String(params.time || "");
   const requestedDate = String(params.tripDate || "");
@@ -357,38 +331,28 @@ export default function DriverResultsScreen() {
         },
       );
 
-      const routesWithProfilesAndReviews: DriverRoute[] = await Promise.all(
+      const routesWithProfiles: DriverRoute[] = await Promise.all(
         routesWithoutProfiles.map(async (driver) => {
           if (!driver.driverId) {
-            return {
-              ...driver,
-              comments: [],
-            };
+            return driver;
           }
 
           try {
-            const [profileSnap, comments] = await Promise.all([
-              getDoc(doc(db, "users", driver.driverId)),
-              getDriverReviews(driver.driverId),
-            ]);
+            const profileSnap = await getDoc(doc(db, "users", driver.driverId));
 
             return {
               ...driver,
               profile: profileSnap.exists()
                 ? (profileSnap.data() as DriverProfile)
                 : undefined,
-              comments,
             };
           } catch {
-            return {
-              ...driver,
-              comments: [],
-            };
+            return driver;
           }
         }),
       );
 
-      const commonFiltered = routesWithProfilesAndReviews.filter((driver) => {
+      const commonFiltered = routesWithProfiles.filter((driver) => {
         const driverFrom =
           driver.fromNormalized || normalize(driver.from || "");
         const driverTo = driver.toNormalized || normalize(driver.to || "");
@@ -503,6 +467,7 @@ const handleBookDriver = async (driver: DriverRoute) => {
 
         from: driver.from || from,
         to: driver.to || to,
+        ...pickupCoordsParams,
 
         date: selectedDate,
         day: selectedDay,
@@ -630,6 +595,7 @@ const confirmWeeklyDayPicker = () => {
 
       from: driver.from || from,
       to: driver.to || to,
+      ...pickupCoordsParams,
 
       driverCar: driver.car || "",
       driverCarColor: driver.carColor || "",
@@ -711,13 +677,12 @@ const availableDrivers = drivers.filter((driver: any) => {
               const totalPrice =
                 Number(driver.price || 0) * (isDelivery ? 1 : seats);
 
-              const expanded = expandedDriver === driver.id;
-              const comments = driver.comments || [];
               const driverLanguages = getDriverLanguages(driver);
               const dateText = getDateText(driver);
               const daysText = getDaysText(driver);
               const driverGender = getDriverGender(driver);
               const rating = getDriverRating(driver);
+              const displayedDriverId = getDisplayedDriverId(driver);
 
               return (
                 <View key={driver.id} style={styles.card}>
@@ -957,79 +922,10 @@ const availableDrivers = drivers.filter((driver: any) => {
 
                   <View style={styles.divider} />
 
-                  <Pressable
-                    style={styles.reviewsButton}
-                    onPress={() =>
-                      setExpandedDriver(expanded ? null : driver.id)
-                    }
-                  >
-                    <View style={styles.reviewsLeft}>
-                      <Ionicons
-                        name="chatbubble-ellipses-outline"
-                        size={18}
-                        color="#F58220"
-                      />
-
-                      <Text style={styles.reviewsButtonText}>
-                        Reviews ({comments.length})
-                      </Text>
-                    </View>
-
-                    <Ionicons
-                      name={expanded ? "chevron-up" : "chevron-down"}
-                      size={20}
-                      color="#7C5F46"
-                    />
-                  </Pressable>
-
-                  {expanded && (
-                    <View style={styles.commentsBox}>
-                      {comments.length === 0 ? (
-                        <View style={styles.noCommentsRow}>
-                          <View style={styles.noCommentsIcon}>
-                            <Ionicons
-                              name="chatbox-outline"
-                              size={18}
-                              color="#7C5F46"
-                            />
-                          </View>
-
-                          <Text style={styles.commentText}>
-                            No reviews yet for this driver.
-                          </Text>
-                        </View>
-                      ) : (
-                        comments.map((comment, index) => (
-                          <View key={index} style={styles.commentItem}>
-                            <View style={styles.commentHeader}>
-                              <Text style={styles.commentUser}>
-                                {comment.user}
-                              </Text>
-
-                              <View style={styles.starsRow}>
-                                {Array.from({ length: 5 }).map((_, i) => (
-                                  <Ionicons
-                                    key={i}
-                                    name={
-                                      i < comment.stars
-                                        ? "star"
-                                        : "star-outline"
-                                    }
-                                    size={13}
-                                    color="#F58220"
-                                  />
-                                ))}
-                              </View>
-                            </View>
-
-                            <Text style={styles.commentText}>
-                              {comment.text || "No comment."}
-                            </Text>
-                          </View>
-                        ))
-                      )}
-                    </View>
-                  )}
+                  <DriverReviewsSection
+                    driverId={displayedDriverId}
+                    reviewCountHint={rating?.count ?? null}
+                  />
 
                   <Pressable
                     style={[styles.bookButton, bookingBusy && { opacity: 0.6 }]}
@@ -1378,63 +1274,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "#F0E5DC",
     marginBottom: 14,
-  },
-  reviewsButton: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 14,
-  },
-  reviewsLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-  },
-  reviewsButtonText: {
-    color: "#3C2319",
-    fontSize: 15,
-    fontWeight: "900",
-  },
-  commentsBox: {
-    backgroundColor: "#F8F4EF",
-    borderRadius: 16,
-    padding: 13,
-    marginBottom: 16,
-    gap: 10,
-  },
-  noCommentsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  noCommentsIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#EFE6DD",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  commentItem: {
-    gap: 4,
-  },
-  commentHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  commentUser: {
-    fontSize: 14,
-    fontWeight: "900",
-    color: "#111827",
-  },
-  starsRow: {
-    flexDirection: "row",
-    gap: 2,
-  },
-  commentText: {
-    color: "#7C5F46",
-    fontSize: 14,
   },
   bookButton: {
     backgroundColor: "#F58220",

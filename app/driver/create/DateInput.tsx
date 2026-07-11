@@ -38,6 +38,10 @@ type Props = {
   showPicker: boolean;
   setShowPicker: (value: boolean) => void;
   maximumDate?: Date;
+  // Defaults to "now" (today), same as before this prop existed — pass an
+  // explicit value only when the caller needs a tighter lower bound (e.g.
+  // weekly booking locking the picker to the currently open week).
+  minimumDate?: Date;
 };
 
 export default function DateInput({
@@ -47,6 +51,7 @@ export default function DateInput({
   showPicker,
   setShowPicker,
   maximumDate,
+  minimumDate,
 }: Props) {
   const cleanDate = normalizeDateToYMD(value);
   const dayName = getDayFromDateText(value);
@@ -88,7 +93,7 @@ export default function DateInput({
           value={pickerDate}
           mode="date"
           display="default"
-          minimumDate={new Date()}
+          minimumDate={minimumDate || new Date()}
           maximumDate={maximumDate}
           onChange={(_event: any, selectedDate?: Date) => {
             setShowPicker(false);

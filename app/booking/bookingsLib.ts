@@ -127,18 +127,23 @@ export const getTodayYMD = () => {
 };
 
 export const getBookingDateYMD = (booking: any): string => {
-  return (
+  return String(
     booking?.date ||
-    booking?.tripDate ||
-    booking?.selectedDate ||
-    booking?.dayDate ||
-    ""
+      booking?.tripDate ||
+      booking?.selectedDate ||
+      booking?.dayDate ||
+      booking?.rideDate ||
+      "",
   );
 };
 
 export const getBookingTime = (booking: any): string => {
-  return (
-    booking?.time || booking?.tripTime || booking?.selectedTime || "00:00"
+  return String(
+    booking?.time ||
+      booking?.tripTime ||
+      booking?.selectedTime ||
+      booking?.rideTime ||
+      "00:00",
   );
 };
 
@@ -204,48 +209,58 @@ export const getStartTripBlockedReason = (booking: any): string | null => {
 // ---------------------------------------------------------------------------
 // My Bookings sort order
 //
-// Upcoming/active trips first (soonest date first), completed trips always
-// pushed to the bottom (most-recently-completed first). Sorting only — the
-// underlying Firestore documents/arrays are never mutated.
+// ONE combined chronological order across every category (School, Personal,
+// Work, Errand, Roadside, ...) — category/collection/creation time must
+// never affect placement, only the real trip date+time and completion:
+//   1. Every non-completed booking first, nearest date+time first.
+//   2. Every completed booking below all of those, newest completed first.
+// Sorting only — the underlying Firestore documents/arrays are never mutated.
 // ---------------------------------------------------------------------------
 
-export const isCompletedBooking = (booking: any): boolean => {
-  const status = String(booking?.status || "");
-  const tripStatus = String(booking?.tripStatus || "");
-  return status === "completed" || tripStatus === "completed";
+export const isCompletedItem = (item: any): boolean => {
+  const status = String(item?.status || "").toLowerCase();
+  const tripStatus = String(item?.tripStatus || "").toLowerCase();
+
+  return (
+    status === "completed" ||
+    tripStatus === "completed" ||
+    item?.completed === true
+  );
 };
 
-export const compareBookingsByDate = (a: any, b: any): number => {
-  const aCompleted = isCompletedBooking(a);
-  const bCompleted = isCompletedBooking(b);
+export const getTripTimestamp = (item: any): number => {
+  const date = getBookingDateYMD(item);
+  const time = getBookingTime(item);
 
-  // Completed always sinks below every non-completed booking.
-  if (aCompleted !== bCompleted) {
-    return aCompleted ? 1 : -1;
-  }
+  if (!date) return Number.MAX_SAFE_INTEGER;
 
-  const aDate = getBookingDateYMD(a);
-  const bDate = getBookingDateYMD(b);
+  const timestamp = new Date(`${date}T${time || "00:00"}:00`).getTime();
 
-  if (aDate !== bDate) {
-    // A booking with no usable date falls to the end of its own group
-    // instead of sorting arbitrarily first.
-    if (!aDate) return 1;
-    if (!bDate) return -1;
-
-    // Non-completed: nearest upcoming date first (ascending).
-    // Completed: most-recently-completed date first (descending).
-    return aCompleted ? bDate.localeCompare(aDate) : aDate.localeCompare(bDate);
-  }
-
-  const aTime = getBookingTime(a);
-  const bTime = getBookingTime(b);
-
-  return aCompleted ? bTime.localeCompare(aTime) : aTime.localeCompare(bTime);
+  return Number.isNaN(timestamp) ? Number.MAX_SAFE_INTEGER : timestamp;
 };
 
-export const sortBookingsByDate = <T,>(items: T[]): T[] =>
-  [...items].sort(compareBookingsByDate);
+export const sortMyBookings = <T,>(items: T[]): T[] => {
+  return [...items].sort((a, b) => {
+    const aCompleted = isCompletedItem(a);
+    const bCompleted = isCompletedItem(b);
+
+    // Non-completed always first.
+    if (aCompleted !== bCompleted) {
+      return aCompleted ? 1 : -1;
+    }
+
+    const aTime = getTripTimestamp(a);
+    const bTime = getTripTimestamp(b);
+
+    // Upcoming/active: earliest first.
+    if (!aCompleted && !bCompleted) {
+      return aTime - bTime;
+    }
+
+    // Completed: newest first, but still at the bottom.
+    return bTime - aTime;
+  });
+};
 
 // ---------------------------------------------------------------------------
 // Current user info
@@ -555,8 +570,17 @@ export type BookingItem = {
   problemTypes: string[];
   description: string;
   address: string;
+  latitude: number | null;
+  longitude: number | null;
   etaMinutes: number | null;
   passengerName: string;
+  passengerPhone: string;
+  driverPhone: string;
+  requestId: string;
+  offerId: string;
+  // "not_due" | "pending" | "paid" — see roadsideLib.ts.
+  paymentStatus: string;
+  helpCompleted: boolean;
 };
 
 export const normalizeBooking = (id: string, data: any): BookingItem => {
@@ -625,8 +649,26 @@ export const normalizeBooking = (id: string, data: any): BookingItem => {
     problemTypes,
     description: data.description || "",
     address,
+    latitude:
+      typeof data.latitude === "number"
+        ? data.latitude
+        : typeof data.location?.latitude === "number"
+          ? data.location.latitude
+          : null,
+    longitude:
+      typeof data.longitude === "number"
+        ? data.longitude
+        : typeof data.location?.longitude === "number"
+          ? data.location.longitude
+          : null,
     etaMinutes: asNumber(data.etaMinutes),
     passengerName: data.passengerName || "Passenger",
+    passengerPhone: data.passengerPhone || "",
+    driverPhone: data.driverPhone || "",
+    requestId: data.requestId || "",
+    offerId: data.offerId || "",
+    paymentStatus: data.paymentStatus || "",
+    helpCompleted: data.helpCompleted === true,
     searchText: buildSearchText([
       meta.label,
       data.category,
@@ -659,6 +701,14 @@ export type DriverTripItem = {
   time: string;
   price: number | null;
   seats: number | null;
+
+  // Work jobs only — capacity tracking (see workErrandLib.ts). Null for
+  // every other collection.
+  totalSeats: number | null;
+  remainingSeats: number | null;
+  acceptedWorkersCount: number | null;
+  isFull: boolean;
+
   status: "ongoing" | "completed";
   createdAtSeconds: number;
   searchText: string;
@@ -696,6 +746,29 @@ export const normalizeDriverTrip = (
   const seats =
     asNumber(data.seats) ?? asNumber(data.workersNeeded) ?? null;
 
+  // Work jobs only — everything else keeps these null.
+  const totalSeats =
+    collectionName === "workJobs"
+      ? (asNumber(data.totalSeats) ??
+        asNumber(data.seats) ??
+        asNumber(data.workersNeeded) ??
+        null)
+      : null;
+  const remainingSeats =
+    collectionName === "workJobs"
+      ? typeof data.remainingSeats === "number"
+        ? data.remainingSeats
+        : totalSeats
+      : null;
+  const acceptedWorkersCount =
+    collectionName === "workJobs" ? asNumber(data.acceptedWorkersCount) : null;
+  const isFull =
+    collectionName === "workJobs" &&
+    (data.isFull === true || data.status === "full");
+
+  // "completed" here means the job LISTING was manually marked done — it's
+  // a different concept from the job being full (isFull), which only
+  // affects whether it still shows up in passenger search results.
   const status = data.status === "completed" ? "completed" : "ongoing";
   const meta = getCategoryMeta(category);
 
@@ -712,6 +785,10 @@ export const normalizeDriverTrip = (
     time,
     price,
     seats,
+    totalSeats,
+    remainingSeats,
+    acceptedWorkersCount,
+    isFull,
     status,
     createdAtSeconds: data.createdAt?.seconds || 0,
     searchText: buildSearchText([

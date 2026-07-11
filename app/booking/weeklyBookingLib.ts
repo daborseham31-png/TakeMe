@@ -25,13 +25,13 @@ import { Alert } from "react-native";
 
 import { auth, db } from "../../firebase";
 import {
+  formatDateToYMD,
   getDayFromDateText,
-  getTodayYMD,
-  isTimeAvailableForDate,
   normalizeDateToYMD,
   normalizeTime,
+  parseDateInput,
 } from "../driver/create/driverHelpers";
-import { notify } from "./work-errand/workErrandLib";
+import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
 // ---------------------------------------------------------------------------
 // Day keys
@@ -84,10 +84,12 @@ export const getDayKeyFromDate = (dateYMD: string): DayKey | "" => {
 const SHORT_DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // Same idea as getDayKeyFromDate, but doesn't go through
-// normalizeDateToYMD/getDayFromDateText (which reject past dates) — used
-// purely for display, on dates that may already be in the past (an existing
-// driver trip someone is matching against).
-const dayKeyFromAnyYMD = (dateYMD: string): DayKey | "" => {
+// normalizeDateToYMD/getDayFromDateText (which reject past dates using the
+// DEVICE's timezone) — used for weekly validation (which already checked
+// past/range itself using Israel-local time) and for display on dates that
+// may already be in the past (an existing driver trip someone is matching
+// against).
+export const dayKeyFromAnyYMD = (dateYMD: string): DayKey | "" => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateYMD || ""));
   if (!match) return "";
 
@@ -101,13 +103,20 @@ const dayKeyFromAnyYMD = (dateYMD: string): DayKey | "" => {
 };
 
 // ---------------------------------------------------------------------------
-// Week bounds (current Sunday -> Saturday, relative to "today")
+// Week bounds — Israel LOCAL time (Asia/Jerusalem), never UTC and never the
+// device's own timezone. Weekly booking always covers exactly one
+// Sunday-to-Saturday week; which week(s) are currently open depends on this
+// clock, not on whatever timezone the passenger's or driver's phone happens
+// to be set to.
+//
+// The next Sunday-to-Saturday week opens every Saturday at 07:00 AM Israel
+// time and stays open until the following Sunday, at which point it becomes
+// the "current" week and the week after it locks again until the next
+// Saturday 07:00.
 // ---------------------------------------------------------------------------
 
-const parseYMD = (ymd: string) => {
-  const [year, month, day] = ymd.split("-").map(Number);
-  return new Date(year, month - 1, day);
-};
+const ISRAEL_TIME_ZONE = "Asia/Jerusalem";
+const NEXT_WEEK_OPEN_MINUTES = 7 * 60; // 07:00 AM
 
 const formatYMD = (date: Date) => {
   const year = date.getFullYear();
@@ -116,27 +125,120 @@ const formatYMD = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
-export const getCurrentWeekBounds = () => {
-  const today = parseYMD(getTodayYMD());
+// "Now", as a Date object whose getFullYear/getMonth/getDate/getDay/
+// getHours/getMinutes already read back the Israel-local wall-clock values.
+// Every helper below can then just use plain Date getters — never UTC math
+// — and can't drift a day off no matter what timezone the device is in.
+export const getLocalNowInIsrael = (): Date => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: ISRAEL_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
 
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay());
+  const get = (type: string) =>
+    Number(parts.find((part) => part.type === type)?.value || 0);
 
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 6);
+  // A few ICU implementations report midnight as hour "24" with hour12:false.
+  const hour = get("hour") % 24;
 
-  return { startYMD: formatYMD(startOfWeek), endYMD: formatYMD(endOfWeek) };
+  return new Date(get("year"), get("month") - 1, get("day"), hour, get("minute"), get("second"));
 };
 
-// today-or-future (normalizeDateToYMD already rejects past dates) AND
-// inside the current Sun-Sat week.
-export const isDateInCurrentWeek = (dateText: string) => {
+export const getStartOfWeekSunday = (date: Date): Date => {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  start.setDate(start.getDate() - start.getDay());
+  return start;
+};
+
+export const getEndOfWeekSaturday = (date: Date): Date => {
+  const end = getStartOfWeekSunday(date);
+  end.setDate(end.getDate() + 6);
+  return end;
+};
+
+// True from Saturday 07:00:00 Israel time through the end of that Saturday —
+// this is the window where the next Sun-Sat week is open for booking.
+export const isNextWeekOpen = (now: Date = getLocalNowInIsrael()): boolean => {
+  if (now.getDay() !== 6) return false;
+  return now.getHours() * 60 + now.getMinutes() >= NEXT_WEEK_OPEN_MINUTES;
+};
+
+export type WeekChoice = "current" | "next";
+
+export const getAllowedWeeklyDateRange = (
+  selectedWeek: WeekChoice = "current",
+  now: Date = getLocalNowInIsrael(),
+): { startYMD: string; endYMD: string } => {
+  const currentStart = getStartOfWeekSunday(now);
+
+  if (selectedWeek === "next") {
+    const nextStart = new Date(currentStart);
+    nextStart.setDate(nextStart.getDate() + 7);
+
+    const nextEnd = new Date(nextStart);
+    nextEnd.setDate(nextEnd.getDate() + 6);
+
+    return { startYMD: formatYMD(nextStart), endYMD: formatYMD(nextEnd) };
+  }
+
+  return {
+    startYMD: formatYMD(currentStart),
+    endYMD: formatYMD(getEndOfWeekSaturday(now)),
+  };
+};
+
+// Back-compat alias for any external caller still expecting the old shape.
+export const getCurrentWeekBounds = () => getAllowedWeeklyDateRange("current");
+
+// Which allowed week (if any) a date belongs to right now — "current",
+// "next" (only meaningful while isNextWeekOpen()), or null if it's outside
+// every currently-bookable week (including simply being in the past).
+type WeekBucket = WeekChoice | null;
+
+const getWeekBucketForDate = (
+  cleanDate: string,
+  now: Date = getLocalNowInIsrael(),
+): WeekBucket => {
+  const todayYMD = formatYMD(now);
+  if (cleanDate < todayYMD) return null;
+
+  const currentRange = getAllowedWeeklyDateRange("current", now);
+  if (cleanDate >= currentRange.startYMD && cleanDate <= currentRange.endYMD) {
+    return "current";
+  }
+
+  if (isNextWeekOpen(now)) {
+    const nextRange = getAllowedWeeklyDateRange("next", now);
+    if (cleanDate >= nextRange.startYMD && cleanDate <= nextRange.endYMD) {
+      return "next";
+    }
+  }
+
+  return null;
+};
+
+// today-or-future (Israel-local) AND inside the given allowed week.
+export const isDateInAllowedWeek = (
+  dateText: string,
+  selectedWeek: WeekChoice = "current",
+  now: Date = getLocalNowInIsrael(),
+) => {
   const clean = normalizeDateToYMD(dateText);
   if (!clean) return false;
 
-  const { endYMD } = getCurrentWeekBounds();
-  return clean <= endYMD;
+  const { startYMD, endYMD } = getAllowedWeeklyDateRange(selectedWeek, now);
+  return clean >= startYMD && clean <= endYMD && clean >= formatYMD(now);
 };
+
+// Back-compat name — same as isDateInAllowedWeek(dateText, "current").
+export const isDateInCurrentWeek = (dateText: string) =>
+  isDateInAllowedWeek(dateText, "current");
 
 // ---------------------------------------------------------------------------
 // Day entry types
@@ -174,7 +276,41 @@ export const makeEmptyWeekDayRow = (defaultTime: string): WeekDayRow => ({
 
 // ---------------------------------------------------------------------------
 // Validation (mirrors driverHelpers' Alert-and-return-null pattern)
+//
+// This is the authoritative check before saving to Firestore — it never
+// trusts that the calendar UI already blocked an invalid date (item 8):
+// every row's date is independently re-checked against Israel-local "now"
+// and the two possible open weeks, and every row is required to land in the
+// SAME week bucket as the others.
 // ---------------------------------------------------------------------------
+
+// Parses "2026-07-04" / "04/07/2026" into a clean YYYY-MM-DD WITHOUT
+// rejecting past dates (unlike normalizeDateToYMD, which rejects past dates
+// using the DEVICE's timezone) — past/range rejection here is done
+// separately, using Israel-local "now" (getWeekBucketForDate).
+const parseAnyDateToYMD = (dateText: string): string | null => {
+  const parsed = parseDateInput(dateText);
+  return parsed ? formatDateToYMD(parsed) : null;
+};
+
+const isWeeklyTimeAvailable = (
+  dateYMD: string,
+  timeText: string,
+  now: Date = getLocalNowInIsrael(),
+): boolean => {
+  const cleanTime = normalizeTime(timeText);
+  if (!cleanTime) return false;
+
+  const todayYMD = formatYMD(now);
+  if (dateYMD < todayYMD) return false;
+  if (dateYMD > todayYMD) return true;
+
+  const [hours, minutes] = cleanTime.split(":").map(Number);
+  const selectedMinutes = hours * 60 + minutes;
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  return selectedMinutes > currentMinutes;
+};
 
 export const validateWeeklyRows = (
   rows: WeekDayRow[],
@@ -185,11 +321,13 @@ export const validateWeeklyRows = (
     return null;
   }
 
+  const now = getLocalNowInIsrael();
   const seenDates = new Set<string>();
   const cleaned: WeeklyDriverDay[] = [];
+  let lockedWeek: WeekChoice | null = null;
 
   for (const row of rows) {
-    const cleanDate = normalizeDateToYMD(row.date);
+    const cleanDate = parseAnyDateToYMD(row.date);
 
     if (!cleanDate) {
       Alert.alert(
@@ -199,13 +337,25 @@ export const validateWeeklyRows = (
       return null;
     }
 
-    if (!isDateInCurrentWeek(cleanDate)) {
+    const bucket = getWeekBucketForDate(cleanDate, now);
+
+    if (!bucket) {
       Alert.alert(
-        "Invalid date",
-        "Weekly booking only supports the current week (Sunday to Saturday). Please choose a date in this week.",
+        "Booking unavailable",
+        "Booking for this week is not available yet.",
       );
       return null;
     }
+
+    if (lockedWeek && bucket !== lockedWeek) {
+      Alert.alert(
+        "Different weeks",
+        "All selected days must belong to the same week.",
+      );
+      return null;
+    }
+
+    lockedWeek = bucket;
 
     if (seenDates.has(cleanDate)) {
       Alert.alert(
@@ -227,7 +377,7 @@ export const validateWeeklyRows = (
       return null;
     }
 
-    if (!isTimeAvailableForDate(cleanDate, cleanTime)) {
+    if (!isWeeklyTimeAvailable(cleanDate, cleanTime, now)) {
       Alert.alert(
         "Invalid time",
         "You cannot choose a time that already passed today.",
@@ -256,7 +406,7 @@ export const validateWeeklyRows = (
       }
     }
 
-    const dayKey = getDayKeyFromDate(cleanDate);
+    const dayKey = dayKeyFromAnyYMD(cleanDate);
 
     if (!dayKey) {
       Alert.alert("Invalid date", "Please choose a valid date for every day.");
@@ -434,6 +584,9 @@ export type CreateWeeklyBookingsInput = {
   routeId: string;
   from: string;
   to: string;
+  // "Use my current location" on the passenger booking form — optional,
+  // same GeoPoint shape used by the quick-booking path.
+  pickup?: GeoPoint | null;
 
   selectedDays: WeeklyDriverDay[];
   payment: WeeklyPayment;
@@ -476,6 +629,17 @@ export const createWeeklyBookings = async (
   const bookingGroupId = generateBookingGroupId();
   const routeRef = doc(db, "driverRoutes", input.routeId);
   const bookingRefs = input.selectedDays.map(() => doc(collection(db, "bookings")));
+
+  const cleanPickup =
+    input.pickup &&
+    typeof input.pickup.latitude === "number" &&
+    typeof input.pickup.longitude === "number"
+      ? {
+          latitude: input.pickup.latitude,
+          longitude: input.pickup.longitude,
+          address: input.pickup.address || "",
+        }
+      : null;
 
   const paymentFields =
     input.payment.method === "cash"
@@ -590,6 +754,24 @@ export const createWeeklyBookings = async (
         routeId: input.routeId,
         from: input.from || "",
         to: input.to || "",
+
+        // Same shape/fields as the quick-booking path (ride-payment.tsx).
+        // Never defaulted to `from`/`to` (the matching fields) — when no GPS
+        // pickup was captured on the form, these simply stay null and
+        // driver navigation falls back to the manual From address itself.
+        // The same pickup point (if any) is reused for every selected day —
+        // it is not re-detected or altered per day.
+        pickup: cleanPickup,
+        pickupCoords: cleanPickup
+          ? { latitude: cleanPickup.latitude, longitude: cleanPickup.longitude }
+          : null,
+        passengerPickupLocation: cleanPickup,
+        pickupAddress: cleanPickup?.address || null,
+        pickupLatitude: cleanPickup?.latitude ?? null,
+        pickupLongitude: cleanPickup?.longitude ?? null,
+        pickupLocation: cleanPickup
+          ? { latitude: cleanPickup.latitude, longitude: cleanPickup.longitude }
+          : null,
 
         dayKey: day.dayKey,
         dayName: day.dayName,

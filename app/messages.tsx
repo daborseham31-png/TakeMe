@@ -21,7 +21,13 @@ import {
 } from "react-native";
 
 import { auth, db } from "../firebase";
-import { ChatUser, hideConversation, openConversation, searchUsers } from "./chat/chatLib";
+import {
+  ChatUser,
+  clearAllConversations,
+  hideConversation,
+  openConversation,
+  searchUsers,
+} from "./chat/chatLib";
 
 type Conversation = {
   id: string;
@@ -57,6 +63,7 @@ export default function MessagesScreen() {
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [clearingAll, setClearingAll] = useState(false);
 
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<ChatUser[]>([]);
@@ -156,14 +163,49 @@ export default function MessagesScreen() {
     } as any);
 
   const onHide = (c: Conversation) =>
-    Alert.alert("Delete chat", "Remove this conversation from your list?", [
+    Alert.alert("Delete chat", "Delete this conversation from your list?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
-        onPress: () => hideConversation(c.id).catch(() => {}),
+        onPress: () => {
+          setConversations((prev) => prev.filter((item) => item.id !== c.id));
+          hideConversation(c.id).catch(() => {});
+        },
       },
     ]);
+
+  const handleClearAll = () => {
+    if (conversations.length === 0 || clearingAll) return;
+
+    Alert.alert(
+      "Clear all",
+      "Clear all messages from your list?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear All",
+          style: "destructive",
+          onPress: async () => {
+            const ids = conversations.map((c) => c.id);
+
+            setClearingAll(true);
+            setConversations((prev) =>
+              prev.filter((item) => !ids.includes(item.id)),
+            );
+
+            try {
+              await clearAllConversations(ids);
+            } catch (error: any) {
+              Alert.alert("Error", error?.message || "Could not clear all.");
+            } finally {
+              setClearingAll(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const showingSearch = search.trim().length > 0;
 
@@ -179,9 +221,19 @@ export default function MessagesScreen() {
           <Text style={styles.backText}>Back</Text>
         </Pressable>
 
-        <View style={styles.header}>
-          <Ionicons name="chatbubbles" size={26} color="#F58220" />
-          <Text style={styles.title}>Messages</Text>
+        <View style={styles.headerRow}>
+          <View style={styles.header}>
+            <Ionicons name="chatbubbles" size={26} color="#F58220" />
+            <Text style={styles.title}>Messages</Text>
+          </View>
+
+          {conversations.length > 0 ? (
+            <Pressable onPress={handleClearAll} disabled={clearingAll} hitSlop={8}>
+              <Text style={styles.clearAllText}>
+                {clearingAll ? "Clearing..." : "Clear All"}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
         <Text style={styles.subtitle}>Chat with drivers and passengers</Text>
 
@@ -246,38 +298,47 @@ export default function MessagesScreen() {
         ) : (
           <View style={styles.list}>
             {listContent.map((c) => (
-              <Pressable
-                key={c.id}
-                style={styles.row}
-                onPress={() => openExisting(c)}
-                onLongPress={() => onHide(c)}
-              >
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{initial(c.otherName)}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.rowTop}>
-                    <Text style={styles.rowName} numberOfLines={1}>
-                      {c.otherName}
-                    </Text>
-                    <Text style={styles.rowTime}>
-                      {formatTime(c.lastMessageAtSeconds)}
-                    </Text>
+              <View key={c.id} style={styles.row}>
+                <Pressable
+                  style={styles.rowMain}
+                  onPress={() => openExisting(c)}
+                  onLongPress={() => onHide(c)}
+                >
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>{initial(c.otherName)}</Text>
                   </View>
-                  <View style={styles.rowBottom}>
-                    <Text style={styles.rowLast} numberOfLines={1}>
-                      {c.lastMessage || "Say hi 👋"}
-                    </Text>
-                    {c.unread > 0 ? (
-                      <View style={styles.unreadBadge}>
-                        <Text style={styles.unreadText}>
-                          {c.unread > 99 ? "99+" : c.unread}
-                        </Text>
-                      </View>
-                    ) : null}
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.rowTop}>
+                      <Text style={styles.rowName} numberOfLines={1}>
+                        {c.otherName}
+                      </Text>
+                      <Text style={styles.rowTime}>
+                        {formatTime(c.lastMessageAtSeconds)}
+                      </Text>
+                    </View>
+                    <View style={styles.rowBottom}>
+                      <Text style={styles.rowLast} numberOfLines={1}>
+                        {c.lastMessage || "Say hi 👋"}
+                      </Text>
+                      {c.unread > 0 ? (
+                        <View style={styles.unreadBadge}>
+                          <Text style={styles.unreadText}>
+                            {c.unread > 99 ? "99+" : c.unread}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
                   </View>
-                </View>
-              </Pressable>
+                </Pressable>
+
+                <Pressable
+                  style={styles.rowDeleteButton}
+                  onPress={() => onHide(c)}
+                  hitSlop={8}
+                >
+                  <Ionicons name="trash-outline" size={18} color="#B91C1C" />
+                </Pressable>
+              </View>
             ))}
           </View>
         )}
@@ -296,8 +357,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   backText: { color: "#7C5F46", fontWeight: "800", fontSize: 15 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   header: { flexDirection: "row", alignItems: "center", gap: 10 },
   title: { fontSize: 28, fontWeight: "900", color: "#111827" },
+  clearAllText: { color: "#F58220", fontWeight: "900", fontSize: 14 },
   subtitle: {
     color: "#7C5F46",
     fontSize: 14,
@@ -353,6 +420,18 @@ const styles = StyleSheet.create({
     borderColor: "#E7DCD1",
     borderRadius: 16,
     padding: 14,
+  },
+  rowMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  rowDeleteButton: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
   },
   avatar: {
     width: 48,

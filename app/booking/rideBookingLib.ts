@@ -332,7 +332,16 @@ export const submitRideRating = async (
 ) => {
   const cleanComment = comment.trim();
 
-  if (!booking.driverId) {
+  // driverId must be the driver's real Firebase UID — never this booking's
+  // own id or its routeId. Treat a suspicious value the same as "no
+  // driver": still save the passenger's rating on the booking, just skip
+  // creating a driverReviews doc / crediting the wrong profile.
+  const hasValidDriverId =
+    !!booking.driverId &&
+    booking.driverId !== bookingId &&
+    booking.driverId !== booking.routeId;
+
+  if (!hasValidDriverId) {
     await updateDoc(doc(db, "bookings", bookingId), {
       rating,
       reviewComment: cleanComment || null,

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,12 +14,8 @@ import {
 } from "react-native";
 
 import { db } from "../../../../firebase";
-
-type Comment = {
-  user: string;
-  text: string;
-  stars: number;
-};
+import DriverReviewsSection from "../../DriverReviewsSection";
+import { getDisplayedDriverId } from "../../driverReviewsLib";
 
 type Driver = {
   id: string;
@@ -41,7 +37,6 @@ type Driver = {
   day: string;
   location: string;
   seats: number;
-  comments: Comment[];
 };
 
 const LANGUAGES_MAP: Record<string, string> = {
@@ -84,7 +79,6 @@ const isTodayOrFuture = (dateText: string) => {
 export default function ErrandsScreen() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedDriver, setExpandedDriver] = useState<string | null>(null);
 
   useEffect(() => {
     loadErrands();
@@ -96,9 +90,30 @@ export default function ErrandsScreen() {
 
       const snapshot = await getDocs(collection(db, "errandJobs"));
 
-      const errandsList: Driver[] = snapshot.docs
-        .map((docSnap): Driver => {
+      // The owner's rating is their overall driverReviews-backed rating
+      // (users/{ownerId}.ratingAverage/ratingCount) — the SAME number shown
+      // for School/Personal/Work — never a value cached on the errand
+      // listing itself, so it stays correct after every future rating.
+      const errandsList: Driver[] = await Promise.all(
+        snapshot.docs.map(async (docSnap): Promise<Driver> => {
           const data = docSnap.data();
+
+          let ratingAverage = 0;
+          let ratingCount = 0;
+
+          if (data.ownerId) {
+            try {
+              const profileSnap = await getDoc(doc(db, "users", data.ownerId));
+
+              if (profileSnap.exists()) {
+                const profile = profileSnap.data();
+                ratingAverage = Number(profile.ratingAverage) || 0;
+                ratingCount = Number(profile.ratingCount) || 0;
+              }
+            } catch {
+              // Keep 0/0 -> renders as "New driver" below.
+            }
+          }
 
           return {
             id: docSnap.id,
@@ -112,8 +127,8 @@ export default function ErrandsScreen() {
             allowsPets: data.allowsPets === true,
             canTakeKids: data.canTakeKids === true,
 
-            rating: Number(data.rating || 4.8),
-            reviews: Number(data.reviews || 0),
+            rating: ratingAverage,
+            reviews: ratingCount,
 
             price: Number(data.price || 0),
 
@@ -128,10 +143,11 @@ export default function ErrandsScreen() {
 
             location: data.location || "",
             seats: Number(data.seats || 1),
-
-            comments: Array.isArray(data.comments) ? data.comments : [],
           };
-        })
+        }),
+      );
+
+      const filteredErrands = errandsList
         .filter((driver) => isTodayOrFuture(driver.date))
         .sort((a, b) => {
           if (a.date === b.date) {
@@ -141,7 +157,7 @@ export default function ErrandsScreen() {
           return a.date.localeCompare(b.date);
         });
 
-      setDrivers(errandsList);
+      setDrivers(filteredErrands);
     } catch (error: any) {
       console.log("Load errands error:", error.message);
       Alert.alert("Error", "Could not load errands.");
@@ -199,8 +215,6 @@ export default function ErrandsScreen() {
         ) : (
           <View style={styles.list}>
             {drivers.map((driver) => {
-              const isExpanded = expandedDriver === driver.id;
-
               return (
                 <View key={driver.id} style={styles.card}>
                   <View style={styles.header}>
@@ -236,8 +250,18 @@ export default function ErrandsScreen() {
 
                     <View style={styles.ratingBox}>
                       <Ionicons name="star" size={17} color="#B45309" />
-                      <Text style={styles.ratingText}>{driver.rating}</Text>
-                      <Text style={styles.reviewsText}>({driver.reviews})</Text>
+                      {driver.reviews > 0 ? (
+                        <>
+                          <Text style={styles.ratingText}>
+                            {driver.rating.toFixed(1)}
+                          </Text>
+                          <Text style={styles.reviewsText}>
+                            ({driver.reviews})
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={styles.reviewsText}>New driver</Text>
+                      )}
                     </View>
                   </View>
 
@@ -392,68 +416,10 @@ export default function ErrandsScreen() {
 
                   <View style={styles.divider} />
 
-                  <Pressable
-                    style={styles.commentsButton}
-                    onPress={() =>
-                      setExpandedDriver(isExpanded ? null : driver.id)
-                    }
-                  >
-                    <View style={styles.commentsLeft}>
-                      <Ionicons
-                        name="chatbubble-ellipses-outline"
-                        size={18}
-                        color="#F58220"
-                      />
-
-                      <Text style={styles.commentsText}>
-                        Comments ({driver.comments.length})
-                      </Text>
-                    </View>
-
-                    <Ionicons
-                      name={isExpanded ? "chevron-up" : "chevron-down"}
-                      size={20}
-                      color="#7A5C4B"
-                    />
-                  </Pressable>
-
-                  {isExpanded && (
-                    <View style={styles.commentsBox}>
-                      {driver.comments.length === 0 ? (
-                        <View style={styles.noCommentsRow}>
-                          <View style={styles.noCommentsIcon}>
-                            <Ionicons
-                              name="chatbox-outline"
-                              size={18}
-                              color="#7A5C4B"
-                            />
-                          </View>
-
-                          <Text style={styles.commentText}>
-                            No comments yet.
-                          </Text>
-                        </View>
-                      ) : (
-                        driver.comments.map((comment, index) => (
-                          <View key={index} style={styles.commentItem}>
-                            <View style={styles.commentHeader}>
-                              <Text style={styles.commentUser}>
-                                {comment.user}
-                              </Text>
-
-                              <Text style={styles.commentStars}>
-                                {"★".repeat(comment.stars)}
-                              </Text>
-                            </View>
-
-                            <Text style={styles.commentText}>
-                              {comment.text}
-                            </Text>
-                          </View>
-                        ))
-                      )}
-                    </View>
-                  )}
+                  <DriverReviewsSection
+                    driverId={getDisplayedDriverId(driver)}
+                    reviewCountHint={driver.reviews}
+                  />
 
                   <Pressable
                     style={styles.bookButton}
@@ -773,63 +739,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "#F0E5DC",
     marginBottom: 14,
-  },
-  commentsButton: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 14,
-  },
-  commentsLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-  },
-  commentsText: {
-    color: "#3C2319",
-    fontSize: 15,
-    fontWeight: "900",
-  },
-  commentsBox: {
-    backgroundColor: "#F8F4EF",
-    borderRadius: 16,
-    padding: 13,
-    marginBottom: 16,
-    gap: 10,
-  },
-  noCommentsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  noCommentsIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#EFE6DD",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  commentItem: {
-    gap: 4,
-  },
-  commentHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  commentUser: {
-    fontSize: 14,
-    fontWeight: "900",
-    color: "#111827",
-  },
-  commentStars: {
-    fontSize: 12,
-    color: "#F58220",
-  },
-  commentText: {
-    fontSize: 14,
-    color: "#7A5C4B",
   },
   bookButton: {
     backgroundColor: "#F58220",

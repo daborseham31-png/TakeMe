@@ -34,6 +34,7 @@ type JobListing = {
   dayEn: string;
   date: string;
   workersNeeded: number;
+  remainingSeats: number;
   locationEn: string;
   rating: number;
   ratingCount: number;
@@ -54,6 +55,7 @@ const defaultJob: JobListing = {
   dayEn: "",
   date: "",
   workersNeeded: 1,
+  remainingSeats: 1,
   locationEn: "",
   rating: 4.8,
   ratingCount: 0,
@@ -194,7 +196,16 @@ export default function WorkApplyScreen() {
 
               <View style={styles.ratingBox}>
                 <Ionicons name="star" size={17} color="#F58220" />
-                <Text style={styles.ratingText}>{job.rating}</Text>
+                {job.ratingCount > 0 ? (
+                  <>
+                    <Text style={styles.ratingText}>
+                      {job.rating.toFixed(1)}
+                    </Text>
+                    <Text style={styles.ratingText}>({job.ratingCount})</Text>
+                  </>
+                ) : (
+                  <Text style={styles.ratingText}>New driver</Text>
+                )}
               </View>
             </View>
 
@@ -228,7 +239,20 @@ export default function WorkApplyScreen() {
                 <View style={styles.detail}>
                   <Ionicons name="people-outline" size={15} color="#7A665C" />
                   <Text style={styles.detailText}>
-                    {job.workersNeeded} workers
+                    Workers needed: {job.workersNeeded}
+                  </Text>
+                </View>
+              ) : null}
+
+              {typeof job.remainingSeats === "number" ? (
+                <View style={styles.detail}>
+                  <Ionicons
+                    name="checkmark-done-outline"
+                    size={15}
+                    color="#7A665C"
+                  />
+                  <Text style={styles.detailText}>
+                    Places remaining: {job.remainingSeats}
                   </Text>
                 </View>
               ) : null}

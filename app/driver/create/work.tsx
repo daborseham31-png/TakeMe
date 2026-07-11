@@ -177,7 +177,21 @@ export default function WorkJobScreen() {
         endTime: cleanEndTime,
 
         hourlyPay: cleanHourlyPay,
+
+        // "workersNeeded" is kept for existing readers; seats/totalSeats are
+        // aliases of the same number. remainingSeats is the only one that
+        // ever changes after creation — see acceptRequest/cancelApplication
+        // in workErrandLib.ts. A pending request never touches this; only
+        // an accepted worker (or a later cancellation) does.
         workersNeeded: cleanWorkersNeeded,
+        seats: cleanWorkersNeeded,
+        totalSeats: cleanWorkersNeeded,
+        remainingSeats: cleanWorkersNeeded,
+        acceptedWorkersCount: 0,
+
+        status: "available",
+        available: true,
+        isFull: false,
 
         rating: 4.8,
         reviews: 0,
@@ -186,6 +200,7 @@ export default function WorkJobScreen() {
         category: "workErrands",
 
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
 
       Alert.alert("Success", "Your work job was created successfully.");

@@ -12,6 +12,10 @@ import {
   View,
 } from "react-native";
 
+import CurrentLocationButton, {
+  CurrentLocationResult,
+} from "../booking/CurrentLocationButton";
+import { validateWeeklyRows, WeekDayRow } from "../booking/weeklyBookingLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
 import {
   getDayFromDateText,
@@ -20,7 +24,6 @@ import {
   styles as weeklyStyles,
 } from "../driver/create/driverHelpers";
 import WeeklyDaysCard from "../driver/create/WeeklyDaysCard";
-import { validateWeeklyRows, WeekDayRow } from "../booking/weeklyBookingLib";
 
 const LANGUAGES_LIST = [
   { key: "ar", label: "العربية" },
@@ -72,8 +75,20 @@ const isTimeAvailableForDate = (dateText: string, timeText: string) => {
 };
 
 export default function PersonalRideScreen() {
+  // Manual matching field ("Nazareth") — this is what driver search compares
+  // against driver.from/driver.to. It is NEVER auto-filled with an exact GPS
+  // address, and using "Use my current location" below never touches it.
   const [fromLocation, setFromLocation] = useState("");
   const [toLocation, setToLocation] = useState("");
+
+  // Separate "pickup location for driver navigation" — an exact GPS point
+  // (+ readable address) used ONLY so the driver can navigate to the
+  // passenger. Never sent to driver matching, never written into `from`.
+  const [navAddress, setNavAddress] = useState("");
+  const [navCoords, setNavCoords] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
 
   const [tripDate, setTripDate] = useState(getTodayDate());
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
@@ -109,6 +124,11 @@ export default function PersonalRideScreen() {
     }
   };
 
+  const handleUseCurrentLocation = (result: CurrentLocationResult) => {
+    setNavAddress(result.address);
+    setNavCoords({ latitude: result.latitude, longitude: result.longitude });
+  };
+
   const decreaseSeats = () => {
     setSeats((prev) => Math.max(1, prev - 1));
   };
@@ -125,10 +145,21 @@ export default function PersonalRideScreen() {
 
     const baseParams: Record<string, string> = {
       category: "personal",
+      // Manual matching fields only — driver search compares these, never
+      // the GPS pickup point below.
       from: fromLocation.trim(),
       to: toLocation.trim(),
       genderPref,
       languages: selectedLanguages.join(","),
+      // Separate navigation-only pickup point (optional) — passed through
+      // untouched to ride-payment/the booking doc, never used for matching.
+      ...(navCoords
+        ? {
+            pickupLatitude: String(navCoords.latitude),
+            pickupLongitude: String(navCoords.longitude),
+            pickupAddress: navAddress,
+          }
+        : {}),
     };
 
     if (weeklyBooking) {
@@ -254,6 +285,23 @@ export default function PersonalRideScreen() {
                 />
               </View>
             </View>
+          </View>
+
+          <View style={styles.navPickupBox}>
+            <Text style={styles.label}>Pickup location for driver navigation</Text>
+            <Text style={styles.navPickupHint}>
+              Optional — used only to guide your driver to your exact spot.
+              Does not affect which drivers you see.
+            </Text>
+
+            <CurrentLocationButton onLocated={handleUseCurrentLocation} />
+
+            {navAddress ? (
+              <View style={styles.navPickupResult}>
+                <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
+                <Text style={styles.navPickupSavedText}>Location saved</Text>
+              </View>
+            ) : null}
           </View>
 
           {!weeklyBooking && (
@@ -497,6 +545,37 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 8,
     color: "#111827",
+  },
+  navPickupBox: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#F0E5DC",
+  },
+  navPickupHint: {
+    fontSize: 12,
+    color: "#7C5F46",
+    marginTop: -4,
+    marginBottom: 4,
+  },
+  navPickupResult: {
+    marginTop: 10,
+    backgroundColor: "#F1FBF4",
+    borderWidth: 1,
+    borderColor: "#BBE7C6",
+    borderRadius: 10,
+    padding: 10,
+  },
+  navPickupResultText: {
+    color: "#111827",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  navPickupSavedText: {
+    color: "#166534",
+    fontWeight: "900",
+    fontSize: 12,
+    marginTop: 2,
   },
   seatsRow: {
     flexDirection: "row",

@@ -30,11 +30,7 @@ import {
   WeeklyDriverDay,
   WeeklyRequestDay,
 } from "./weeklyBookingLib";
-import {
-  detectCurrentLocation,
-  GeoPoint,
-  notify,
-} from "./work-errand/workErrandLib";
+import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
 type Method = "cash" | "card" | null;
 
@@ -73,8 +69,22 @@ export default function RidePaymentScreen() {
   const seats = num(params.seats);
   const price = num(params.price);
 
-  const presetLat = num(params.fromLat);
-  const presetLng = num(params.fromLng);
+  // "Pickup location for driver navigation" — a SEPARATE, optional GPS point
+  // from the booking form. Never used for driver matching (that already
+  // happened, using from/to text, before this screen). Only ever used to
+  // help the driver navigate to the passenger later.
+  const presetPickupLat = num(params.pickupLatitude);
+  const presetPickupLng = num(params.pickupLongitude);
+  const presetPickupAddress = String(params.pickupAddress || "");
+
+  const presetPickup: GeoPoint | null =
+    presetPickupLat !== null && presetPickupLng !== null
+      ? {
+          latitude: presetPickupLat,
+          longitude: presetPickupLng,
+          address: presetPickupAddress,
+        }
+      : null;
 
   const bookingType = String(params.bookingType || "quick");
   const isWeekly = bookingType === "weekly";
@@ -116,17 +126,11 @@ export default function RidePaymentScreen() {
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
 
-  const resolvePickup = async (): Promise<GeoPoint | null> => {
-    if (presetLat !== null && presetLng !== null) {
-      return { latitude: presetLat, longitude: presetLng, address: from };
-    }
-
-    try {
-      return await detectCurrentLocation();
-    } catch {
-      return null;
-    }
-  };
+  // Pickup GPS is optional — if the passenger never pressed "Use my current
+  // location" on the booking form, there is no preset pickup, and none is
+  // silently captured here either. Driver navigation then falls back to the
+  // manual From address (see driver/ride-navigation.tsx).
+  const resolvePickup = async (): Promise<GeoPoint | null> => presetPickup;
 
   const getPassengerProfile = async () => {
     const user = auth.currentUser;
@@ -240,6 +244,8 @@ const createBookingAfterPayment = async (
       seats: seats ?? null,
       price: price ?? null,
 
+      // Existing fields — already read by driver navigation / live tracking
+      // (app/driver/ride-navigation.tsx, app/booking/live-tracking.tsx).
       pickup: cleanPickup,
       pickupCoords: cleanPickup
         ? {
@@ -248,6 +254,17 @@ const createBookingAfterPayment = async (
           }
         : null,
       passengerPickupLocation: cleanPickup,
+
+      // Same data, explicit field names. This is the SEPARATE navigation
+      // pickup point — never defaulted to `from` (the matching field): when
+      // no GPS pickup was captured, these simply stay null and driver
+      // navigation falls back to the manual From address itself.
+      pickupAddress: cleanPickup?.address || null,
+      pickupLatitude: cleanPickup?.latitude ?? null,
+      pickupLongitude: cleanPickup?.longitude ?? null,
+      pickupLocation: cleanPickup
+        ? { latitude: cleanPickup.latitude, longitude: cleanPickup.longitude }
+        : null,
 
       ...paymentFields,
 
@@ -367,6 +384,7 @@ const createBookingAfterPayment = async (
           routeId,
           from,
           to,
+          pickup: presetPickup,
 
           selectedDays: selectedWeeklyDays,
           payment,
