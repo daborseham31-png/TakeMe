@@ -223,7 +223,7 @@ export default function StoreDeliveryScreen() {
 
             <TextInput
               style={styles.input}
-              placeholder="e.g. Rami Levy, Super Pharm..."
+              placeholder="Enter the store name"
               placeholderTextColor="#8B7B6B"
               value={store.name}
               onChangeText={(text) => updateStore(store.id, "name", text)}
@@ -236,7 +236,7 @@ export default function StoreDeliveryScreen() {
 
             <TextInput
               style={styles.textArea}
-              placeholder={"List the items you need, e.g.:\n- 2L milk\n- Bread\n- Paracetamol"}
+              placeholder="List the items you need"
               placeholderTextColor="#8B7B6B"
               multiline
               numberOfLines={4}

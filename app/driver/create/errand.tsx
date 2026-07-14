@@ -217,7 +217,7 @@ export default function ErrandJobScreen() {
           <Text style={styles.label}>Errand Title</Text>
           <TextInput
             style={styles.input}
-            placeholder="e.g. Shopping at Big Mall"
+            placeholder="Enter errand title"
             placeholderTextColor="#8B7B6B"
             value={errandTitle}
             onChangeText={setErrandTitle}
@@ -238,7 +238,7 @@ export default function ErrandJobScreen() {
             <Ionicons name="location-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Nazareth"
+              placeholder="Enter errand location"
               placeholderTextColor="#8B7B6B"
               value={errandLocation}
               onChangeText={setErrandLocation}
@@ -294,7 +294,7 @@ export default function ErrandJobScreen() {
                 <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="20"
+                  placeholder="Enter price"
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   value={errandPrice}
@@ -309,7 +309,7 @@ export default function ErrandJobScreen() {
                 <Ionicons name="people-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="3"
+                  placeholder="Enter available seats"
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   maxLength={1}

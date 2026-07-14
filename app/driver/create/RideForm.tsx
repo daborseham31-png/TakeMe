@@ -26,6 +26,7 @@ import YesNoField from "./YesNoField";
 import {
   getDayFromDateText,
   getDigitsOnly,
+  isValidCarPlate,
   normalize,
   normalizeDateToYMD,
   styles,
@@ -120,6 +121,14 @@ export default function RideForm({ category, showPets, onBack }: Props) {
       (!recurring && (!tripDate || !price || !time || !seats))
     ) {
       Alert.alert("Missing details", "Please fill in all fields.");
+      return;
+    }
+
+    if (!isValidCarPlate(carPlate)) {
+      Alert.alert(
+        "Invalid vehicle number",
+        "Vehicle number must contain between 7 and 9 digits.",
+      );
       return;
     }
 
@@ -284,7 +293,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             <Ionicons name="car-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Toyota Corolla 2022"
+              placeholder="Enter your car model"
               placeholderTextColor="#8B7B6B"
               value={car}
               onChangeText={setCar}
@@ -296,7 +305,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. White / Black / Silver"
+              placeholder="Enter your car color"
               placeholderTextColor="#8B7B6B"
               value={carColor}
               onChangeText={setCarColor}
@@ -308,10 +317,11 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. 1234567"
+              placeholder="Enter your car plate number"
               placeholderTextColor="#8B7B6B"
+              keyboardType="number-pad"
               value={carPlate}
-              onChangeText={setCarPlate}
+              onChangeText={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
             />
           </View>
 
@@ -328,7 +338,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             <Ionicons name="location-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Nazareth"
+              placeholder="Enter departure city"
               placeholderTextColor="#8B7B6B"
               value={from}
               onChangeText={setFrom}
@@ -340,7 +350,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             <Ionicons name="location-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Mashhad"
+              placeholder="Enter destination city"
               placeholderTextColor="#8B7B6B"
               value={to}
               onChangeText={setTo}
@@ -381,7 +391,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
                     <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
                     <TextInput
                       style={styles.rowInput}
-                      placeholder="₪"
+                      placeholder="Enter price"
                       placeholderTextColor="#8B7B6B"
                       keyboardType="numeric"
                       value={price}
@@ -396,7 +406,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
                     <Ionicons name="people-outline" size={18} color="#8B7B6B" />
                     <TextInput
                       style={styles.rowInput}
-                      placeholder="1"
+                      placeholder="Enter available seats"
                       placeholderTextColor="#8B7B6B"
                       keyboardType="numeric"
                       maxLength={1}

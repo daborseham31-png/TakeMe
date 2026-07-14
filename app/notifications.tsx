@@ -81,6 +81,7 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
   roadside_driver_on_way: "navigate-outline",
   roadside_payment_required: "card-outline",
   roadside_payment_received: "cash-outline",
+  roadside_rating_required: "star-outline",
 };
 
 export default function NotificationsScreen() {
@@ -172,6 +173,7 @@ export default function NotificationsScreen() {
       "ride_arrived",
       "ride_trip_completed",
       "roadside_driver_on_way",
+      "roadside_rating_required",
     ];
 
     if (passengerTypes.includes(n.type || "")) {

@@ -17,6 +17,7 @@ import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
 import {
   getDigitsOnly,
+  isValidCarPlate,
   normalize,
   styles,
   useDriverAccount,
@@ -153,6 +154,14 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
       return;
     }
 
+    if (!isValidCarPlate(carPlate)) {
+      Alert.alert(
+        "Invalid vehicle number",
+        "Vehicle number must contain between 7 and 9 digits.",
+      );
+      return;
+    }
+
     const dateTimeValidation = validateDateAndTimeNotPassed(
       deliveryDate,
       time,
@@ -253,7 +262,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="car-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Toyota Corolla 2022"
+              placeholder="Enter your car model"
               placeholderTextColor="#8B7B6B"
               value={car}
               onChangeText={setCar}
@@ -265,7 +274,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. White / Black / Silver"
+              placeholder="Enter your car color"
               placeholderTextColor="#8B7B6B"
               value={carColor}
               onChangeText={setCarColor}
@@ -277,10 +286,11 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. 1234567"
+              placeholder="Enter your car plate number"
               placeholderTextColor="#8B7B6B"
+              keyboardType="number-pad"
               value={carPlate}
-              onChangeText={setCarPlate}
+              onChangeText={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
             />
           </View>
 
@@ -289,7 +299,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="location-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Nazareth"
+              placeholder="Enter departure city"
               placeholderTextColor="#8B7B6B"
               value={from}
               onChangeText={setFrom}
@@ -301,7 +311,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="location-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Mashhad"
+              placeholder="Enter destination city"
               placeholderTextColor="#8B7B6B"
               value={to}
               onChangeText={setTo}
@@ -329,7 +339,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="call-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="05XXXXXXXX"
+              placeholder="Enter recipient's phone number"
               placeholderTextColor="#8B7B6B"
               keyboardType="numeric"
               maxLength={10}
@@ -353,7 +363,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="₪"
+              placeholder="Enter price"
               placeholderTextColor="#8B7B6B"
               keyboardType="numeric"
               value={price}
@@ -441,6 +451,14 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
       !time
     ) {
       Alert.alert("Missing details", "Please fill in all fields.");
+      return;
+    }
+
+    if (!isValidCarPlate(carPlate)) {
+      Alert.alert(
+        "Invalid vehicle number",
+        "Vehicle number must contain between 7 and 9 digits.",
+      );
       return;
     }
 
@@ -536,7 +554,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="car-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Toyota Corolla 2022"
+              placeholder="Enter your car model"
               placeholderTextColor="#8B7B6B"
               value={car}
               onChangeText={setCar}
@@ -548,7 +566,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. White / Black / Silver"
+              placeholder="Enter your car color"
               placeholderTextColor="#8B7B6B"
               value={carColor}
               onChangeText={setCarColor}
@@ -560,10 +578,11 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. 1234567"
+              placeholder="Enter your car plate number"
               placeholderTextColor="#8B7B6B"
+              keyboardType="number-pad"
               value={carPlate}
-              onChangeText={setCarPlate}
+              onChangeText={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
             />
           </View>
 
@@ -572,7 +591,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="location-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Nazareth"
+              placeholder="Enter departure city"
               placeholderTextColor="#8B7B6B"
               value={from}
               onChangeText={setFrom}
@@ -584,7 +603,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="location-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Mashhad"
+              placeholder="Enter destination city"
               placeholderTextColor="#8B7B6B"
               value={to}
               onChangeText={setTo}
@@ -596,7 +615,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="storefront-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Big Mall"
+              placeholder="Enter store name"
               placeholderTextColor="#8B7B6B"
               value={storeName}
               onChangeText={setStoreName}
@@ -624,7 +643,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="₪"
+              placeholder="Enter price"
               placeholderTextColor="#8B7B6B"
               keyboardType="numeric"
               value={price}

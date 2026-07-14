@@ -565,7 +565,8 @@ export const rejectRequest = async (
 
 export type PaymentInput =
   | { method: "cash" }
-  | { method: "card"; cardLast4: string };
+  | { method: "card"; cardLast4: string }
+  | { method: "bit" };
 
 export const confirmPayment = async (
   kind: WorkErrandKind,
@@ -580,12 +581,18 @@ export const confirmPayment = async (
           paymentStatus: "cash_selected",
           cardLast4: null,
         }
-      : {
-          paymentMethod: "card",
-          paymentStatus: "mock_paid",
-          // Only the last 4 digits are ever stored.
-          cardLast4: payment.cardLast4.slice(-4),
-        };
+      : payment.method === "bit"
+        ? {
+            paymentMethod: "bit",
+            paymentStatus: "mock_paid",
+            cardLast4: null,
+          }
+        : {
+            paymentMethod: "card",
+            paymentStatus: "mock_paid",
+            // Only the last 4 digits are ever stored.
+            cardLast4: payment.cardLast4.slice(-4),
+          };
 
   await updateDoc(doc(db, COLLECTION[kind], id), {
     ...fields,
@@ -720,7 +727,8 @@ export const finishJob = async (
 
 export type WorkPaymentInput =
   | { method: "cash" }
-  | { method: "card"; cardLast4: string };
+  | { method: "card"; cardLast4: string }
+  | { method: "bit" };
 
 export const payCompletedWork = async (
   bookingId: string,
@@ -738,11 +746,13 @@ export const payCompletedWork = async (
   const paymentFields =
     payment.method === "cash"
       ? { paymentMethod: "cash", cardLast4: null }
-      : {
-          paymentMethod: "card",
-          // Only the last 4 digits are ever stored.
-          cardLast4: payment.cardLast4.slice(-4),
-        };
+      : payment.method === "bit"
+        ? { paymentMethod: "bit", cardLast4: null }
+        : {
+            paymentMethod: "card",
+            // Only the last 4 digits are ever stored.
+            cardLast4: payment.cardLast4.slice(-4),
+          };
 
   let applicantId = "";
   let jobTitle = "the job";

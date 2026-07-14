@@ -66,14 +66,28 @@ export default function RoadsideHelpScreen() {
 
   const [problemTypes, setProblemTypes] = useState<string[]>([]);
   const [description, setDescription] = useState("");
+  const [descriptionError, setDescriptionError] = useState("");
   const [locating, setLocating] = useState(true);
   const [address, setAddress] = useState("");
   const [sending, setSending] = useState(false);
 
+  // "Other" is the one problem type that requires a description — every
+  // other type keeps it optional.
+  const isOther = problemTypes.includes("other");
+
   const toggleProblem = (key: string) => {
-    setProblemTypes((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
-    );
+    setProblemTypes((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+
+      // Switching away from "Other" means a description is no longer
+      // required — clear any leftover error, but keep whatever text the
+      // user already typed.
+      if (!next.includes("other")) {
+        setDescriptionError("");
+      }
+
+      return next;
+    });
   };
 
   const coordsLabel = `${marker.latitude.toFixed(5)}, ${marker.longitude.toFixed(
@@ -148,6 +162,16 @@ export default function RoadsideHelpScreen() {
       return;
     }
 
+    const trimmedDescription = description.trim();
+
+    if (isOther && !trimmedDescription) {
+      setDescriptionError("Please describe the help you need.");
+      Alert.alert("Description required", "Please describe the help you need.");
+      return;
+    }
+
+    setDescriptionError("");
+
     if (sending) return;
 
     const problemTitles = PROBLEMS.filter((p) => problemTypes.includes(p.key)).map(
@@ -162,7 +186,7 @@ export default function RoadsideHelpScreen() {
       const { requestId, matchedCount } = await createRoadsideRequest({
         problemKeys: problemTypes,
         problemTitles,
-        description: description.trim(),
+        description: trimmedDescription,
         location: {
           latitude: marker.latitude,
           longitude: marker.longitude,
@@ -285,26 +309,41 @@ export default function RoadsideHelpScreen() {
 
         {/* Description */}
         <View style={styles.card}>
-          <Text style={styles.label}>Describe the problem</Text>
+          <Text style={styles.label}>
+            Describe the problem{isOther ? " *" : ""}
+          </Text>
           <TextInput
             style={styles.textArea}
-            placeholder="e.g. Front left tire is flat, need spare..."
+            placeholder={
+              isOther ? "Describe the help you need" : "Describe the problem"
+            }
             placeholderTextColor="#8B7B6B"
             multiline
             numberOfLines={4}
             textAlignVertical="top"
             value={description}
-            onChangeText={setDescription}
+            onChangeText={(text) => {
+              setDescription(text);
+              if (descriptionError && text.trim()) {
+                setDescriptionError("");
+              }
+            }}
           />
+          {descriptionError ? (
+            <Text style={styles.fieldError}>{descriptionError}</Text>
+          ) : null}
         </View>
 
         <Pressable
           style={[
             styles.searchButton,
-            (problemTypes.length === 0 || sending) && styles.searchButtonDisabled,
+            (problemTypes.length === 0 ||
+              sending ||
+              (isOther && !description.trim())) &&
+              styles.searchButtonDisabled,
           ]}
           onPress={handleFindHelp}
-          disabled={problemTypes.length === 0 || sending}
+          disabled={problemTypes.length === 0 || sending || (isOther && !description.trim())}
         >
           {sending ? (
             <ActivityIndicator color="#FFFFFF" />
@@ -455,6 +494,12 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#111827",
     marginBottom: 4,
+  },
+  fieldError: {
+    color: "#B91C1C",
+    fontWeight: "700",
+    fontSize: 12.5,
+    marginTop: 8,
   },
   textArea: {
     borderWidth: 1,

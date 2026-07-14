@@ -230,7 +230,7 @@ export default function WorkJobScreen() {
           <Text style={styles.label}>Job Title</Text>
           <TextInput
             style={styles.input}
-            placeholder="e.g. Carpenter, Painter, Cleaner"
+            placeholder="Enter job title"
             placeholderTextColor="#8B7B6B"
             value={jobTitle}
             onChangeText={setJobTitle}
@@ -251,7 +251,7 @@ export default function WorkJobScreen() {
             <Ionicons name="location-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Nazareth"
+              placeholder="Enter work location"
               placeholderTextColor="#8B7B6B"
               value={jobLocation}
               onChangeText={setJobLocation}
@@ -308,7 +308,7 @@ export default function WorkJobScreen() {
                 <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="80"
+                  placeholder="Enter hourly pay"
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   value={hourlyPay}
@@ -324,7 +324,7 @@ export default function WorkJobScreen() {
                 <Ionicons name="people-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="2"
+                  placeholder="Enter workers needed"
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   maxLength={2}

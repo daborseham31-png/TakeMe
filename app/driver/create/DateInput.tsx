@@ -73,7 +73,7 @@ export default function DateInput({
 
         <TextInput
           style={styles.rowInput}
-          placeholder="2026-07-04 or 04/07/2026"
+          placeholder={`Select ${label.toLowerCase()}`}
           placeholderTextColor="#8B7B6B"
           keyboardType="numbers-and-punctuation"
           maxLength={10}
@@ -355,7 +355,7 @@ export function TimeInput({
         <Ionicons name="time-outline" size={18} color="#8B7B6B" />
 
         <Text style={[styles.rowInput, !value && { color: "#8B7B6B" }]}>
-          {value || "Select time"}
+          {value || `Select ${label.toLowerCase()}`}
         </Text>
       </Pressable>
 

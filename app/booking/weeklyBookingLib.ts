@@ -568,7 +568,8 @@ export const computeWeeklyTotal = (
 
 export type WeeklyPayment =
   | { method: "cash" }
-  | { method: "card"; cardLast4: string };
+  | { method: "card"; cardLast4: string }
+  | { method: "bit" };
 
 export type CreateWeeklyBookingsInput = {
   category: "school" | "personal";
@@ -644,11 +645,13 @@ export const createWeeklyBookings = async (
   const paymentFields =
     input.payment.method === "cash"
       ? { paymentMethod: "cash", paymentStatus: "cash_pending", cardLast4: null }
-      : {
-          paymentMethod: "card",
-          paymentStatus: "mock_paid",
-          cardLast4: input.payment.cardLast4.slice(-4),
-        };
+      : input.payment.method === "bit"
+        ? { paymentMethod: "bit", paymentStatus: "mock_paid", cardLast4: null }
+        : {
+            paymentMethod: "card",
+            paymentStatus: "mock_paid",
+            cardLast4: input.payment.cardLast4.slice(-4),
+          };
 
   await runTransaction(db, async (transaction) => {
     const routeSnap = await transaction.get(routeRef);

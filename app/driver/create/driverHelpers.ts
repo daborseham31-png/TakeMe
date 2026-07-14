@@ -30,6 +30,10 @@ export const getDigitsOnly = (value: string) => {
   return value.replace(/\D/g, "");
 };
 
+// Vehicle/car plate number: digits only, 7-9 digits (matches the same rule
+// enforced at Sign Up for the driver's vehicle number).
+export const isValidCarPlate = (value: string) => /^\d{7,9}$/.test(value);
+
 export const normalizePhoneFromAccount = (value: any) => {
   const digits = String(value || "").replace(/\D/g, "");
 

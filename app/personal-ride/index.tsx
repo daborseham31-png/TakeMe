@@ -264,7 +264,7 @@ export default function PersonalRideScreen() {
                 <Ionicons name="location-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Nazareth"
+                  placeholder="Enter departure city"
                   placeholderTextColor="#8B7B6B"
                   value={fromLocation}
                   onChangeText={setFromLocation}
@@ -278,7 +278,7 @@ export default function PersonalRideScreen() {
                 <Ionicons name="location-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Haifa"
+                  placeholder="Enter destination city"
                   placeholderTextColor="#8B7B6B"
                   value={toLocation}
                   onChangeText={setToLocation}

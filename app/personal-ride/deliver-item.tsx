@@ -199,7 +199,7 @@ export default function DeliverItemScreen() {
                 <Ionicons name="location-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Nazareth"
+                  placeholder="Enter departure city"
                   placeholderTextColor="#8B7B6B"
                   value={fromLocation}
                   onChangeText={setFromLocation}
@@ -213,7 +213,7 @@ export default function DeliverItemScreen() {
                 <Ionicons name="location-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Haifa"
+                  placeholder="Enter destination city"
                   placeholderTextColor="#8B7B6B"
                   value={toLocation}
                   onChangeText={setToLocation}
@@ -228,7 +228,7 @@ export default function DeliverItemScreen() {
           <View style={styles.timeRowFull}>
             <TextInput
               style={styles.timeInput}
-              placeholder="09:00"
+              placeholder="--:--"
               placeholderTextColor="#8B7B6B"
               keyboardType="numbers-and-punctuation"
               maxLength={5}
@@ -243,7 +243,7 @@ export default function DeliverItemScreen() {
             <Ionicons name="call-outline" size={18} color="#F58220" />
             <TextInput
               style={styles.rowInput}
-              placeholder="05X-XXXXXXX"
+              placeholder="Enter recipient's phone number"
               placeholderTextColor="#8B7B6B"
               keyboardType="phone-pad"
               maxLength={10}

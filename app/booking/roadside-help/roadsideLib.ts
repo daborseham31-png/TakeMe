@@ -780,6 +780,8 @@ export const finishRoadsideHelp = async (bookingId: string) => {
         status: "completed",
         helpCompleted: true,
         paymentStatus: "pending",
+        needsPassengerRating: true,
+        ratingSubmitted: false,
         completedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -799,6 +801,8 @@ export const finishRoadsideHelp = async (bookingId: string) => {
       tripStatus: "completed",
       helpCompleted: true,
       paymentStatus: "pending",
+      needsPassengerRating: true,
+      ratingSubmitted: false,
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -810,7 +814,7 @@ export const finishRoadsideHelp = async (bookingId: string) => {
       senderId: user.uid,
       type: "roadside_payment_required",
       title: "Roadside Help completed",
-      message: `${driverName} finished helping you. Please complete the payment.`,
+      message: `${driverName} finished helping you. Please complete payment and rate your helper.`,
       category: "roadside",
       requestId,
       offerId,
@@ -830,7 +834,7 @@ export const finishRoadsideHelp = async (bookingId: string) => {
 // Blocked unless request.status === "completed" && paymentStatus === "pending".
 // ---------------------------------------------------------------------------
 
-export type RoadsidePaymentMethod = "cash" | "card";
+export type RoadsidePaymentMethod = "cash" | "card" | "bit";
 
 export const payRoadsideHelp = async (
   bookingId: string,
@@ -844,8 +848,10 @@ export const payRoadsideHelp = async (
   let requestId = "";
   let offerId = "";
   let driverId = "";
+  let driverName = "your helper";
   let passengerName = "The passenger";
   let amount = 0;
+  let needsRating = false;
 
   await runTransaction(db, async (transaction) => {
     const bookingSnap = await transaction.get(bookingRef);
@@ -863,7 +869,11 @@ export const payRoadsideHelp = async (
     requestId = booking.requestId || "";
     offerId = booking.offerId || "";
     driverId = booking.driverId || "";
+    driverName = booking.driverName || driverName;
     passengerName = booking.passengerName || passengerName;
+    needsRating =
+      booking.needsPassengerRating === true &&
+      booking.ratingSubmitted !== true;
 
     const reqRef = doc(db, "roadsideRequests", requestId);
     const reqSnap = await transaction.get(reqRef);
@@ -924,5 +934,156 @@ export const payRoadsideHelp = async (
     });
   }
 
+  // Payment just gated the rating modal open — if it's still pending, tell
+  // the passenger it's time to rate their helper.
+  if (needsRating) {
+    await notify({
+      receiverId: user.uid,
+      senderId: driverId || undefined,
+      type: "roadside_rating_required",
+      title: "Rate your helper",
+      message: `Please rate your Roadside Help experience with ${driverName}.`,
+      category: "roadside",
+      requestId,
+      offerId,
+      bookingId,
+      driverId,
+      targetTab: "passenger",
+    });
+  }
+
   return { amount, driverId };
+};
+
+// ---------------------------------------------------------------------------
+// Passenger: rate the helper after a completed (and paid) Roadside Help.
+//
+// Mirrors submitRideRating (rideBookingLib.ts) / submitApplicationRating
+// (workErrandLib.ts) — same driverReviews + users/{driverId} rating-average
+// transaction pattern — but also mirrors the rating onto the linked
+// roadsideOffers doc, since Roadside (unlike Ride/Work/Errand) has one.
+// Guarded so the same request can never be rated twice.
+// ---------------------------------------------------------------------------
+
+export type RatableRoadsideBooking = {
+  driverId: string;
+  driverName?: string;
+  requestId?: string;
+  offerId?: string;
+};
+
+export const submitRoadsideRating = async (
+  bookingId: string,
+  booking: RatableRoadsideBooking,
+  rating: number,
+  comment: string,
+) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Please login first.");
+
+  if (!booking.driverId) {
+    throw new Error("Missing driver id.");
+  }
+
+  const cleanComment = comment.trim();
+
+  const bookingRef = doc(db, "bookings", bookingId);
+  const driverRef = doc(db, "users", booking.driverId);
+  const reviewRef = doc(collection(db, "driverReviews"));
+  const offerRef = booking.offerId
+    ? doc(db, "roadsideOffers", booking.offerId)
+    : null;
+
+  await runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+
+    if (!bookingSnap.exists()) {
+      throw new Error("Booking not found.");
+    }
+
+    const bookingData: any = bookingSnap.data();
+
+    // Prevent duplicate ratings — each Roadside Help request can be rated
+    // only once.
+    if (bookingData.ratingSubmitted === true) {
+      return;
+    }
+
+    const driverSnap = await transaction.get(driverRef);
+    const driverData: any = driverSnap.exists() ? driverSnap.data() : {};
+
+    const requestId = booking.requestId || bookingData.requestId || "";
+    const reqRef = requestId ? doc(db, "roadsideRequests", requestId) : null;
+    const reqSnap = reqRef ? await transaction.get(reqRef) : null;
+
+    const oldCount = Number(driverData.ratingCount) || 0;
+    const oldSum =
+      Number(driverData.ratingSum) ||
+      Number(driverData.ratingAverage || 0) * oldCount;
+
+    const newCount = oldCount + 1;
+    const newSum = oldSum + rating;
+    const newAverage = Number((newSum / newCount).toFixed(2));
+
+    transaction.set(reviewRef, {
+      requestId: booking.requestId || "",
+      offerId: booking.offerId || "",
+      category: "roadside",
+
+      driverId: booking.driverId,
+      driverName: booking.driverName || "Driver",
+
+      passengerId: user.uid,
+      passengerName: bookingData.passengerName || user.displayName || "Passenger",
+
+      rating,
+      comment: cleanComment,
+      reviewComment: cleanComment,
+
+      createdAt: serverTimestamp(),
+    });
+
+    transaction.update(bookingRef, {
+      rating,
+      reviewComment: cleanComment,
+      ratingSubmitted: true,
+      needsPassengerRating: false,
+      ratedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    if (offerRef) {
+      transaction.update(offerRef, {
+        rating,
+        reviewComment: cleanComment,
+        ratingSubmitted: true,
+        ratedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    // Keeps Help Requests (which reads roadsideRequests, not bookings) in
+    // sync with My Bookings so both screens agree the rating is done.
+    if (reqSnap && reqSnap.exists()) {
+      transaction.update(reqRef!, {
+        rating,
+        reviewComment: cleanComment,
+        ratingSubmitted: true,
+        needsPassengerRating: false,
+        ratedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    transaction.set(
+      driverRef,
+      {
+        ratingCount: newCount,
+        ratingSum: newSum,
+        ratingAverage: newAverage,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  });
 };

@@ -52,6 +52,9 @@ export default function SignUpScreen() {
   // --- Driver: spoken languages -----------------------------------------------
   const [spokenLanguages, setSpokenLanguages] = useState<string[]>([]);
 
+  // --- Driver: vehicle number ---------------------------------------------------
+  const [carPlate, setCarPlate] = useState("");
+
   // --- Driver: license scan -----------------------------------------------------
   const [licenseImageUri, setLicenseImageUri] = useState<string | null>(null);
   const [licenseAnalyzing, setLicenseAnalyzing] = useState(false);
@@ -61,6 +64,20 @@ export default function SignUpScreen() {
   const [licenseError, setLicenseError] = useState<string | null>(null);
 
   const getDigitsOnly = (value: string) => value.replace(/\D/g, "");
+
+  // --- Validation -----------------------------------------------------------
+  const normalizedEmail = email.trim().toLowerCase();
+  const isValidEmail = /^[^\s@]+@(gmail\.com|hotmail\.com)$/.test(normalizedEmail);
+  const emailError =
+    email.trim().length > 0 && !isValidEmail
+      ? "Email must be a Gmail or Hotmail address."
+      : "";
+
+  const isValidCarPlate = /^\d{7,9}$/.test(carPlate);
+  const carPlateError =
+    isDriver && carPlate.length > 0 && !isValidCarPlate
+      ? "Vehicle number must contain between 7 and 9 digits."
+      : "";
 
   const derivedAge =
     calculateAgeFromBirthDate(idResult?.birthDate ?? null) ?? idResult?.age ?? null;
@@ -153,6 +170,11 @@ export default function SignUpScreen() {
       return;
     }
 
+    if (!isValidEmail) {
+      Alert.alert("Invalid email", "Email must be a Gmail or Hotmail address.");
+      return;
+    }
+
     if (!gender) {
       Alert.alert("Missing gender", "Please select your gender.");
       return;
@@ -164,6 +186,14 @@ export default function SignUpScreen() {
     }
 
     if (isDriver) {
+      if (!isValidCarPlate) {
+        Alert.alert(
+          "Invalid vehicle number",
+          "Vehicle number must contain between 7 and 9 digits.",
+        );
+        return;
+      }
+
       if (spokenLanguages.length === 0) {
         Alert.alert(
           "Languages required",
@@ -204,7 +234,7 @@ export default function SignUpScreen() {
     try {
       const userCredential = await createUserWithEmailAndPassword(
         auth,
-        email.trim(),
+        normalizedEmail,
         password,
       );
 
@@ -217,7 +247,7 @@ export default function SignUpScreen() {
 
       const baseData = {
         name: fullName,
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         phone: getDigitsOnly(phone),
         birthDate: idResult.birthDate,
         age: derivedAge,
@@ -235,6 +265,9 @@ export default function SignUpScreen() {
           licenseExpiryDate: licenseResult.expiryDate,
           licenseIsValid: true,
           spokenLanguages,
+          // Kept as a string (not Number(...)) so a leading zero in the
+          // vehicle number is never silently dropped.
+          carPlate: carPlate,
           driverVerificationStatus: "pending_admin_review",
         });
       } else {
@@ -360,13 +393,14 @@ export default function SignUpScreen() {
           <Text style={styles.label}>Email</Text>
           <TextInput
             style={styles.input}
-            placeholder="you@example.com"
+            placeholder="Enter your email"
             placeholderTextColor="#8b7b6b"
             keyboardType="email-address"
             autoCapitalize="none"
             value={email}
             onChangeText={setEmail}
           />
+          {emailError ? <Text style={styles.fieldError}>{emailError}</Text> : null}
 
           <Text style={styles.label}>Phone Number</Text>
           <TextInput
@@ -429,6 +463,24 @@ export default function SignUpScreen() {
 
           {isDriver ? (
             <>
+              {/* ------------------------------------------------------ */}
+              {/* Vehicle number                                          */}
+              {/* ------------------------------------------------------ */}
+              <Text style={styles.label}>Vehicle Number</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Vehicle number (7-9 digits)"
+                placeholderTextColor="#8b7b6b"
+                keyboardType="number-pad"
+                value={carPlate}
+                onChangeText={(value) =>
+                  setCarPlate(value.replace(/\D/g, "").slice(0, 9))
+                }
+              />
+              {carPlateError ? (
+                <Text style={styles.fieldError}>{carPlateError}</Text>
+              ) : null}
+
               {/* ------------------------------------------------------ */}
               {/* Spoken languages                                        */}
               {/* ------------------------------------------------------ */}
@@ -802,6 +854,12 @@ const styles = StyleSheet.create({
     padding: 14,
     backgroundColor: "#FFFDFC",
     color: "#111827",
+  },
+  fieldError: {
+    color: "#B91C1C",
+    fontWeight: "700",
+    fontSize: 12.5,
+    marginTop: 6,
   },
   passwordRow: {
     flexDirection: "row",

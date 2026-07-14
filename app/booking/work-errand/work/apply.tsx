@@ -297,7 +297,7 @@ export default function WorkApplyScreen() {
                 style={styles.input}
                 value={city}
                 onChangeText={setCity}
-                placeholder="e.g. Nazareth"
+                placeholder="Enter city or village"
                 placeholderTextColor="#9B7A68"
               />
             </View>
@@ -308,7 +308,7 @@ export default function WorkApplyScreen() {
                 style={styles.input}
                 value={neighborhood}
                 onChangeText={setNeighborhood}
-                placeholder="e.g. Al- Maidan"
+                placeholder="Enter neighborhood"
                 placeholderTextColor="#9B7A68"
               />
             </View>

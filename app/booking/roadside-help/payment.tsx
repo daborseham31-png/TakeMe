@@ -32,11 +32,14 @@ import {
 } from "react-native";
 
 import { db } from "../../../firebase";
+import BitBadge from "../BitBadge";
+import { openBitPayment } from "../bitPayment";
 import { payRoadsideHelp, RoadsidePaymentMethod } from "./roadsideLib";
 
 type BookingDoc = {
   id: string;
   driverName: string;
+  driverPhone: string;
   problemTypes: string[];
   address: string;
   etaMinutes: number | null;
@@ -49,6 +52,7 @@ type BookingDoc = {
 const normalize = (id: string, data: any): BookingDoc => ({
   id,
   driverName: data.driverName || "Driver",
+  driverPhone: data.driverPhone || "",
   problemTypes: Array.isArray(data.problemTypes) ? data.problemTypes : [],
   address: data.address || data.location?.address || "",
   etaMinutes: typeof data.etaMinutes === "number" ? data.etaMinutes : null,
@@ -70,7 +74,7 @@ export default function RoadsideHelpPaymentScreen() {
   const [bookingId, setBookingId] = useState(bookingIdParam);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [method, setMethod] = useState<RoadsidePaymentMethod>("card");
+  const [method, setMethod] = useState<RoadsidePaymentMethod | null>(null);
   const [processing, setProcessing] = useState(false);
 
   // Resolve the booking id: prefer the one passed in (from the payment
@@ -138,8 +142,13 @@ export default function RoadsideHelpPaymentScreen() {
     return unsubscribe;
   }, [bookingId]);
 
+  const handleSelectBit = () => {
+    setMethod("bit");
+    openBitPayment(booking?.driverPhone || "", booking?.price ?? amountParam);
+  };
+
   const handlePay = async () => {
-    if (!bookingId || processing) return;
+    if (!bookingId || processing || !method) return;
 
     try {
       setProcessing(true);
@@ -254,28 +263,6 @@ export default function RoadsideHelpPaymentScreen() {
                     <Pressable
                       style={[
                         styles.methodButton,
-                        method === "card" && styles.methodButtonActive,
-                      ]}
-                      onPress={() => setMethod("card")}
-                    >
-                      <Ionicons
-                        name="card"
-                        size={18}
-                        color={method === "card" ? "#FFFFFF" : "#7C5F46"}
-                      />
-                      <Text
-                        style={[
-                          styles.methodText,
-                          method === "card" && styles.methodTextActive,
-                        ]}
-                      >
-                        Credit Card
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      style={[
-                        styles.methodButton,
                         method === "cash" && styles.methodButtonActive,
                       ]}
                       onPress={() => setMethod("cash")}
@@ -290,7 +277,41 @@ export default function RoadsideHelpPaymentScreen() {
                         Cash
                       </Text>
                     </Pressable>
+
+                    <Pressable
+                      style={[
+                        styles.methodButton,
+                        method === "bit" && styles.methodButtonActive,
+                      ]}
+                      onPress={handleSelectBit}
+                    >
+                      <BitBadge size={18} />
+                      <Text
+                        style={[
+                          styles.methodText,
+                          method === "bit" && styles.methodTextActive,
+                        ]}
+                      >
+                        Pay with BIT
+                      </Text>
+                    </Pressable>
                   </View>
+
+                  {method === "bit" ? (
+                    <View style={styles.bitInfoBox}>
+                      <Ionicons
+                        name="information-circle-outline"
+                        size={16}
+                        color="#B86115"
+                      />
+                      <Text style={styles.bitInfoText}>
+                        BIT was opened with{" "}
+                        {booking.driverPhone || "the driver's number"} copied
+                        to your clipboard — paste it into BIT&apos;s &quot;Send
+                        money to&quot; field, then press Pay below.
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
 
                 <View style={styles.secureRow}>
@@ -305,9 +326,12 @@ export default function RoadsideHelpPaymentScreen() {
                 </View>
 
                 <Pressable
-                  style={[styles.payButton, processing && styles.payButtonDisabled]}
+                  style={[
+                    styles.payButton,
+                    (!method || processing) && styles.payButtonDisabled,
+                  ]}
                   onPress={handlePay}
-                  disabled={processing}
+                  disabled={!method || processing}
                 >
                   {processing ? (
                     <ActivityIndicator color="#FFFFFF" />
@@ -456,6 +480,21 @@ const styles = StyleSheet.create({
   },
   cashEmoji: {
     fontSize: 16,
+  },
+  bitInfoBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FFF2E8",
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
+  },
+  bitInfoText: {
+    color: "#B86115",
+    fontWeight: "700",
+    fontSize: 13,
+    flexShrink: 1,
   },
   secureRow: {
     flexDirection: "row",

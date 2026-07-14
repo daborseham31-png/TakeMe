@@ -249,7 +249,7 @@ export default function SchoolRideScreen() {
                 <Ionicons name="home-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="e.g. Nazareth"
+                  placeholder="Enter departure city"
                   placeholderTextColor="#8B7B6B"
                   value={fromAddress}
                   onChangeText={setFromAddress}
