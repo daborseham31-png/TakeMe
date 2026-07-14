@@ -62,6 +62,12 @@ type DriverRoute = {
   to?: string;
   fromNormalized?: string;
   toNormalized?: string;
+  // Stable Israeli-locality ids (see israelLocations.ts) — preferred over
+  // fromNormalized/toNormalized text matching whenever both sides have one,
+  // so a driver in Hebrew and a passenger in Arabic still match the same
+  // place. Absent on documents created before this existed.
+  fromLocationId?: string;
+  toLocationId?: string;
   tripDate?: string;
   deliveryDate?: string;
   day?: string;
@@ -90,7 +96,20 @@ const MAX_TIME_DIFF_MINUTES = 30;
 
 const normalize = (value: string) => value.trim().toLowerCase();
 
-const locationMatches = (driverValue: string, userValue: string) => {
+const locationMatches = (
+  driverValue: string,
+  userValue: string,
+  driverLocationId?: string,
+  userLocationId?: string,
+) => {
+  // Stable-id match wins whenever both sides picked a suggestion from
+  // IsraelLocationAutocomplete — correct even across display languages
+  // ("נצרת" vs "الناصرة" vs "Nazareth"). Falls back to the old normalized
+  // text comparison for documents created before location ids existed.
+  if (driverLocationId && userLocationId) {
+    return driverLocationId === userLocationId;
+  }
+
   const driver = normalize(driverValue);
   const user = normalize(userValue);
 
@@ -262,6 +281,8 @@ export default function DriverResultsScreen() {
 
   const from = String(params.from || "");
   const to = String(params.to || "");
+  const fromLocationId = String(params.fromLocationId || "");
+  const toLocationId = String(params.toLocationId || "");
   const category = String(params.category || "");
   const genderPref = String(params.genderPref || "any");
   const seats = Number(params.seats || 1);
@@ -360,8 +381,18 @@ export default function DriverResultsScreen() {
         const activeMatches = driver.active !== false;
         const categoryMatches = !category || driver.category === category;
 
-        const fromMatches = locationMatches(driverFrom, from);
-        const toMatches = locationMatches(driverTo, to);
+        const fromMatches = locationMatches(
+          driverFrom,
+          from,
+          driver.fromLocationId,
+          fromLocationId,
+        );
+        const toMatches = locationMatches(
+          driverTo,
+          to,
+          driver.toLocationId,
+          toLocationId,
+        );
 
         const driverGender = getDriverGender(driver);
         const driverLanguages = getDriverLanguages(driver);

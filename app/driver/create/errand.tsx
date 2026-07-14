@@ -13,6 +13,8 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../../firebase";
+import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
+import { IsraelLocation } from "../../booking/israelLocations";
 import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
 import YesNoField from "./YesNoField";
@@ -37,6 +39,15 @@ export default function ErrandJobScreen() {
   const [errandTitle, setErrandTitle] = useState("");
   const [errandDescription, setErrandDescription] = useState("");
   const [errandLocation, setErrandLocation] = useState("");
+  const [errandLocationPlace, setErrandLocationPlace] =
+    useState<IsraelLocation | null>(null);
+  const [errandLocationError, setErrandLocationError] = useState("");
+
+  const handleErrandLocationChange = (text: string) => {
+    setErrandLocation(text);
+    setErrandLocationPlace(null);
+    if (errandLocationError) setErrandLocationError("");
+  };
   const [errandDate, setErrandDate] = useState("");
   const [showErrandDatePicker, setShowErrandDatePicker] = useState(false);
   const [errandStartTime, setErrandStartTime] = useState("");
@@ -88,6 +99,11 @@ export default function ErrandJobScreen() {
       !errandSeats
     ) {
       Alert.alert("Missing details", "Please fill in all errand details.");
+      return;
+    }
+
+    if (!errandLocationPlace) {
+      setErrandLocationError("Please select a location from the list.");
       return;
     }
 
@@ -162,6 +178,13 @@ export default function ErrandJobScreen() {
 
         location: errandLocation,
         locationNormalized: normalize(errandLocation),
+        // Stable id for cross-language matching — see israelLocations.ts.
+        locationId: errandLocationPlace.id,
+        locationNames: {
+          english: errandLocationPlace.english,
+          arabic: errandLocationPlace.arabic,
+          hebrew: errandLocationPlace.hebrew,
+        },
 
         date: cleanErrandDate,
         day: errandDay,
@@ -191,7 +214,10 @@ export default function ErrandJobScreen() {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#7C5F46" />
         </Pressable>
@@ -233,17 +259,17 @@ export default function ErrandJobScreen() {
             multiline
           />
 
-          <Text style={styles.label}>Errand Location</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder="Enter errand location"
-              placeholderTextColor="#8B7B6B"
-              value={errandLocation}
-              onChangeText={setErrandLocation}
-            />
-          </View>
+          <IsraelLocationAutocomplete
+            label="Errand Location"
+            value={errandLocation}
+            onChangeText={handleErrandLocationChange}
+            onSelectLocation={(location) => {
+              setErrandLocationPlace(location);
+              setErrandLocationError("");
+            }}
+            placeholder="Enter errand location"
+            error={errandLocationError}
+          />
 
           <DateInput
             label="Errand Date"

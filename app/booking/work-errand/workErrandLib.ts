@@ -231,6 +231,10 @@ export type CustomerDetails = {
   neighborhood: string;
   notes: string;
   location: GeoPoint;
+  // Stable Israeli-locality id for `city` (see israelLocations.ts) — optional
+  // only because this type predates that dataset; new callers always set it.
+  cityLocationId?: string;
+  cityLocationNames?: { english: string; arabic: string; hebrew: string };
 };
 
 // The job / errand the customer is applying to (read from the listing).
@@ -296,6 +300,8 @@ export const createApplication = async (
   // Shared fields written to both collections.
   const base = {
     city: details.city,
+    cityLocationId: details.cityLocationId || null,
+    cityLocationNames: details.cityLocationNames || null,
     neighborhood: details.neighborhood,
     notes: details.notes || "",
 
@@ -1021,6 +1027,7 @@ export type NormalizedApplication = {
   customerAge: number | null;
   customerPhone: string;
   city: string;
+  cityLocationId: string;
   neighborhood: string;
   notes: string;
   location: GeoPoint | null;
@@ -1099,6 +1106,7 @@ export const normalizeApplication = (
     customerAge: asNumber(data.applicantAge ?? data.passengerAge),
     customerPhone: data.applicantPhone || data.passengerPhone || "",
     city: data.city || "",
+    cityLocationId: data.cityLocationId || "",
     neighborhood: data.neighborhood || "",
     notes: data.notes || "",
     location: normalizeGeo(data.applicantLocation || data.passengerLocation),

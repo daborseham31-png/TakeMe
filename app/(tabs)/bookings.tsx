@@ -1685,9 +1685,9 @@ useEffect(() => {
     return;
   }
 
-  // Roadside always requires payment before rating opens (see
-  // finishRoadsideHelp/payRoadsideHelp in roadsideLib.ts) — every other
-  // category here (School) has no such payment gate.
+  // Roadside is scanned separately below (openRoadsideRatingModal, distinct
+  // title/subtitle) — everything else in `bookings` (School, ...) uses the
+  // generic modal text.
   const pendingSchoolRating = bookings.find(
     (b) => b.category !== "roadside" && bookingNeedsRating(b),
   );
@@ -1697,11 +1697,11 @@ useEffect(() => {
     return;
   }
 
+  // Roadside rates right after "Finished Help", same trigger point as every
+  // other category — payment is a separate, independent step and no longer
+  // gates the rating modal.
   const pendingRoadsideRating = bookings.find(
-    (b) =>
-      b.category === "roadside" &&
-      bookingNeedsRating(b) &&
-      b.paymentStatus === "paid",
+    (b) => b.category === "roadside" && bookingNeedsRating(b),
   );
 
   if (pendingRoadsideRating) {
@@ -2468,7 +2468,7 @@ useEffect(() => {
           </Pressable>
         ) : null}
 
-        {isPaid && typeof b.rating === "number" ? (
+        {typeof b.rating === "number" ? (
           <View style={styles.ratingSummaryRow}>
             {Array.from({ length: 5 }).map((_, i) => (
               <Ionicons
@@ -2485,7 +2485,9 @@ useEffect(() => {
           </View>
         ) : null}
 
-        {!isDriverView && isPaid && bookingNeedsRating(b) ? (
+        {/* Rating no longer waits on payment — it opens right after
+            Finished Help, same trigger point as every other category. */}
+        {!isDriverView && bookingNeedsRating(b) ? (
           <Pressable
             style={styles.primaryButton}
             onPress={() => openRoadsideRatingModal(b)}

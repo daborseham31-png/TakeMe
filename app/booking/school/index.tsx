@@ -15,6 +15,8 @@ import {
 import CurrentLocationButton, {
   CurrentLocationResult,
 } from "../CurrentLocationButton";
+import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
+import { IsraelLocation } from "../israelLocations";
 import DateInput, { TimeInput } from "../../driver/create/DateInput";
 import {
   getDayFromDateText,
@@ -50,6 +52,22 @@ export default function SchoolRideScreen() {
   // address, and using "Use my current location" below never touches it.
   const [fromAddress, setFromAddress] = useState("");
   const [schoolLocation, setSchoolLocation] = useState("");
+  const [fromPlace, setFromPlace] = useState<IsraelLocation | null>(null);
+  const [schoolPlace, setSchoolPlace] = useState<IsraelLocation | null>(null);
+  const [fromError, setFromError] = useState("");
+  const [schoolLocationError, setSchoolLocationError] = useState("");
+
+  const handleFromChange = (text: string) => {
+    setFromAddress(text);
+    setFromPlace(null);
+    if (fromError) setFromError("");
+  };
+
+  const handleSchoolLocationChange = (text: string) => {
+    setSchoolLocation(text);
+    setSchoolPlace(null);
+    if (schoolLocationError) setSchoolLocationError("");
+  };
 
   // Separate "pickup location for driver navigation" — an exact GPS point
   // (+ readable address) used ONLY so the driver can navigate to the
@@ -117,6 +135,16 @@ export default function SchoolRideScreen() {
       return;
     }
 
+    if (!fromPlace) {
+      setFromError("Please select a location from the list.");
+      return;
+    }
+
+    if (!schoolPlace) {
+      setSchoolLocationError("Please select a location from the list.");
+      return;
+    }
+
     const baseParams: Record<string, string> = {
       category: "school",
       schoolName: schoolName.trim(),
@@ -124,6 +152,10 @@ export default function SchoolRideScreen() {
       // the GPS pickup point below.
       from: fromAddress.trim(),
       to: schoolLocation.trim(),
+      // Stable ids so this matches the same driver regardless of which
+      // language each side searched in (see israelLocations.ts).
+      fromLocationId: fromPlace.id,
+      toLocationId: schoolPlace.id,
       genderPref,
       languages: selectedLanguages.join(","),
       // Separate navigation-only pickup point (optional) — passed through
@@ -217,7 +249,10 @@ export default function SchoolRideScreen() {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#7C5F46" />
         </Pressable>
@@ -244,31 +279,31 @@ export default function SchoolRideScreen() {
 
           <View style={styles.twoColumns}>
             <View style={styles.column}>
-              <Text style={styles.label}>From</Text>
-              <View style={styles.inputRow}>
-                <Ionicons name="home-outline" size={18} color="#8B7B6B" />
-                <TextInput
-                  style={styles.rowInput}
-                  placeholder="Enter departure city"
-                  placeholderTextColor="#8B7B6B"
-                  value={fromAddress}
-                  onChangeText={setFromAddress}
-                />
-              </View>
+              <IsraelLocationAutocomplete
+                label="From"
+                value={fromAddress}
+                onChangeText={handleFromChange}
+                onSelectLocation={(location) => {
+                  setFromPlace(location);
+                  setFromError("");
+                }}
+                placeholder="Enter departure city"
+                error={fromError}
+              />
             </View>
 
             <View style={styles.column}>
-              <Text style={styles.label}>To</Text>
-              <View style={styles.inputRow}>
-                <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-                <TextInput
-                  style={styles.rowInput}
-                  placeholder="School address"
-                  placeholderTextColor="#8B7B6B"
-                  value={schoolLocation}
-                  onChangeText={setSchoolLocation}
-                />
-              </View>
+              <IsraelLocationAutocomplete
+                label="To"
+                value={schoolLocation}
+                onChangeText={handleSchoolLocationChange}
+                onSelectLocation={(location) => {
+                  setSchoolPlace(location);
+                  setSchoolLocationError("");
+                }}
+                placeholder="School address"
+                error={schoolLocationError}
+              />
             </View>
           </View>
 

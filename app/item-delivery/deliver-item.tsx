@@ -12,6 +12,9 @@ import {
     View,
 } from "react-native";
 
+import IsraelLocationAutocomplete from "../booking/IsraelLocationAutocomplete";
+import { IsraelLocation } from "../booking/israelLocations";
+
 const LANGUAGES_LIST = [
   { key: "ar", label: "العربية" },
   { key: "he", label: "עברית" },
@@ -59,7 +62,23 @@ const normalizeTime = (value: string) => {
 export default function DeliverItemScreen() {
   const [fromLocation, setFromLocation] = useState("");
   const [toLocation, setToLocation] = useState("");
+  const [fromPlace, setFromPlace] = useState<IsraelLocation | null>(null);
+  const [toPlace, setToPlace] = useState<IsraelLocation | null>(null);
+  const [fromError, setFromError] = useState("");
+  const [toError, setToError] = useState("");
   const [tripTime, setTripTime] = useState("09:00");
+
+  const handleFromChange = (text: string) => {
+    setFromLocation(text);
+    setFromPlace(null);
+    if (fromError) setFromError("");
+  };
+
+  const handleToChange = (text: string) => {
+    setToLocation(text);
+    setToPlace(null);
+    if (toError) setToError("");
+  };
 
   const [recipientPhone, setRecipientPhone] = useState("");
   const [itemDescription, setItemDescription] = useState("");
@@ -83,6 +102,16 @@ export default function DeliverItemScreen() {
   const handleSearch = () => {
     if (!fromLocation || !toLocation) {
       Alert.alert("Missing details", "Please enter both From and To.");
+      return;
+    }
+
+    if (!fromPlace) {
+      setFromError("Please select a location from the list.");
+      return;
+    }
+
+    if (!toPlace) {
+      setToError("Please select a location from the list.");
       return;
     }
 
@@ -115,6 +144,8 @@ export default function DeliverItemScreen() {
       category: "delivery",
       from: fromLocation.trim(),
       to: toLocation.trim(),
+      fromLocationId: fromPlace.id,
+      toLocationId: toPlace.id,
       genderPref,
       languages: selectedLanguages.join(","),
       seats: "1",
@@ -154,7 +185,10 @@ export default function DeliverItemScreen() {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#7C5F46" />
         </Pressable>
@@ -171,31 +205,31 @@ export default function DeliverItemScreen() {
         <View style={styles.card}>
           <View style={styles.twoColumns}>
             <View style={styles.column}>
-              <Text style={styles.label}>From</Text>
-              <View style={styles.inputRow}>
-                <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-                <TextInput
-                  style={styles.rowInput}
-                  placeholder="Enter departure city"
-                  placeholderTextColor="#8B7B6B"
-                  value={fromLocation}
-                  onChangeText={setFromLocation}
-                />
-              </View>
+              <IsraelLocationAutocomplete
+                label="From"
+                value={fromLocation}
+                onChangeText={handleFromChange}
+                onSelectLocation={(location) => {
+                  setFromPlace(location);
+                  setFromError("");
+                }}
+                placeholder="Enter departure city"
+                error={fromError}
+              />
             </View>
 
             <View style={styles.column}>
-              <Text style={styles.label}>To</Text>
-              <View style={styles.inputRow}>
-                <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-                <TextInput
-                  style={styles.rowInput}
-                  placeholder="Enter destination city"
-                  placeholderTextColor="#8B7B6B"
-                  value={toLocation}
-                  onChangeText={setToLocation}
-                />
-              </View>
+              <IsraelLocationAutocomplete
+                label="To"
+                value={toLocation}
+                onChangeText={handleToChange}
+                onSelectLocation={(location) => {
+                  setToPlace(location);
+                  setToError("");
+                }}
+                placeholder="Enter destination city"
+                error={toError}
+              />
             </View>
           </View>
 

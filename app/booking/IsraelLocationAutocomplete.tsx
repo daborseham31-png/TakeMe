@@ -1,0 +1,301 @@
+// ---------------------------------------------------------------------------
+// Shared multilingual Israeli locality autocomplete — the ONE input to use
+// everywhere a screen asks for a city / town / village / locality (From, To,
+// work location, errand location, City/Village, ...). Do NOT use this for
+// exact GPS pickup fields, street addresses, phone numbers, or free-text
+// descriptions — those stay plain TextInput.
+//
+// No API key / network request: it searches the bundled israelLocations.ts
+// dataset entirely on-device (see locationSearch.ts for the language
+// detection + normalization + ranking logic).
+//
+// The dropdown is an absolutely-positioned sibling of the input (not a
+// Modal/Portal), so it works inside a ScrollView, inside a modal, inside the
+// weekly booking form, etc. — the one requirement on the CALLER is that the
+// surrounding ScrollView passes `keyboardShouldPersistTaps="handled"`,
+// otherwise the first tap on a suggestion just dismisses the keyboard
+// instead of registering the press.
+// ---------------------------------------------------------------------------
+
+import { Ionicons } from "@expo/vector-icons";
+import React, { useMemo, useRef, useState } from "react";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+
+import { IsraelLocation } from "./israelLocations";
+import {
+  detectInputLanguage,
+  getLocationDisplayName,
+  normalizeLocationText,
+  searchIsraelLocations,
+} from "./locationSearch";
+
+type Props = {
+  value: string;
+  onChangeText: (value: string) => void;
+  onSelectLocation: (location: IsraelLocation) => void;
+  placeholder?: string;
+  label?: string;
+  error?: string;
+};
+
+// Splits `name` into [before, match, after] around the first case/diacritic
+// -insensitive occurrence of `needle`, so the matching portion can be bolded.
+// Falls back to [name, "", ""] when there's no match to highlight.
+const splitForHighlight = (
+  name: string,
+  needle: string,
+): [string, string, string] => {
+  if (!needle) return [name, "", ""];
+
+  const normalizedName = normalizeLocationText(name);
+  const normalizedNeedle = normalizeLocationText(needle);
+  const index = normalizedName.indexOf(normalizedNeedle);
+
+  if (index === -1) return [name, "", ""];
+
+  return [
+    name.slice(0, index),
+    name.slice(index, index + normalizedNeedle.length),
+    name.slice(index + normalizedNeedle.length),
+  ];
+};
+
+export default function IsraelLocationAutocomplete({
+  value,
+  onChangeText,
+  onSelectLocation,
+  placeholder,
+  label,
+  error,
+}: Props) {
+  const [focused, setFocused] = useState(false);
+  const blurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const language = useMemo(() => detectInputLanguage(value), [value]);
+
+  const results = useMemo(
+    () => searchIsraelLocations(value, language),
+    [value, language],
+  );
+
+  const showDropdown = focused && value.trim().length > 0;
+
+  const handleSelect = (location: IsraelLocation) => {
+    if (blurTimeout.current) {
+      clearTimeout(blurTimeout.current);
+      blurTimeout.current = null;
+    }
+
+    onChangeText(getLocationDisplayName(location, language));
+    onSelectLocation(location);
+    setFocused(false);
+  };
+
+  // A short delay before hiding on blur gives the suggestion Pressable's
+  // onPress time to fire first (tapping a suggestion blurs the TextInput
+  // immediately, before the press is registered).
+  const handleBlur = () => {
+    blurTimeout.current = setTimeout(() => setFocused(false), 150);
+  };
+
+  const handleFocus = () => {
+    if (blurTimeout.current) {
+      clearTimeout(blurTimeout.current);
+      blurTimeout.current = null;
+    }
+    setFocused(true);
+  };
+
+  const isRTL = language !== "english";
+
+  return (
+    <View style={styles.wrapper}>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
+
+      <View style={styles.inputRow}>
+        <Ionicons name="location-outline" size={18} color="#8B7B6B" />
+        <TextInput
+          style={[styles.input, isRTL && styles.inputRTL]}
+          value={value}
+          onChangeText={onChangeText}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          placeholder={placeholder || "Enter a city, town, or village"}
+          placeholderTextColor="#9B7A68"
+        />
+        {value.length > 0 ? (
+          <Pressable
+            hitSlop={8}
+            onPress={() => {
+              onChangeText("");
+            }}
+          >
+            <Ionicons name="close-circle" size={18} color="#C7B9AC" />
+          </Pressable>
+        ) : null}
+      </View>
+
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+      {showDropdown ? (
+        <View style={styles.dropdown}>
+          {results.length === 0 ? (
+            <View style={styles.emptyRow}>
+              <Ionicons name="search-outline" size={16} color="#8B7B6B" />
+              <Text style={styles.emptyText}>No locations found</Text>
+            </View>
+          ) : (
+            <ScrollView
+              style={styles.dropdownScroll}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+            >
+              {results.map((location) => {
+                const name = getLocationDisplayName(location, language);
+                const [before, match, after] = splitForHighlight(
+                  name,
+                  value,
+                );
+
+                return (
+                  <Pressable
+                    key={location.id}
+                    style={styles.resultRow}
+                    onPress={() => handleSelect(location)}
+                  >
+                    <Ionicons
+                      name="location-sharp"
+                      size={16}
+                      color="#F58220"
+                    />
+                    <Text
+                      style={[styles.resultText, isRTL && styles.resultTextRTL]}
+                      numberOfLines={1}
+                    >
+                      {match ? (
+                        <>
+                          {before}
+                          <Text style={styles.resultTextMatch}>{match}</Text>
+                          {after}
+                        </>
+                      ) : (
+                        name
+                      )}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrapper: {
+    // Dropdown is positioned absolutely relative to this wrapper, and must
+    // render above sibling fields below it in the same form.
+    position: "relative",
+    zIndex: 20,
+    marginBottom: 14,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 8,
+  },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: "#FFFDFC",
+  },
+  input: {
+    flex: 1,
+    fontSize: 15,
+    color: "#111827",
+    padding: 0,
+  },
+  inputRTL: {
+    textAlign: "right",
+    writingDirection: "rtl",
+  },
+  errorText: {
+    color: "#B91C1C",
+    fontWeight: "700",
+    fontSize: 12.5,
+    marginTop: 6,
+  },
+  dropdown: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+    elevation: 6,
+    zIndex: 30,
+    overflow: "hidden",
+  },
+  dropdownScroll: {
+    maxHeight: 220,
+  },
+  resultRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3ECE3",
+  },
+  resultText: {
+    flex: 1,
+    fontSize: 14.5,
+    color: "#111827",
+    fontWeight: "600",
+  },
+  resultTextRTL: {
+    textAlign: "right",
+    writingDirection: "rtl",
+  },
+  resultTextMatch: {
+    fontWeight: "900",
+    color: "#F58220",
+  },
+  emptyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  emptyText: {
+    color: "#7C5F46",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+});

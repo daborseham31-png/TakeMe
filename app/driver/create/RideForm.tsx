@@ -14,6 +14,8 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../../firebase";
+import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
+import { IsraelLocation } from "../../booking/israelLocations";
 import {
   validateWeeklyRows,
   WeekDayRow,
@@ -58,6 +60,24 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [fromLocation, setFromLocation] = useState<IsraelLocation | null>(
+    null,
+  );
+  const [toLocation, setToLocation] = useState<IsraelLocation | null>(null);
+  const [fromError, setFromError] = useState("");
+  const [toError, setToError] = useState("");
+
+  const handleFromChange = (text: string) => {
+    setFrom(text);
+    setFromLocation(null);
+    if (fromError) setFromError("");
+  };
+
+  const handleToChange = (text: string) => {
+    setTo(text);
+    setToLocation(null);
+    if (toError) setToError("");
+  };
 
   const [tripDate, setTripDate] = useState("");
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
@@ -129,6 +149,16 @@ export default function RideForm({ category, showPets, onBack }: Props) {
         "Invalid vehicle number",
         "Vehicle number must contain between 7 and 9 digits.",
       );
+      return;
+    }
+
+    if (!fromLocation) {
+      setFromError("Please select a location from the list.");
+      return;
+    }
+
+    if (!toLocation) {
+      setToError("Please select a location from the list.");
       return;
     }
 
@@ -237,6 +267,22 @@ export default function RideForm({ category, showPets, onBack }: Props) {
         to,
         fromNormalized: normalize(from),
         toNormalized: normalize(to),
+        // Stable IDs so a driver in Hebrew and a passenger in Arabic still
+        // match the same locality — see israelLocations.ts/locationSearch.ts.
+        // fromNormalized/toNormalized above remain as the fallback for old
+        // documents that predate this.
+        fromLocationId: fromLocation.id,
+        toLocationId: toLocation.id,
+        fromLocationNames: {
+          english: fromLocation.english,
+          arabic: fromLocation.arabic,
+          hebrew: fromLocation.hebrew,
+        },
+        toLocationNames: {
+          english: toLocation.english,
+          arabic: toLocation.arabic,
+          hebrew: toLocation.hebrew,
+        },
         ...routeCoords,
 
         tripDate: cleanTripDate,
@@ -274,7 +320,10 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable
           style={styles.backButton}
           onPress={() => (onBack ? onBack() : router.back())}
@@ -333,29 +382,29 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             />
           )}
 
-          <Text style={styles.label}>From</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder="Enter departure city"
-              placeholderTextColor="#8B7B6B"
-              value={from}
-              onChangeText={setFrom}
-            />
-          </View>
+          <IsraelLocationAutocomplete
+            label="From"
+            value={from}
+            onChangeText={handleFromChange}
+            onSelectLocation={(location) => {
+              setFromLocation(location);
+              setFromError("");
+            }}
+            placeholder="Enter departure city"
+            error={fromError}
+          />
 
-          <Text style={styles.label}>To</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder="Enter destination city"
-              placeholderTextColor="#8B7B6B"
-              value={to}
-              onChangeText={setTo}
-            />
-          </View>
+          <IsraelLocationAutocomplete
+            label="To"
+            value={to}
+            onChangeText={handleToChange}
+            onSelectLocation={(location) => {
+              setToLocation(location);
+              setToError("");
+            }}
+            placeholder="Enter destination city"
+            error={toError}
+          />
 
           {canRepeat && (
             <YesNoField
