@@ -1836,6 +1836,13 @@ useEffect(() => {
 
         {renderRouteLine(r.from, r.to, "")}
 
+        {r.destinationDetails ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="flag-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>{r.destinationDetails}</Text>
+          </View>
+        ) : null}
+
         {r.date ? (
           <View style={styles.infoRow}>
             <Ionicons name="calendar-outline" size={15} color="#7C5F46" />

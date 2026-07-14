@@ -29,6 +29,8 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../../firebase";
+import { getIsraelLocationById } from "./israelLocations";
+import { LocationNames, sameLocation } from "./locationSearch";
 import { getDriverDayTrips, WeeklyDriverDay } from "./weeklyBookingLib";
 
 export type FeedCategory = "personal" | "school" | "work" | "errand";
@@ -68,6 +70,9 @@ export type FeedItem = {
   fromLocationId: string;
   toLocationId: string;
   locationId: string;
+  fromLocationNames?: LocationNames;
+  toLocationNames?: LocationNames;
+  locationNames?: LocationNames;
 
   isWeekly: boolean;
   // Only the days that still have room — used for the weekly day-picker.
@@ -171,6 +176,8 @@ const normalizeDriverRouteItem = (id: string, data: any): FeedItem | null => {
     fromLocationId: data.fromLocationId || "",
     toLocationId: data.toLocationId || "",
     locationId: "",
+    fromLocationNames: data.fromLocationNames || undefined,
+    toLocationNames: data.toLocationNames || undefined,
 
     isWeekly,
     availableWeeklyDays,
@@ -229,6 +236,7 @@ const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
     fromLocationId: "",
     toLocationId: "",
     locationId: data.locationId || "",
+    locationNames: data.locationNames || undefined,
 
     isWeekly: false,
     availableWeeklyDays: [],
@@ -297,6 +305,7 @@ const normalizeErrandJobItem = (id: string, data: any): FeedItem | null => {
     fromLocationId: "",
     toLocationId: "",
     locationId: data.locationId || "",
+    locationNames: data.locationNames || undefined,
 
     isWeekly: false,
     availableWeeklyDays: [],
@@ -351,10 +360,47 @@ const withProviderRating = async (item: FeedItem): Promise<FeedItem> => {
 // date/time, then higher rating as a tie-breaker.
 // ---------------------------------------------------------------------------
 
-const itemMatchesUser = (item: FeedItem, userLocationId: string) =>
-  item.fromLocationId === userLocationId ||
-  item.toLocationId === userLocationId ||
-  item.locationId === userLocationId;
+// Resolves the user's saved locality to its own multilingual names so old
+// listings (no id, only text/names saved) can still be recognized as a
+// match via sameLocation's names fallback, not just a bare id comparison.
+const itemMatchesUser = (item: FeedItem, userLocationId: string) => {
+  const userLocation = getIsraelLocationById(userLocationId);
+  const userNames: LocationNames | undefined = userLocation
+    ? {
+        english: userLocation.english,
+        arabic: userLocation.arabic,
+        hebrew: userLocation.hebrew,
+      }
+    : undefined;
+  const userText = userNames?.english || "";
+
+  return (
+    sameLocation(
+      item.fromLocationId,
+      userLocationId,
+      item.from,
+      userText,
+      item.fromLocationNames,
+      userNames,
+    ) ||
+    sameLocation(
+      item.toLocationId,
+      userLocationId,
+      item.to,
+      userText,
+      item.toLocationNames,
+      userNames,
+    ) ||
+    sameLocation(
+      item.locationId,
+      userLocationId,
+      item.location,
+      userText,
+      item.locationNames,
+      userNames,
+    )
+  );
+};
 
 const dateTimeKey = (item: FeedItem) => {
   const date = item.isWeekly

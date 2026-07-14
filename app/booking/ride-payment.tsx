@@ -64,6 +64,9 @@ export default function RidePaymentScreen() {
   const routeId = String(params.routeId || "");
   const from = String(params.from || "");
   const to = String(params.to || "");
+  // The exact place within the destination city (optional, Personal Ride
+  // only) — informational for the driver, never used for matching.
+  const destinationDetails = String(params.destinationDetails || "");
   const date = String(params.date || params.tripDate || "");
   const day = String(params.day || params.tripDay || "");
   const time = String(params.time || "");
@@ -246,6 +249,7 @@ const createBookingAfterPayment = async (
       routeId,
       from,
       to,
+      destinationDetails: destinationDetails || null,
       date,
       day,
       time,
@@ -366,6 +370,7 @@ const createBookingAfterPayment = async (
           routeId,
           from,
           to,
+          destinationDetails,
           pickup: presetPickup,
 
           selectedDays: selectedWeeklyDays,
@@ -491,6 +496,13 @@ const createBookingAfterPayment = async (
                 {from || "?"} → {to || "?"}
               </Text>
             </View>
+
+            {destinationDetails ? (
+              <View style={styles.summaryRow}>
+                <Ionicons name="flag-outline" size={15} color="#7C5F46" />
+                <Text style={styles.summaryText}>{destinationDetails}</Text>
+              </View>
+            ) : null}
 
             {!isWeekly && date ? (
               <View style={styles.summaryRow}>

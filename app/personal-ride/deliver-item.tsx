@@ -146,6 +146,16 @@ export default function DeliverItemScreen() {
       to: toLocation.trim(),
       fromLocationId: fromPlace.id,
       toLocationId: toPlace.id,
+      fromLocationNames: JSON.stringify({
+        english: fromPlace.english,
+        arabic: fromPlace.arabic,
+        hebrew: fromPlace.hebrew,
+      }),
+      toLocationNames: JSON.stringify({
+        english: toPlace.english,
+        arabic: toPlace.arabic,
+        hebrew: toPlace.hebrew,
+      }),
       genderPref,
       languages: selectedLanguages.join(","),
       seats: "1",

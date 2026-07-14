@@ -585,6 +585,9 @@ export type CreateWeeklyBookingsInput = {
   routeId: string;
   from: string;
   to: string;
+  // The exact place within the destination city (optional, Personal Ride
+  // only) — informational for the driver, never used for matching.
+  destinationDetails?: string;
   // "Use my current location" on the passenger booking form — optional,
   // same GeoPoint shape used by the quick-booking path.
   pickup?: GeoPoint | null;
@@ -757,6 +760,7 @@ export const createWeeklyBookings = async (
         routeId: input.routeId,
         from: input.from || "",
         to: input.to || "",
+        destinationDetails: input.destinationDetails || null,
 
         // Same shape/fields as the quick-booking path (ride-payment.tsx).
         // Never defaulted to `from`/`to` (the matching fields) — when no GPS

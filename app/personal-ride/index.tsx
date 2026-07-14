@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -98,6 +99,12 @@ export default function PersonalRideScreen() {
     if (toError) setToError("");
   };
 
+  // The exact place within the destination city (a building, university,
+  // landmark, ...) — free text, optional, never used for driver matching
+  // (that's `toLocation`/`toPlace` above). Only shown to the driver on the
+  // payment/confirmation screen and saved on the booking.
+  const [destinationDetails, setDestinationDetails] = useState("");
+
   // Separate "pickup location for driver navigation" — an exact GPS point
   // (+ readable address) used ONLY so the driver can navigate to the
   // passenger. Never sent to driver matching, never written into `from`.
@@ -177,11 +184,28 @@ export default function PersonalRideScreen() {
       from: fromLocation.trim(),
       to: toLocation.trim(),
       // Stable ids so this matches the same driver regardless of which
-      // language each side searched in (see israelLocations.ts).
+      // language each side searched in (see israelLocations.ts). Names are
+      // a fallback for the driver side only, in case that trip predates
+      // location ids entirely — see sameLocation in locationSearch.ts.
       fromLocationId: fromPlace.id,
       toLocationId: toPlace.id,
+      fromLocationNames: JSON.stringify({
+        english: fromPlace.english,
+        arabic: fromPlace.arabic,
+        hebrew: fromPlace.hebrew,
+      }),
+      toLocationNames: JSON.stringify({
+        english: toPlace.english,
+        arabic: toPlace.arabic,
+        hebrew: toPlace.hebrew,
+      }),
       genderPref,
       languages: selectedLanguages.join(","),
+      // The exact place within the destination city (optional) — shown to
+      // the driver, never used for matching.
+      ...(destinationDetails.trim()
+        ? { destinationDetails: destinationDetails.trim() }
+        : {}),
       // Separate navigation-only pickup point (optional) — passed through
       // untouched to ride-payment/the booking doc, never used for matching.
       ...(navCoords
@@ -319,6 +343,18 @@ export default function PersonalRideScreen() {
                 error={toError}
               />
             </View>
+          </View>
+
+          <Text style={styles.label}>Exact Destination (optional)</Text>
+          <View style={styles.inputRow}>
+            <Ionicons name="flag-outline" size={18} color="#8B7B6B" />
+            <TextInput
+              style={styles.rowInput}
+              placeholder="Enter the exact building, university, or landmark"
+              placeholderTextColor="#8B7B6B"
+              value={destinationDetails}
+              onChangeText={setDestinationDetails}
+            />
           </View>
 
           <View style={styles.navPickupBox}>

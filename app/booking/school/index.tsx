@@ -153,9 +153,21 @@ export default function SchoolRideScreen() {
       from: fromAddress.trim(),
       to: schoolLocation.trim(),
       // Stable ids so this matches the same driver regardless of which
-      // language each side searched in (see israelLocations.ts).
+      // language each side searched in (see israelLocations.ts). Names are
+      // a fallback for the driver side only, in case that trip predates
+      // location ids entirely — see sameLocation in locationSearch.ts.
       fromLocationId: fromPlace.id,
       toLocationId: schoolPlace.id,
+      fromLocationNames: JSON.stringify({
+        english: fromPlace.english,
+        arabic: fromPlace.arabic,
+        hebrew: fromPlace.hebrew,
+      }),
+      toLocationNames: JSON.stringify({
+        english: schoolPlace.english,
+        arabic: schoolPlace.arabic,
+        hebrew: schoolPlace.hebrew,
+      }),
       genderPref,
       languages: selectedLanguages.join(","),
       // Separate navigation-only pickup point (optional) — passed through

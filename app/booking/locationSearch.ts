@@ -121,3 +121,44 @@ export function getLocationDisplayName(
 ): string {
   return nameForLanguage(loc, language) || loc.english;
 }
+
+// ---------------------------------------------------------------------------
+// Cross-language route matching — the ONE helper every from/to comparison in
+// the app must go through (driver search, weekly matching, the Home feed).
+// A driver posting "المشهد" and a passenger searching "Mashhad" must match:
+// never compare the raw displayed strings directly.
+// ---------------------------------------------------------------------------
+
+export type LocationNames = {
+  english?: string | null;
+  arabic?: string | null;
+  hebrew?: string | null;
+};
+
+// Stable-id match wins whenever both sides have one (true regardless of
+// which language each side is displayed in). Falls back to comparing every
+// known multilingual name across both sides for documents saved before
+// location ids existed — if neither side has any usable text either, this
+// correctly returns false (there's nothing to compare).
+export function sameLocation(
+  aId: string | null | undefined,
+  bId: string | null | undefined,
+  aText: string | null | undefined,
+  bText: string | null | undefined,
+  aNames?: LocationNames | null,
+  bNames?: LocationNames | null,
+): boolean {
+  if (aId && bId) {
+    return aId === bId;
+  }
+
+  const candidatesA = [aText, aNames?.english, aNames?.arabic, aNames?.hebrew]
+    .filter((value): value is string => !!value)
+    .map((value) => normalizeLocationText(value));
+
+  const candidatesB = [bText, bNames?.english, bNames?.arabic, bNames?.hebrew]
+    .filter((value): value is string => !!value)
+    .map((value) => normalizeLocationText(value));
+
+  return candidatesA.some((value) => candidatesB.includes(value));
+}

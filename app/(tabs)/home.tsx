@@ -46,6 +46,14 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "errand", label: "Errands" },
 ];
 
+const FILTER_ICONS: Record<FilterKey, keyof typeof Ionicons.glyphMap> = {
+  all: "apps-outline",
+  personal: "person-outline",
+  school: "school-outline",
+  work: "briefcase-outline",
+  errand: "location-outline",
+};
+
 export default function HomeScreen() {
   const [unreadHelp, setUnreadHelp] = useState(0);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
@@ -375,15 +383,20 @@ export default function HomeScreen() {
         </Text>
 
         <Pressable
-          style={styles.primaryButton}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            pressed && styles.primaryButtonPressed,
+          ]}
           onPress={() => router.push("/booking/ride-category" as any)}
         >
-          <Text style={styles.primaryButtonText}> Find a Ride 🔍</Text>
+          <Ionicons name="search" size={19} color="#FFFFFF" />
+          <Text style={styles.primaryButtonText}>Find a Ride</Text>
         </Pressable>
 
         <Pressable
-          style={[
+          style={({ pressed }) => [
             styles.outlineButton,
+            pressed && styles.outlineButtonPressed,
             checkingDriver && styles.outlineButtonDisabled,
           ]}
           onPress={handleBecomeDriver}
@@ -392,61 +405,83 @@ export default function HomeScreen() {
           {checkingDriver ? (
             <ActivityIndicator color="#2B2118" />
           ) : (
-            <Text style={styles.outlineButtonText}>Become a Driver →</Text>
+            <>
+              <Ionicons name="car-sport-outline" size={19} color="#2B2118" />
+              <Text style={styles.outlineButtonText}>Become a Driver</Text>
+              <Ionicons name="arrow-forward" size={17} color="#2B2118" />
+            </>
           )}
         </Pressable>
       </View>
 
       {/* --- Trips near you ------------------------------------------- */}
-      <View style={styles.feedHeader}>
-        <Text style={styles.feedTitle}>Trips near you</Text>
-        <Text style={styles.feedSubtitle}>
-          Available rides and services around your area
-        </Text>
+      <View style={styles.feedSection}>
+        <View style={styles.feedHeader}>
+          <View style={styles.feedTitleRow}>
+            <View style={styles.feedTitleIcon}>
+              <Ionicons name="navigate" size={16} color="#F58220" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.feedTitle}>Trips near you</Text>
+              <Text style={styles.feedSubtitle}>
+                Available rides and services around your area
+              </Text>
+            </View>
+          </View>
 
-        {!userLocationId ? (
-          <View style={styles.noAreaBanner}>
-            <Ionicons name="information-circle-outline" size={16} color="#B86115" />
-            <Text style={styles.noAreaBannerText}>
-              Showing recent available trips. Choose your city in Profile to
-              see trips near you first.
-            </Text>
+          {!userLocationId ? (
+            <View style={styles.noAreaBanner}>
+              <Ionicons
+                name="information-circle"
+                size={18}
+                color="#B86115"
+              />
+              <Text style={styles.noAreaBannerText}>
+                Showing recent available trips. Choose your city in Profile
+                to see trips near you first.
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={FILTERS}
+          keyExtractor={(f) => f.key}
+          contentContainerStyle={styles.filterRow}
+          renderItem={({ item: f }) => (
+            <Pressable
+              style={[
+                styles.filterChip,
+                filter === f.key && styles.filterChipActive,
+              ]}
+              onPress={() => setFilter(f.key)}
+            >
+              <Ionicons
+                name={FILTER_ICONS[f.key]}
+                size={14}
+                color={filter === f.key ? "#FFFFFF" : "#7C5F46"}
+              />
+              <Text
+                style={[
+                  styles.filterChipText,
+                  filter === f.key && styles.filterChipTextActive,
+                ]}
+              >
+                {f.label}
+              </Text>
+            </Pressable>
+          )}
+        />
+
+        {feedLoading ? (
+          <View style={styles.feedLoadingBox}>
+            <ActivityIndicator color="#F58220" />
+            <Text style={styles.feedLoadingText}>Loading nearby trips...</Text>
           </View>
         ) : null}
       </View>
-
-      <FlatList
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        data={FILTERS}
-        keyExtractor={(f) => f.key}
-        contentContainerStyle={styles.filterRow}
-        renderItem={({ item: f }) => (
-          <Pressable
-            style={[
-              styles.filterChip,
-              filter === f.key && styles.filterChipActive,
-            ]}
-            onPress={() => setFilter(f.key)}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                filter === f.key && styles.filterChipTextActive,
-              ]}
-            >
-              {f.label}
-            </Text>
-          </Pressable>
-        )}
-      />
-
-      {feedLoading ? (
-        <View style={styles.feedLoadingBox}>
-          <ActivityIndicator color="#F58220" />
-          <Text style={styles.feedLoadingText}>Loading nearby trips...</Text>
-        </View>
-      ) : null}
     </View>
   );
 
@@ -552,66 +587,74 @@ const styles = StyleSheet.create({
   hero: {
     alignItems: "center",
     paddingHorizontal: 24,
-    paddingTop: 10,
+    paddingTop: 4,
+    paddingBottom: 8,
   },
   logo: {
-    width: 170,
-    height: 170,
-    borderRadius: 85,
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: 56,
-    fontWeight: "900",
-    color: "#F39C2D",
+    width: 108,
+    height: 108,
+    borderRadius: 54,
     marginBottom: 14,
   },
-  badge: {
-    backgroundColor: "#FFF2E2",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 30,
-    marginBottom: 24,
-  },
-  badgeText: {
-    color: "#B86115",
-    fontWeight: "700",
-    fontSize: 15,
+  title: {
+    fontSize: 38,
+    fontWeight: "900",
+    color: "#F39C2D",
+    marginBottom: 8,
   },
   description: {
     textAlign: "center",
-    fontSize: 20,
-    lineHeight: 30,
-    color: "#6B7280",
-    marginBottom: 35,
+    fontSize: 15,
+    lineHeight: 21,
+    color: "#8A7A6C",
+    marginBottom: 22,
+    paddingHorizontal: 8,
   },
   primaryButton: {
     width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
     backgroundColor: "#F28C28",
-    paddingVertical: 18,
-    borderRadius: 18,
-    marginBottom: 14,
+    paddingVertical: 16,
+    borderRadius: 16,
+    marginBottom: 10,
+    shadowColor: "#F28C28",
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  primaryButtonPressed: {
+    opacity: 0.9,
   },
   primaryButtonText: {
     textAlign: "center",
     color: "#FFFFFF",
     fontWeight: "800",
-    fontSize: 18,
+    fontSize: 16,
   },
   outlineButton: {
     width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
     backgroundColor: "#FFFFFF",
     borderWidth: 1.5,
-    borderColor: "#D9CDBE",
-    paddingVertical: 18,
-    borderRadius: 18,
-    marginBottom: 14,
+    borderColor: "#E7DCD1",
+    paddingVertical: 16,
+    borderRadius: 16,
+  },
+  outlineButtonPressed: {
+    backgroundColor: "#FBF7F1",
   },
   outlineButtonText: {
     textAlign: "center",
     color: "#2B2118",
     fontWeight: "800",
-    fontSize: 18,
+    fontSize: 16,
   },
   outlineButtonDisabled: {
     opacity: 0.6,
@@ -658,30 +701,40 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     fontSize: 11,
   },
-  ghostButton: {
-    paddingVertical: 12,
-  },
-  ghostButtonText: {
-    color: "#7A6A5A",
-    fontWeight: "700",
-    fontSize: 17,
-  },
 
   // --- Feed ---------------------------------------------------------------
+  feedSection: {
+    marginTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: "#EFE3D6",
+    paddingTop: 20,
+  },
   feedHeader: {
     paddingHorizontal: 20,
-    marginTop: 8,
-    marginBottom: 12,
+    marginBottom: 14,
+  },
+  feedTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  feedTitleIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#FFF2E8",
+    alignItems: "center",
+    justifyContent: "center",
   },
   feedTitle: {
-    fontSize: 22,
+    fontSize: 19,
     fontWeight: "900",
     color: "#111827",
   },
   feedSubtitle: {
-    fontSize: 13,
+    fontSize: 12.5,
     color: "#7C5F46",
-    marginTop: 4,
+    marginTop: 2,
   },
   noAreaBanner: {
     flexDirection: "row",
@@ -690,7 +743,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF2E8",
     borderRadius: 12,
     padding: 10,
-    marginTop: 10,
+    marginTop: 12,
   },
   noAreaBannerText: {
     color: "#B86115",
@@ -700,17 +753,25 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     paddingHorizontal: 20,
-    gap: 8,
-    paddingBottom: 14,
+    paddingRight: 28,
+    paddingBottom: 16,
   },
   filterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     borderWidth: 1,
     borderColor: "#E7DCD1",
     backgroundColor: "#FFFFFF",
     borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     marginRight: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.03,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 1,
   },
   filterChipActive: {
     backgroundColor: "#F58220",

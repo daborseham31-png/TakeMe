@@ -18,6 +18,7 @@ import { db } from "../../firebase";
 import { createPassengerBooking } from "./bookingsLib";
 import DriverReviewsSection from "./DriverReviewsSection";
 import { getDisplayedDriverId } from "./driverReviewsLib";
+import { LocationNames, sameLocation } from "./locationSearch";
 import {
   buildBookingDayFromMatch,
   computeWeeklyTotal,
@@ -68,6 +69,8 @@ type DriverRoute = {
   // place. Absent on documents created before this existed.
   fromLocationId?: string;
   toLocationId?: string;
+  fromLocationNames?: LocationNames;
+  toLocationNames?: LocationNames;
   tripDate?: string;
   deliveryDate?: string;
   day?: string;
@@ -101,21 +104,36 @@ const locationMatches = (
   userValue: string,
   driverLocationId?: string,
   userLocationId?: string,
+  driverNames?: LocationNames,
+  userNames?: LocationNames,
 ) => {
+  if (!userValue && !userLocationId) return true;
+
   // Stable-id match wins whenever both sides picked a suggestion from
   // IsraelLocationAutocomplete — correct even across display languages
-  // ("נצרת" vs "الناصرة" vs "Nazareth"). Falls back to the old normalized
-  // text comparison for documents created before location ids existed.
-  if (driverLocationId && userLocationId) {
-    return driverLocationId === userLocationId;
+  // ("נצרת" vs "الناصرة" vs "Nazareth"). Falls back to comparing every known
+  // multilingual name for documents created before location ids existed —
+  // see sameLocation in locationSearch.ts.
+  if (
+    sameLocation(
+      driverLocationId,
+      userLocationId,
+      driverValue,
+      userValue,
+      driverNames,
+      userNames,
+    )
+  ) {
+    return true;
   }
 
+  // Last-resort safety net for the oldest free-text-only documents (no id,
+  // no multilingual names at all) — a loose substring match beats hiding
+  // the trip outright.
   const driver = normalize(driverValue);
   const user = normalize(userValue);
 
-  if (!user) return true;
-
-  return driver === user || driver.includes(user) || user.includes(driver);
+  return driver.includes(user) || user.includes(driver);
 };
 
 const timeToMinutes = (time: string) => {
@@ -279,10 +297,25 @@ export default function DriverResultsScreen() {
     new Set(),
   );
 
+  const parseLocationNames = (value: unknown): LocationNames | undefined => {
+    try {
+      const parsed = JSON.parse(String(value || ""));
+      return parsed && typeof parsed === "object" ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   const from = String(params.from || "");
   const to = String(params.to || "");
   const fromLocationId = String(params.fromLocationId || "");
   const toLocationId = String(params.toLocationId || "");
+  const fromLocationNames = parseLocationNames(params.fromLocationNames);
+  const toLocationNames = parseLocationNames(params.toLocationNames);
+  // The exact place within the destination city (optional, Personal Ride
+  // only) — pure passthrough to ride-payment/the booking doc, never used
+  // for matching.
+  const destinationDetails = String(params.destinationDetails || "");
   const category = String(params.category || "");
   const genderPref = String(params.genderPref || "any");
   const seats = Number(params.seats || 1);
@@ -374,24 +407,24 @@ export default function DriverResultsScreen() {
       );
 
       const commonFiltered = routesWithProfiles.filter((driver) => {
-        const driverFrom =
-          driver.fromNormalized || normalize(driver.from || "");
-        const driverTo = driver.toNormalized || normalize(driver.to || "");
-
         const activeMatches = driver.active !== false;
         const categoryMatches = !category || driver.category === category;
 
         const fromMatches = locationMatches(
-          driverFrom,
+          driver.from || driver.fromNormalized || "",
           from,
           driver.fromLocationId,
           fromLocationId,
+          driver.fromLocationNames,
+          fromLocationNames,
         );
         const toMatches = locationMatches(
-          driverTo,
+          driver.to || driver.toNormalized || "",
           to,
           driver.toLocationId,
           toLocationId,
+          driver.toLocationNames,
+          toLocationNames,
         );
 
         const driverGender = getDriverGender(driver);
@@ -498,6 +531,7 @@ const handleBookDriver = async (driver: DriverRoute) => {
 
         from: driver.from || from,
         to: driver.to || to,
+        ...(destinationDetails ? { destinationDetails } : {}),
         ...pickupCoordsParams,
 
         date: selectedDate,
@@ -626,6 +660,7 @@ const confirmWeeklyDayPicker = () => {
 
       from: driver.from || from,
       to: driver.to || to,
+      ...(destinationDetails ? { destinationDetails } : {}),
       ...pickupCoordsParams,
 
       driverCar: driver.car || "",
