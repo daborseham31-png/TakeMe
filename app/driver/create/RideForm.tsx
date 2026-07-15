@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as Location from "expo-location";
 import { router } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import React, { useState } from "react";
@@ -16,6 +15,7 @@ import {
 import { auth, db } from "../../../firebase";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
+import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import {
   validateWeeklyRows,
   WeekDayRow,
@@ -237,24 +237,22 @@ export default function RideForm({ category, showPets, onBack }: Props) {
     try {
       setLoading(true);
 
+      // Origin/destination coordinates — resolved ONCE here at creation time
+      // (never re-geocoded when Home loads). Prefers the autocomplete's own
+      // dataset coordinates, falling back to a live geocode of the typed
+      // text only when the locality doesn't have them yet.
       const routeCoords: Record<string, number> = {};
 
-      try {
-        const [fromGeo] = await Location.geocodeAsync(from);
+      const fromCoords = await resolveLocationCoordinates(fromLocation, from);
+      if (fromCoords) {
+        routeCoords.fromLat = fromCoords.latitude;
+        routeCoords.fromLng = fromCoords.longitude;
+      }
 
-        if (fromGeo) {
-          routeCoords.fromLat = fromGeo.latitude;
-          routeCoords.fromLng = fromGeo.longitude;
-        }
-
-        const [toGeo] = await Location.geocodeAsync(to);
-
-        if (toGeo) {
-          routeCoords.toLat = toGeo.latitude;
-          routeCoords.toLng = toGeo.longitude;
-        }
-      } catch {
-        // Ignore geocoding errors — matching still works via text fallback.
+      const toCoords = await resolveLocationCoordinates(toLocation, to);
+      if (toCoords) {
+        routeCoords.toLat = toCoords.latitude;
+        routeCoords.toLng = toCoords.longitude;
       }
 
       await addDoc(collection(db, "driverRoutes"), {

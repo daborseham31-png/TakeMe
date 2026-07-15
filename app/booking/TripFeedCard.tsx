@@ -51,9 +51,10 @@ const CATEGORY_META: Record<
 type Props = {
   item: FeedItem;
   onPressBook: () => void;
+  distanceKm?: number | null;
 };
 
-export default function TripFeedCard({ item, onPressBook }: Props) {
+export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
   const meta = CATEGORY_META[item.category];
   const languageLabels = item.languages
     .map((code) => LANGUAGE_LABELS[code] || code)
@@ -69,12 +70,28 @@ export default function TripFeedCard({ item, onPressBook }: Props) {
           </Text>
         </View>
 
-        {item.isWeekly ? (
-          <View style={styles.weeklyPill}>
-            <Ionicons name="calendar-outline" size={12} color="#B86115" />
-            <Text style={styles.weeklyPillText}>Weekly</Text>
-          </View>
-        ) : null}
+        <View style={styles.topRowRight}>
+          {typeof distanceKm === "number" ? (
+            <View style={styles.distancePill}>
+              <Ionicons name="navigate-outline" size={12} color="#2563EB" />
+              <View>
+                <Text style={styles.distancePillText}>
+                  {distanceKm.toFixed(1)} km away
+                </Text>
+                <Text style={styles.distancePillTextAr}>
+                  على بعد {distanceKm.toFixed(1)} كم
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
+          {item.isWeekly ? (
+            <View style={styles.weeklyPill}>
+              <Ionicons name="calendar-outline" size={12} color="#B86115" />
+              <Text style={styles.weeklyPillText}>Weekly</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
 
       {/* Route / title row */}
@@ -301,6 +318,31 @@ const styles = StyleSheet.create({
   badgeText: {
     fontWeight: "900",
     fontSize: 12,
+  },
+  topRowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  distancePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EFF6FF",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  distancePillText: {
+    color: "#2563EB",
+    fontWeight: "800",
+    fontSize: 11,
+  },
+  distancePillTextAr: {
+    color: "#2563EB",
+    fontWeight: "600",
+    fontSize: 10,
+    textAlign: "right",
   },
   weeklyPill: {
     flexDirection: "row",

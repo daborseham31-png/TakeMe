@@ -8,6 +8,7 @@ import { User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 
 import { db } from "../../firebase";
+import { AccountStatus } from "./adminTypes";
 
 export const isUserAdmin = async (user: User | null): Promise<boolean> => {
   if (!user) return false;
@@ -19,6 +20,32 @@ export const isUserAdmin = async (user: User | null): Promise<boolean> => {
     return snap.data().role === "admin";
   } catch {
     return false;
+  }
+};
+
+export type AccountRestriction = {
+  status: AccountStatus;
+  reason: string;
+};
+
+// Checked right after every sign-in (app/index.tsx) — a blocked/suspended
+// account must never reach any in-app screen, admin or otherwise, even
+// though Firebase Auth itself happily accepted the password.
+export const getAccountRestriction = async (
+  uid: string,
+): Promise<AccountRestriction | null> => {
+  try {
+    const snap = await getDoc(doc(db, "users", uid));
+    if (!snap.exists()) return null;
+
+    const data = snap.data();
+    const status: AccountStatus = data.accountStatus || "active";
+
+    if (status === "active") return null;
+
+    return { status, reason: data.statusReason || "" };
+  } catch {
+    return null;
   }
 };
 

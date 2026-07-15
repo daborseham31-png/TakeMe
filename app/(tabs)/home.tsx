@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
@@ -9,6 +10,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Linking,
   Modal,
   Pressable,
   RefreshControl,
@@ -21,6 +23,7 @@ import {
 import { auth, db } from "../../firebase";
 import { fetchDriverEligibility } from "../driver/driverEligibility";
 import {
+  attachDistances,
   buildErrandBookNav,
   buildQuickRideNav,
   buildWeeklyRideNav,
@@ -28,12 +31,16 @@ import {
   FEED_PAGE_SIZE,
   FeedCategory,
   FeedItem,
-  getUserHomeLocationId,
+  filterNearbyItems,
+  NEARBY_RIDE_RADIUS_KM,
   sortFeedItems,
   subscribeHomeFeed,
 } from "../booking/homeFeedLib";
+import { useCurrentLocation } from "../booking/useCurrentLocation";
 import { WeeklyDriverDay } from "../booking/weeklyBookingLib";
 import TripFeedCard from "../booking/TripFeedCard";
+
+type RideDisplayMode = "nearby" | "all";
 
 const logoImg = require("../../assets/images/logo.jpeg");
 
@@ -66,9 +73,18 @@ export default function HomeScreen() {
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
   const [feedLoading, setFeedLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [userLocationId, setUserLocationId] = useState<string | null>(null);
+
+  // GPS-based nearby/all mode — see useCurrentLocation.ts. Foreground-only,
+  // never tracked in the background, never saved to Firestore.
+  const {
+    state: locationState,
+    coords,
+    canAskAgain,
+    refresh: refreshLocation,
+    requestPermission: requestLocationPermission,
+  } = useCurrentLocation();
+  const [mode, setMode] = useState<RideDisplayMode>("nearby");
 
   const [dayPickerItem, setDayPickerItem] = useState<FeedItem | null>(null);
   const [dayPickerSelected, setDayPickerSelected] = useState<Set<string>>(
@@ -172,20 +188,12 @@ export default function HomeScreen() {
   }, []);
 
   // Trips near you — one combined, live-updating feed (see homeFeedLib.ts).
-  // Re-subscribing on refreshKey change is what "pull to refresh" triggers;
-  // onSnapshot already keeps the list live in between refreshes.
+  // Subscribed exactly once for the component's lifetime; onSnapshot already
+  // keeps the list live, so pull-to-refresh / Nearby-All switching only ever
+  // re-filters this same already-loaded array — no extra Firebase reads.
   useEffect(() => {
     let cancelled = false;
     setFeedLoading(true);
-
-    const unsubAuth = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const locationId = await getUserHomeLocationId(user.uid);
-        if (!cancelled) setUserLocationId(locationId);
-      } else {
-        if (!cancelled) setUserLocationId(null);
-      }
-    });
 
     const unsubFeed = subscribeHomeFeed(
       (items) => {
@@ -203,24 +211,74 @@ export default function HomeScreen() {
 
     return () => {
       cancelled = true;
-      unsubAuth();
       unsubFeed();
     };
-  }, [refreshKey]);
+  }, []);
+
+  // Re-check location every time Home regains focus (app foregrounded,
+  // navigated back to this tab) — this is what makes "nearby" update when
+  // the user has physically moved to a different city. Silent: never
+  // re-prompts the system permission dialog on its own.
+  useFocusEffect(
+    useCallback(() => {
+      refreshLocation();
+    }, [refreshLocation]),
+  );
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
-    setRefreshKey((prev) => prev + 1);
-  }, []);
+    refreshLocation().finally(() => setRefreshing(false));
+  }, [refreshLocation]);
 
-  const visibleFeedItems = useMemo(() => {
-    const filtered =
+  // "Nearby" only ever actually applies once we have granted permission AND
+  // a current fix — otherwise we silently fall back to "All rides" without
+  // blocking the screen (denied / services-disabled / unavailable banners
+  // below explain why).
+  const effectiveMode: RideDisplayMode =
+    mode === "nearby" && locationState === "granted" && coords
+      ? "nearby"
+      : "all";
+
+  const categoryFilteredItems = useMemo(
+    () =>
       filter === "all"
         ? feedItems
-        : feedItems.filter((item) => item.category === filter);
+        : feedItems.filter((item) => item.category === filter),
+    [feedItems, filter],
+  );
 
-    return sortFeedItems(filtered, userLocationId).slice(0, FEED_PAGE_SIZE);
-  }, [feedItems, filter, userLocationId]);
+  const itemsWithDistance = useMemo(
+    () => attachDistances(categoryFilteredItems, coords),
+    [categoryFilteredItems, coords],
+  );
+
+  const nearbyItems = useMemo(
+    () => sortFeedItems(filterNearbyItems(itemsWithDistance)),
+    [itemsWithDistance],
+  );
+
+  const allItemsSorted = useMemo(
+    () => sortFeedItems(itemsWithDistance),
+    [itemsWithDistance],
+  );
+
+  const visibleFeedItems = (
+    effectiveMode === "nearby" ? nearbyItems : allItemsSorted
+  ).slice(0, FEED_PAGE_SIZE);
+
+  // Nearby mode found nothing but there ARE other available items — offer a
+  // one-tap way to see them instead of a dead end.
+  const nearbyIsEmptyButOthersExist =
+    effectiveMode === "nearby" &&
+    nearbyItems.length === 0 &&
+    allItemsSorted.length > 0;
+
+  const handlePressNearbyTab = () => {
+    setMode("nearby");
+    if (locationState !== "granted") {
+      requestLocationPermission();
+    }
+  };
 
   const openDayPicker = (item: FeedItem) => {
     setDayPickerItem(item);
@@ -477,9 +535,15 @@ export default function HomeScreen() {
               <Ionicons name="navigate" size={16} color="#F58220" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.feedTitle}>Trips near you</Text>
+              <Text style={styles.feedTitle}>
+                {effectiveMode === "nearby"
+                  ? "Nearby rides"
+                  : "All available rides"}
+              </Text>
               <Text style={styles.feedSubtitle}>
-                Available rides and services around your area
+                {effectiveMode === "nearby"
+                  ? `Within ${NEARBY_RIDE_RADIUS_KM} km of your current location`
+                  : "Available rides and services, everywhere"}
               </Text>
             </View>
 
@@ -494,17 +558,147 @@ export default function HomeScreen() {
             ) : null}
           </View>
 
-          {!userLocationId ? (
+          {/* Nearby / All toggle */}
+          <View style={styles.modeRow}>
+            <Pressable
+              style={[
+                styles.modeButton,
+                mode === "nearby" && styles.modeButtonActive,
+              ]}
+              onPress={handlePressNearbyTab}
+            >
+              <Ionicons
+                name="navigate"
+                size={14}
+                color={mode === "nearby" ? "#FFFFFF" : "#7C5F46"}
+              />
+              <Text
+                style={[
+                  styles.modeButtonText,
+                  mode === "nearby" && styles.modeButtonTextActive,
+                ]}
+              >
+                Nearby
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.modeButton,
+                mode === "all" && styles.modeButtonActive,
+              ]}
+              onPress={() => setMode("all")}
+            >
+              <Ionicons
+                name="globe-outline"
+                size={14}
+                color={mode === "all" ? "#FFFFFF" : "#7C5F46"}
+              />
+              <Text
+                style={[
+                  styles.modeButtonText,
+                  mode === "all" && styles.modeButtonTextActive,
+                ]}
+              >
+                All rides
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Location state banners — only relevant while the user is trying
+              to use Nearby mode; "All rides" always works regardless. */}
+          {mode === "nearby" && locationState === "checking" ? (
+            <View style={styles.noAreaBanner}>
+              <ActivityIndicator size="small" color="#B86115" />
+              <Text style={styles.noAreaBannerText}>
+                Getting your current location...
+              </Text>
+            </View>
+          ) : null}
+
+          {mode === "nearby" && locationState === "denied" ? (
+            <View style={styles.noAreaBanner}>
+              <Ionicons name="location-outline" size={18} color="#B86115" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.noAreaBannerText}>
+                  Location permission was not granted, so we&apos;re showing
+                  all available rides instead.{"\n"}
+                  لم يتم منح إذن الموقع، لذلك نعرض جميع الرحلات المتاحة.
+                </Text>
+                <Pressable
+                  style={styles.bannerButton}
+                  onPress={
+                    canAskAgain
+                      ? requestLocationPermission
+                      : () => Linking.openSettings()
+                  }
+                >
+                  <Text style={styles.bannerButtonText}>
+                    {canAskAgain ? "Grant location access" : "Open Settings"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
+          {mode === "nearby" && locationState === "services-disabled" ? (
+            <View style={styles.noAreaBanner}>
+              <Ionicons name="location-outline" size={18} color="#B86115" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.noAreaBannerText}>
+                  Location services are turned off on your phone, so
+                  we&apos;re showing all available rides instead.
+                </Text>
+                <Pressable
+                  style={styles.bannerButton}
+                  onPress={requestLocationPermission}
+                >
+                  <Text style={styles.bannerButtonText}>Try again</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
+          {mode === "nearby" && locationState === "unavailable" ? (
             <View style={styles.noAreaBanner}>
               <Ionicons
                 name="information-circle"
                 size={18}
                 color="#B86115"
               />
-              <Text style={styles.noAreaBannerText}>
-                Showing recent available trips. Choose your city in Profile
-                to see trips near you first.
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.noAreaBannerText}>
+                  We couldn&apos;t get your current location, so we&apos;re
+                  showing all available rides instead.
+                </Text>
+                <Pressable
+                  style={styles.bannerButton}
+                  onPress={requestLocationPermission}
+                >
+                  <Text style={styles.bannerButtonText}>Try again</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
+          {nearbyIsEmptyButOthersExist ? (
+            <View style={styles.noAreaBanner}>
+              <Ionicons
+                name="information-circle"
+                size={18}
+                color="#B86115"
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.noAreaBannerText}>
+                  No nearby rides within {NEARBY_RIDE_RADIUS_KM} km right now.
+                </Text>
+                <Pressable
+                  style={styles.bannerButton}
+                  onPress={() => setMode("all")}
+                >
+                  <Text style={styles.bannerButtonText}>Show all rides</Text>
+                </Pressable>
+              </View>
             </View>
           ) : null}
         </View>
@@ -563,7 +757,11 @@ export default function HomeScreen() {
         keyExtractor={(item) => `${item.category}-${item.id}`}
         renderItem={({ item }) => (
           <View style={styles.feedItemWrap}>
-            <TripFeedCard item={item} onPressBook={() => handleBookPress(item)} />
+            <TripFeedCard
+              item={item}
+              onPressBook={() => handleBookPress(item)}
+              distanceKm={item.distanceKm}
+            />
           </View>
         )}
         ListHeaderComponent={listHeader}
@@ -572,8 +770,18 @@ export default function HomeScreen() {
             <View style={styles.emptyFeedBox}>
               <Ionicons name="search-outline" size={32} color="#8B7B6B" />
               <Text style={styles.emptyFeedText}>
-                No nearby trips available right now.
+                {effectiveMode === "nearby"
+                  ? `No nearby rides within ${NEARBY_RIDE_RADIUS_KM} km right now.`
+                  : "No available rides right now."}
               </Text>
+              {effectiveMode === "nearby" && allItemsSorted.length > 0 ? (
+                <Pressable
+                  style={styles.bannerButton}
+                  onPress={() => setMode("all")}
+                >
+                  <Text style={styles.bannerButtonText}>Show all rides</Text>
+                </Pressable>
+              ) : null}
             </View>
           ) : null
         }
@@ -905,6 +1113,47 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: "700",
     flexShrink: 1,
+  },
+  modeRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 14,
+  },
+  modeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  modeButtonActive: {
+    backgroundColor: "#F58220",
+    borderColor: "#F58220",
+  },
+  modeButtonText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  modeButtonTextActive: {
+    color: "#FFFFFF",
+  },
+  bannerButton: {
+    alignSelf: "flex-start",
+    backgroundColor: "#F58220",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginTop: 8,
+  },
+  bannerButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 12.5,
   },
   filterRow: {
     paddingHorizontal: 20,

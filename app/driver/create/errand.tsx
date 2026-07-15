@@ -15,6 +15,7 @@ import {
 import { auth, db } from "../../../firebase";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
+import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
 import YesNoField from "./YesNoField";
@@ -160,6 +161,13 @@ export default function ErrandJobScreen() {
     try {
       setLoading(true);
 
+      // Resolved ONCE here at creation time (never re-geocoded when Home
+      // loads) — see resolveLocationCoordinates in locationSearch.ts.
+      const locationCoords = await resolveLocationCoordinates(
+        errandLocationPlace,
+        errandLocation,
+      );
+
       await addDoc(collection(db, "errandJobs"), {
         ownerId: user.uid,
 
@@ -185,6 +193,8 @@ export default function ErrandJobScreen() {
           arabic: errandLocationPlace.arabic,
           hebrew: errandLocationPlace.hebrew,
         },
+        locationLat: locationCoords?.latitude ?? null,
+        locationLng: locationCoords?.longitude ?? null,
 
         date: cleanErrandDate,
         day: errandDay,

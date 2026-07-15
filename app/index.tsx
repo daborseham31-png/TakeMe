@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,7 +13,7 @@ import {
 } from "react-native";
 
 import { auth } from "../firebase";
-import { isUserAdmin } from "./admin/adminAuthLib";
+import { getAccountRestriction, isUserAdmin } from "./admin/adminAuthLib";
 
 export default function AppStartScreen() {
   const [loading, setLoading] = useState(true);
@@ -36,6 +36,23 @@ export default function AppStartScreen() {
 
     try {
       const credential = await signInWithEmailAndPassword(auth, email, password);
+
+      // A blocked/suspended account must never reach any screen, even
+      // though Firebase Auth itself just accepted the password — sign them
+      // straight back out and tell them why.
+      const restriction = await getAccountRestriction(credential.user.uid);
+
+      if (restriction) {
+        await signOut(auth);
+
+        Alert.alert(
+          restriction.status === "blocked" ? "Account blocked" : "Account suspended",
+          restriction.reason
+            ? `This account was ${restriction.status} by an admin: ${restriction.reason}`
+            : `This account has been ${restriction.status} by an admin.`,
+        );
+        return;
+      }
 
       // Never trust the role toggled in the UI as a PERMISSION — always read
       // the SIGNED-IN user's own users/{uid} doc and check its real `role`
