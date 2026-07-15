@@ -1,6 +1,5 @@
 import { router } from "expo-router";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,7 +12,8 @@ import {
   View,
 } from "react-native";
 
-import { auth, db } from "../firebase";
+import { auth } from "../firebase";
+import { isUserAdmin } from "./admin/adminAuthLib";
 
 export default function AppStartScreen() {
   const [loading, setLoading] = useState(true);
@@ -35,31 +35,21 @@ export default function AppStartScreen() {
     }
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const credential = await signInWithEmailAndPassword(auth, email, password);
 
-      const userDoc = await getDoc(doc(db, "users", "admin"));
-
-      let roleFromDatabase = "user";
-
-      if (userDoc.exists()) {
-        const adminEmail = userDoc.data().email;
-        const adminRole = userDoc.data().role;
-
-        if (
-          email.trim().toLowerCase() === adminEmail.trim().toLowerCase() &&
-          adminRole === "admin"
-        ) {
-          roleFromDatabase = "admin";
-        }
-      }
-
-      if (role === "admin" && roleFromDatabase !== "admin") {
-        Alert.alert("Access denied", "This account is not an admin.");
-        return;
-      }
+      // Never trust the role toggled in the UI as a PERMISSION — always read
+      // the SIGNED-IN user's own users/{uid} doc and check its real `role`
+      // field before allowing entry to admin pages. The toggle only ever
+      // expresses which experience the user wants to log into.
+      const admin = await isUserAdmin(credential.user);
 
       if (role === "admin") {
-        router.replace("/login/admin");
+        if (!admin) {
+          Alert.alert("Access denied", "This account is not an admin.");
+          return;
+        }
+
+        router.replace("/admin" as any);
       } else {
         router.replace("/(tabs)/home" as any);
       }
