@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import React, { useEffect, useState } from "react";
@@ -11,14 +12,21 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth } from "../firebase";
+import { useLanguage } from "./i18n/LanguageProvider";
+import LanguageSelectorModal from "./i18n/LanguageSelectorModal";
 import { getAccountRestriction, isUserAdmin } from "./admin/adminAuthLib";
 
 export default function AppStartScreen() {
+  const { t } = useTranslation();
+  const { isRTL, language } = useLanguage();
+
   const [loading, setLoading] = useState(true);
   const [showPw, setShowPw] = useState(false);
   const [role, setRole] = useState<"user" | "admin">("user");
+  const [languageModalVisible, setLanguageModalVisible] = useState(false);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,7 +38,7 @@ export default function AppStartScreen() {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert("Missing details", "Please enter email and password.");
+      Alert.alert(t("auth.missingDetails"), t("auth.enterEmailPassword"));
       return;
     }
 
@@ -45,11 +53,21 @@ export default function AppStartScreen() {
       if (restriction) {
         await signOut(auth);
 
+        const statusWord =
+          restriction.status === "blocked"
+            ? t("auth.statusWordBlocked")
+            : t("auth.statusWordSuspended");
+
         Alert.alert(
-          restriction.status === "blocked" ? "Account blocked" : "Account suspended",
+          restriction.status === "blocked"
+            ? t("auth.accountBlocked")
+            : t("auth.accountSuspended"),
           restriction.reason
-            ? `This account was ${restriction.status} by an admin: ${restriction.reason}`
-            : `This account has been ${restriction.status} by an admin.`,
+            ? t("auth.blockedByAdmin", {
+                status: statusWord,
+                reason: restriction.reason,
+              })
+            : t("auth.blockedByAdminNoReason", { status: statusWord }),
         );
         return;
       }
@@ -62,7 +80,7 @@ export default function AppStartScreen() {
 
       if (role === "admin") {
         if (!admin) {
-          Alert.alert("Access denied", "This account is not an admin.");
+          Alert.alert(t("auth.accessDenied"), t("auth.notAdmin"));
           return;
         }
 
@@ -71,15 +89,15 @@ export default function AppStartScreen() {
         router.replace("/(tabs)/home" as any);
       }
     } catch (error: any) {
-      Alert.alert("Login failed", "Invalid email or password.");
+      Alert.alert(t("auth.loginFailed"), t("auth.invalidCredentials"));
     }
   };
 
   if (loading) {
     return (
       <SafeAreaView style={styles.splash}>
-        <Text style={styles.logo}>TakeMe</Text>
-        <Text style={styles.tagline}>Connecting people, simplifying life</Text>
+        <Text style={styles.logo}>{t("common.appName")}</Text>
+        <Text style={styles.tagline}>{t("auth.tagline")}</Text>
         <ActivityIndicator size="large" color="#ffffff" style={styles.loader} />
       </SafeAreaView>
     );
@@ -87,11 +105,22 @@ export default function AppStartScreen() {
 
   return (
     <SafeAreaView style={styles.page}>
-      <View style={styles.card}>
-        <Text style={styles.title}>Login</Text>
-        <Text style={styles.subtitle}>Welcome back!</Text>
+      <Pressable
+        style={styles.languagePill}
+        onPress={() => setLanguageModalVisible(true)}
+        hitSlop={8}
+      >
+        <Ionicons name="globe-outline" size={16} color="#7C5F46" />
+        <Text style={styles.languagePillText}>{language.toUpperCase()}</Text>
+      </Pressable>
 
-        <Text style={styles.label}>Login as</Text>
+      <View style={styles.card}>
+        <Text style={styles.title}>{t("auth.loginTitle")}</Text>
+        <Text style={styles.subtitle}>{t("auth.welcomeBack")}</Text>
+
+        <Text style={[styles.label, isRTL && styles.textRTL]}>
+          {t("auth.loginAs")}
+        </Text>
 
         <View style={styles.roleRow}>
           <Pressable
@@ -106,7 +135,7 @@ export default function AppStartScreen() {
             <Text
               style={[styles.roleText, role === "user" && styles.activeText]}
             >
-              User
+              {t("auth.user")}
             </Text>
           </Pressable>
 
@@ -122,52 +151,66 @@ export default function AppStartScreen() {
             <Text
               style={[styles.roleText, role === "admin" && styles.activeText]}
             >
-              Admin
+              {t("auth.admin")}
             </Text>
           </Pressable>
         </View>
 
-        <Text style={styles.label}>Email</Text>
+        <Text style={[styles.label, isRTL && styles.textRTL]}>
+          {t("auth.email")}
+        </Text>
         <TextInput
           style={styles.input}
-          placeholder="Enter your email"
+          placeholder={t("auth.emailPlaceholder")}
           placeholderTextColor="#8b7b6b"
           keyboardType="email-address"
           autoCapitalize="none"
+          // Email addresses must stay readable regardless of app language —
+          // never mirrored to RTL.
+          textAlign="left"
           value={email}
           onChangeText={setEmail}
         />
 
-        <Text style={styles.label}>Password</Text>
+        <Text style={[styles.label, isRTL && styles.textRTL]}>
+          {t("auth.password")}
+        </Text>
         <View style={styles.passwordRow}>
           <TextInput
             style={styles.passwordInput}
-            placeholder="Password"
+            placeholder={t("auth.passwordPlaceholder")}
             placeholderTextColor="#8b7b6b"
             secureTextEntry={!showPw}
             value={password}
             onChangeText={setPassword}
           />
           <Pressable onPress={() => setShowPw(!showPw)}>
-            <Text style={styles.eye}>{showPw ? "Hide" : "Show"}</Text>
+            <Text style={styles.eye}>
+              {showPw ? t("auth.hide") : t("auth.show")}
+            </Text>
           </Pressable>
         </View>
 
         <Pressable onPress={() => router.push("/login/forgot-password" as any)}>
-          <Text style={styles.forgot}>Forgot Password?</Text>
+          <Text style={styles.forgot}>{t("auth.forgotPassword")}</Text>
         </Pressable>
 
         <Pressable style={styles.loginButton} onPress={handleLogin}>
-          <Text style={styles.loginText}>Login</Text>
+          <Text style={styles.loginText}>{t("auth.loginButton")}</Text>
         </Pressable>
 
         <Pressable onPress={() => router.push("/login/signup" as any)}>
           <Text style={styles.signupText}>
-            Don't have an account?{" "}
-            <Text style={styles.signupLink}>Sign Up</Text>
+            {t("auth.noAccount")}{" "}
+            <Text style={styles.signupLink}>{t("auth.signUp")}</Text>
           </Text>
         </Pressable>
       </View>
+
+      <LanguageSelectorModal
+        visible={languageModalVisible}
+        onClose={() => setLanguageModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -198,6 +241,25 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 20,
   },
+  languagePill: {
+    position: "absolute",
+    top: 16,
+    right: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  languagePillText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 12,
+  },
   card: {
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
@@ -223,6 +285,10 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 10,
     marginTop: 14,
+  },
+  textRTL: {
+    textAlign: "right",
+    writingDirection: "rtl",
   },
   roleRow: {
     flexDirection: "row",
@@ -275,6 +341,9 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 14,
     color: "#111827",
+    // Passwords are opaque (secureTextEntry) but keep LTR entry — matches
+    // the email field and avoids caret-direction weirdness while typing.
+    textAlign: "left",
   },
   eye: {
     color: "#8B7B6B",

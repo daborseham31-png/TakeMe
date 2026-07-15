@@ -19,9 +19,11 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { fetchDriverEligibility } from "../driver/driverEligibility";
+import { useLanguage } from "../i18n/LanguageProvider";
 import {
   attachDistances,
   buildErrandBookNav,
@@ -46,13 +48,7 @@ const logoImg = require("../../assets/images/logo.jpeg");
 
 type FilterKey = "all" | FeedCategory;
 
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "personal", label: "Personal" },
-  { key: "school", label: "School" },
-  { key: "work", label: "Work" },
-  { key: "errand", label: "Errands" },
-];
+const FILTER_KEYS: FilterKey[] = ["all", "personal", "school", "work", "errand"];
 
 const FILTER_ICONS: Record<FilterKey, keyof typeof Ionicons.glyphMap> = {
   all: "apps-outline",
@@ -63,6 +59,8 @@ const FILTER_ICONS: Record<FilterKey, keyof typeof Ionicons.glyphMap> = {
 };
 
 export default function HomeScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [unreadHelp, setUnreadHelp] = useState(0);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
   // Unread chat messages across all of the user's conversations.
@@ -310,7 +308,7 @@ export default function HomeScreen() {
     );
 
     if (chosen.length === 0) {
-      Alert.alert("Choose a day", "Please select at least one day to continue.");
+      Alert.alert(t("rides.chooseDayTitle"), t("rides.chooseDayMessage"));
       return;
     }
 
@@ -362,8 +360,8 @@ export default function HomeScreen() {
 
       if (eligibility.status === "license_expired") {
         Alert.alert(
-          "License expired",
-          "Your driving license is expired. Please upload a valid license before becoming a driver.",
+          t("driver.licenseExpired"),
+          t("driver.licenseExpiredMessage"),
         );
       }
 
@@ -371,7 +369,7 @@ export default function HomeScreen() {
       // the same verification screen.
       router.push("/driver/verify-license" as any);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not check your driver status.");
+      Alert.alert(t("common.error"), error?.message || t("driver.couldNotCheckStatus"));
     } finally {
       setCheckingDriver(false);
     }
@@ -390,7 +388,7 @@ export default function HomeScreen() {
           />
           <View>
             <Text style={styles.brandTitle}>Take Me</Text>
-            <Text style={styles.brandTagline}>Community Rides</Text>
+            <Text style={styles.brandTagline}>{t("home.communityRides")}</Text>
           </View>
         </View>
 
@@ -466,15 +464,12 @@ export default function HomeScreen() {
 
           <View style={styles.heroBadge}>
             <Ionicons name="sparkles" size={13} color="#FFFFFF" />
-            <Text style={styles.heroBadgeText}>Connecting people</Text>
+            <Text style={styles.heroBadgeText}>{t("home.connectingPeople")}</Text>
           </View>
 
-          <Text style={styles.heroTitle}>Where would you{"\n"}like to go?</Text>
+          <Text style={styles.heroTitle}>{t("home.whereToGo")}</Text>
 
-          <Text style={styles.heroDescription}>
-            Connect with trusted neighbors heading your way. Safe, affordable
-            rides for your community.
-          </Text>
+          <Text style={styles.heroDescription}>{t("home.heroDescription")}</Text>
 
           <Pressable
             style={({ pressed }) => [
@@ -487,13 +482,17 @@ export default function HomeScreen() {
               <Ionicons name="search" size={18} color="#F58220" />
             </View>
             <View style={styles.heroRowText}>
-              <Text style={styles.heroRowTitle}>Find a Ride</Text>
+              <Text style={styles.heroRowTitle}>{t("home.findARide")}</Text>
               <Text style={styles.heroRowSubtitle}>
-                Search for rides near you
+                {t("home.findARideSubtitle")}
               </Text>
             </View>
             <View style={styles.heroRowArrow}>
-              <Ionicons name="arrow-forward" size={16} color="#F58220" />
+              <Ionicons
+                name={isRTL ? "arrow-back" : "arrow-forward"}
+                size={16}
+                color="#F58220"
+              />
             </View>
           </Pressable>
 
@@ -515,13 +514,17 @@ export default function HomeScreen() {
               )}
             </View>
             <View style={styles.heroRowText}>
-              <Text style={styles.heroRowTitle}>Become a Driver</Text>
+              <Text style={styles.heroRowTitle}>{t("home.becomeADriver")}</Text>
               <Text style={styles.heroRowSubtitle}>
-                Join our community of drivers
+                {t("home.becomeADriverSubtitle")}
               </Text>
             </View>
             <View style={styles.heroRowArrow}>
-              <Ionicons name="arrow-forward" size={16} color="#F58220" />
+              <Ionicons
+                name={isRTL ? "arrow-back" : "arrow-forward"}
+                size={16}
+                color="#F58220"
+              />
             </View>
           </Pressable>
         </LinearGradient>
@@ -537,13 +540,13 @@ export default function HomeScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.feedTitle}>
                 {effectiveMode === "nearby"
-                  ? "Nearby rides"
-                  : "All available rides"}
+                  ? t("home.nearbyRides")
+                  : t("home.allAvailableRides")}
               </Text>
               <Text style={styles.feedSubtitle}>
                 {effectiveMode === "nearby"
-                  ? `Within ${NEARBY_RIDE_RADIUS_KM} km of your current location`
-                  : "Available rides and services, everywhere"}
+                  ? t("home.withinRadius", { radius: NEARBY_RIDE_RADIUS_KM })
+                  : t("home.allRidesEverywhere")}
               </Text>
             </View>
 
@@ -552,8 +555,12 @@ export default function HomeScreen() {
                 style={styles.viewAllChip}
                 onPress={() => setFilter("all")}
               >
-                <Text style={styles.viewAllChipText}>View all</Text>
-                <Ionicons name="arrow-forward" size={13} color="#F58220" />
+                <Text style={styles.viewAllChipText}>{t("common.viewAll")}</Text>
+                <Ionicons
+                  name={isRTL ? "arrow-back" : "arrow-forward"}
+                  size={13}
+                  color="#F58220"
+                />
               </Pressable>
             ) : null}
           </View>
@@ -578,7 +585,7 @@ export default function HomeScreen() {
                   mode === "nearby" && styles.modeButtonTextActive,
                 ]}
               >
-                Nearby
+                {t("home.nearby")}
               </Text>
             </Pressable>
 
@@ -600,7 +607,7 @@ export default function HomeScreen() {
                   mode === "all" && styles.modeButtonTextActive,
                 ]}
               >
-                All rides
+                {t("home.allRides")}
               </Text>
             </Pressable>
           </View>
@@ -611,7 +618,7 @@ export default function HomeScreen() {
             <View style={styles.noAreaBanner}>
               <ActivityIndicator size="small" color="#B86115" />
               <Text style={styles.noAreaBannerText}>
-                Getting your current location...
+                {t("home.gettingLocation")}
               </Text>
             </View>
           ) : null}
@@ -621,9 +628,7 @@ export default function HomeScreen() {
               <Ionicons name="location-outline" size={18} color="#B86115" />
               <View style={{ flex: 1 }}>
                 <Text style={styles.noAreaBannerText}>
-                  Location permission was not granted, so we&apos;re showing
-                  all available rides instead.{"\n"}
-                  لم يتم منح إذن الموقع، لذلك نعرض جميع الرحلات المتاحة.
+                  {t("home.locationDenied")}
                 </Text>
                 <Pressable
                   style={styles.bannerButton}
@@ -634,7 +639,7 @@ export default function HomeScreen() {
                   }
                 >
                   <Text style={styles.bannerButtonText}>
-                    {canAskAgain ? "Grant location access" : "Open Settings"}
+                    {canAskAgain ? t("home.grantLocationAccess") : t("common.openSettings")}
                   </Text>
                 </Pressable>
               </View>
@@ -646,14 +651,13 @@ export default function HomeScreen() {
               <Ionicons name="location-outline" size={18} color="#B86115" />
               <View style={{ flex: 1 }}>
                 <Text style={styles.noAreaBannerText}>
-                  Location services are turned off on your phone, so
-                  we&apos;re showing all available rides instead.
+                  {t("home.locationServicesDisabled")}
                 </Text>
                 <Pressable
                   style={styles.bannerButton}
                   onPress={requestLocationPermission}
                 >
-                  <Text style={styles.bannerButtonText}>Try again</Text>
+                  <Text style={styles.bannerButtonText}>{t("common.tryAgain")}</Text>
                 </Pressable>
               </View>
             </View>
@@ -668,14 +672,13 @@ export default function HomeScreen() {
               />
               <View style={{ flex: 1 }}>
                 <Text style={styles.noAreaBannerText}>
-                  We couldn&apos;t get your current location, so we&apos;re
-                  showing all available rides instead.
+                  {t("home.locationUnavailable")}
                 </Text>
                 <Pressable
                   style={styles.bannerButton}
                   onPress={requestLocationPermission}
                 >
-                  <Text style={styles.bannerButtonText}>Try again</Text>
+                  <Text style={styles.bannerButtonText}>{t("common.tryAgain")}</Text>
                 </Pressable>
               </View>
             </View>
@@ -690,13 +693,13 @@ export default function HomeScreen() {
               />
               <View style={{ flex: 1 }}>
                 <Text style={styles.noAreaBannerText}>
-                  No nearby rides within {NEARBY_RIDE_RADIUS_KM} km right now.
+                  {t("home.noNearbyRides", { radius: NEARBY_RIDE_RADIUS_KM })}
                 </Text>
                 <Pressable
                   style={styles.bannerButton}
                   onPress={() => setMode("all")}
                 >
-                  <Text style={styles.bannerButtonText}>Show all rides</Text>
+                  <Text style={styles.bannerButtonText}>{t("home.showAllRides")}</Text>
                 </Pressable>
               </View>
             </View>
@@ -706,14 +709,14 @@ export default function HomeScreen() {
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
-          data={FILTERS}
-          keyExtractor={(f) => f.key}
+          data={FILTER_KEYS}
+          keyExtractor={(key) => key}
           contentContainerStyle={styles.filterRow}
-          renderItem={({ item: f }) => {
-            const active = filter === f.key;
+          renderItem={({ item: key }) => {
+            const active = filter === key;
 
             return (
-              <Pressable style={styles.filterChip} onPress={() => setFilter(f.key)}>
+              <Pressable style={styles.filterChip} onPress={() => setFilter(key)}>
                 {active ? (
                   <LinearGradient
                     colors={["#FFB870", "#F58220"]}
@@ -723,7 +726,7 @@ export default function HomeScreen() {
                   />
                 ) : null}
                 <Ionicons
-                  name={FILTER_ICONS[f.key]}
+                  name={FILTER_ICONS[key]}
                   size={14}
                   color={active ? "#FFFFFF" : "#7C5F46"}
                 />
@@ -733,7 +736,7 @@ export default function HomeScreen() {
                     active && styles.filterChipTextActive,
                   ]}
                 >
-                  {f.label}
+                  {t(`home.filters.${key}`)}
                 </Text>
               </Pressable>
             );
@@ -743,7 +746,7 @@ export default function HomeScreen() {
         {feedLoading ? (
           <View style={styles.feedLoadingBox}>
             <ActivityIndicator color="#F58220" />
-            <Text style={styles.feedLoadingText}>Loading nearby trips...</Text>
+            <Text style={styles.feedLoadingText}>{t("home.loadingTrips")}</Text>
           </View>
         ) : null}
       </View>
@@ -771,15 +774,15 @@ export default function HomeScreen() {
               <Ionicons name="search-outline" size={32} color="#8B7B6B" />
               <Text style={styles.emptyFeedText}>
                 {effectiveMode === "nearby"
-                  ? `No nearby rides within ${NEARBY_RIDE_RADIUS_KM} km right now.`
-                  : "No available rides right now."}
+                  ? t("home.noNearbyRides", { radius: NEARBY_RIDE_RADIUS_KM })
+                  : t("home.noAvailableRides")}
               </Text>
               {effectiveMode === "nearby" && allItemsSorted.length > 0 ? (
                 <Pressable
                   style={styles.bannerButton}
                   onPress={() => setMode("all")}
                 >
-                  <Text style={styles.bannerButtonText}>Show all rides</Text>
+                  <Text style={styles.bannerButtonText}>{t("home.showAllRides")}</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -801,9 +804,11 @@ export default function HomeScreen() {
           <Pressable style={StyleSheet.absoluteFill} onPress={closeDayPicker} />
 
           <View style={styles.dayPickerCard}>
-            <Text style={styles.dayPickerTitle}>Choose your days</Text>
-            <Text style={styles.dayPickerSubtitle}>
-              Pick one or more available days for this weekly trip.
+            <Text style={[styles.dayPickerTitle, isRTL && styles.textRTL]}>
+              {t("rides.pickDaysTitle")}
+            </Text>
+            <Text style={[styles.dayPickerSubtitle, isRTL && styles.textRTL]}>
+              {t("rides.pickDaysSubtitle")}
             </Text>
 
             <FlatList
@@ -828,7 +833,8 @@ export default function HomeScreen() {
                         {day.dayName} · {day.date}
                       </Text>
                       <Text style={styles.dayRowSubtitle}>
-                        {day.time} · ₪{day.price} · {day.remainingSeats} left
+                        {day.time} · ₪{day.price} ·{" "}
+                        {t("rides.seatsLeft", { count: day.remainingSeats })}
                       </Text>
                     </View>
                   </Pressable>
@@ -838,14 +844,14 @@ export default function HomeScreen() {
 
             <View style={styles.dayPickerButtonsRow}>
               <Pressable style={styles.dayPickerCancel} onPress={closeDayPicker}>
-                <Text style={styles.dayPickerCancelText}>Cancel</Text>
+                <Text style={styles.dayPickerCancelText}>{t("common.cancel")}</Text>
               </Pressable>
 
               <Pressable
                 style={styles.dayPickerConfirm}
                 onPress={confirmDayPicker}
               >
-                <Text style={styles.dayPickerConfirmText}>Continue</Text>
+                <Text style={styles.dayPickerConfirmText}>{t("common.continue")}</Text>
               </Pressable>
             </View>
           </View>
@@ -862,6 +868,10 @@ const styles = StyleSheet.create({
   },
   scroll: {
     paddingBottom: 40,
+  },
+  textRTL: {
+    textAlign: "right",
+    writingDirection: "rtl",
   },
   // --- Top brand bar -------------------------------------------------------
   topBar: {

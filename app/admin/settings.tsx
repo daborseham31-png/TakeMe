@@ -7,6 +7,7 @@
 // config doc, so a toggle here would not actually change anything.
 // ---------------------------------------------------------------------------
 
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import Constants from "expo-constants";
 import { router } from "expo-router";
@@ -14,19 +15,31 @@ import { signOut } from "firebase/auth";
 import { doc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
+import { useLanguage } from "../i18n/LanguageProvider";
+import LanguageSelectorModal from "../i18n/LanguageSelectorModal";
+import { SUPPORTED_LANGUAGES } from "../i18n/languages";
 import { getAdminProfile } from "./adminAuthLib";
 import { adminColors, adminRadius, adminSpacing } from "./adminTheme";
 import AdminScreen from "./components/AdminScreen";
 import { LoadingState } from "./components/AdminStates";
 
 export default function AdminSettingsScreen() {
+  const { t } = useTranslation();
+  const { language } = useLanguage();
+
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [languageModalVisible, setLanguageModalVisible] = useState(false);
+
+  const currentLanguageName =
+    SUPPORTED_LANGUAGES.find((lang) => lang.code === language)?.nativeName ??
+    language;
 
   useEffect(() => {
     (async () => {
@@ -66,19 +79,19 @@ export default function AdminSettingsScreen() {
     try {
       setSaving(true);
       await updateDoc(doc(db, "users", uid), { name, photo });
-      Alert.alert("Saved", "Your admin profile was updated.");
+      Alert.alert(t("common.success"), t("profile.profileUpdated"));
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not save your profile.");
+      Alert.alert(t("common.error"), error?.message || t("errors.couldNotSave"));
     } finally {
       setSaving(false);
     }
   };
 
   const handleLogout = () => {
-    Alert.alert("Log out", "Are you sure you want to log out?", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("common.logOut"), t("common.areYouSure"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Log out",
+        text: t("common.logOut"),
         style: "destructive",
         onPress: async () => {
           await signOut(auth);
@@ -90,14 +103,14 @@ export default function AdminSettingsScreen() {
 
   if (loading) {
     return (
-      <AdminScreen title="Settings" activeKey="settings">
-        <LoadingState label="Loading settings..." />
+      <AdminScreen title={t("admin.settings")} activeKey="settings">
+        <LoadingState label={t("common.loading")} />
       </AdminScreen>
     );
   }
 
   return (
-    <AdminScreen title="Settings" activeKey="settings">
+    <AdminScreen title={t("admin.settings")} activeKey="settings">
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.card}>
           <Pressable style={styles.avatarWrapper} onPress={pickImage}>
@@ -108,14 +121,19 @@ export default function AdminSettingsScreen() {
                 <Text style={styles.avatarIcon}>👤</Text>
               </View>
             )}
-            <Text style={styles.changePhotoText}>Change photo</Text>
+            <Text style={styles.changePhotoText}>{t("admin.changePhoto")}</Text>
           </Pressable>
 
-          <Text style={styles.label}>Name</Text>
+          <Text style={styles.label}>{t("admin.name")}</Text>
           <TextInput style={styles.input} value={name} onChangeText={setName} />
 
-          <Text style={styles.label}>Email</Text>
-          <TextInput style={[styles.input, styles.inputDisabled]} value={email} editable={false} />
+          <Text style={styles.label}>{t("profile.email")}</Text>
+          <TextInput
+            style={[styles.input, styles.inputDisabled]}
+            value={email}
+            editable={false}
+            textAlign="left"
+          />
 
           <Pressable
             style={[styles.saveButton, saving && styles.saveButtonDisabled]}
@@ -125,22 +143,43 @@ export default function AdminSettingsScreen() {
             {saving ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.saveText}>Save Changes</Text>
+              <Text style={styles.saveText}>{t("profile.saveChanges")}</Text>
             )}
           </Pressable>
         </View>
 
+        <Pressable
+          style={styles.card}
+          onPress={() => setLanguageModalVisible(true)}
+        >
+          <View style={styles.languageRow}>
+            <View style={styles.languageRowLeft}>
+              <Ionicons name="globe-outline" size={20} color={adminColors.textMuted} />
+              <Text style={styles.rowLabel}>{t("settings.language")}</Text>
+            </View>
+            <View style={styles.languageRowRight}>
+              <Text style={styles.rowValue}>{currentLanguageName}</Text>
+              <Ionicons name="chevron-forward" size={18} color={adminColors.placeholder} />
+            </View>
+          </View>
+        </Pressable>
+
         <View style={styles.card}>
-          <Text style={styles.rowLabel}>App version</Text>
+          <Text style={styles.rowLabel}>{t("admin.appVersion")}</Text>
           <Text style={styles.rowValue}>
             {Constants.expoConfig?.version || "1.0.0"}
           </Text>
         </View>
 
         <Pressable style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutText}>Log Out</Text>
+          <Text style={styles.logoutText}>{t("common.logOut")}</Text>
         </Pressable>
       </ScrollView>
+
+      <LanguageSelectorModal
+        visible={languageModalVisible}
+        onClose={() => setLanguageModalVisible(false)}
+      />
     </AdminScreen>
   );
 }
@@ -190,6 +229,21 @@ const styles = StyleSheet.create({
     color: adminColors.text,
     marginBottom: 8,
     marginTop: 10,
+  },
+  languageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  languageRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  languageRowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   input: {
     borderWidth: 1,
