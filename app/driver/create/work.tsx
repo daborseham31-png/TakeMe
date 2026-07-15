@@ -15,6 +15,7 @@ import {
 import { auth, db } from "../../../firebase";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
+import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
 
@@ -169,6 +170,13 @@ export default function WorkJobScreen() {
     try {
       setLoading(true);
 
+      // Resolved ONCE here at creation time (never re-geocoded when Home
+      // loads) — see resolveLocationCoordinates in locationSearch.ts.
+      const locationCoords = await resolveLocationCoordinates(
+        jobLocationPlace,
+        jobLocation,
+      );
+
       await addDoc(collection(db, "workJobs"), {
         employerId: user.uid,
 
@@ -192,6 +200,8 @@ export default function WorkJobScreen() {
           arabic: jobLocationPlace.arabic,
           hebrew: jobLocationPlace.hebrew,
         },
+        locationLat: locationCoords?.latitude ?? null,
+        locationLng: locationCoords?.longitude ?? null,
 
         date: cleanJobDate,
         day: jobDay,

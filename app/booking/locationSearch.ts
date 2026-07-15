@@ -5,6 +5,8 @@
 // text — never duplicate this logic in a screen.
 // ---------------------------------------------------------------------------
 
+import * as Location from "expo-location";
+
 import { IsraelLocation, ISRAEL_LOCATIONS } from "./israelLocations";
 
 export type InputLanguage = "arabic" | "hebrew" | "english";
@@ -161,4 +163,42 @@ export function sameLocation(
     .map((value) => normalizeLocationText(value));
 
   return candidatesA.some((value) => candidatesB.includes(value));
+}
+
+// ---------------------------------------------------------------------------
+// Origin coordinates for a ride/job/errand at CREATION time — the ONE place
+// every "save the starting-location coordinates" call in the app goes
+// through, so a ride is never geocoded more than once (never re-run when
+// Home loads).
+// ---------------------------------------------------------------------------
+
+export type ResolvedCoords = { latitude: number; longitude: number } | null;
+
+// Prefers the curated dataset's own coordinates for the selected locality
+// (instant, free, no network — see israelLocations.ts) and only falls back
+// to a live geocode of the typed text when that locality doesn't have them
+// yet. Failures (offline, no match) simply return null — the caller must
+// still save the ride without coordinates rather than blocking creation.
+export async function resolveLocationCoordinates(
+  place: IsraelLocation | null,
+  fallbackText: string,
+): Promise<ResolvedCoords> {
+  if (place && typeof place.latitude === "number" && typeof place.longitude === "number") {
+    return { latitude: place.latitude, longitude: place.longitude };
+  }
+
+  const trimmed = fallbackText.trim();
+  if (!trimmed) return null;
+
+  try {
+    const [geo] = await Location.geocodeAsync(trimmed);
+    if (geo) {
+      return { latitude: geo.latitude, longitude: geo.longitude };
+    }
+  } catch {
+    // Offline or no geocoding match — the ride still saves, just without
+    // coordinates, and shows up in "All rides" instead of "Nearby".
+  }
+
+  return null;
 }

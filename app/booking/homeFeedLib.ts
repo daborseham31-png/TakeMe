@@ -29,8 +29,7 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../../firebase";
-import { getIsraelLocationById } from "./israelLocations";
-import { LocationNames, sameLocation } from "./locationSearch";
+import { LocationNames } from "./locationSearch";
 import { getDriverDayTrips, WeeklyDriverDay } from "./weeklyBookingLib";
 
 export type FeedCategory = "personal" | "school" | "work" | "errand";
@@ -73,6 +72,14 @@ export type FeedItem = {
   fromLocationNames?: LocationNames;
   toLocationNames?: LocationNames;
   locationNames?: LocationNames;
+
+  // Starting-point coordinates — reused from whatever the ride/job/errand
+  // already saved at creation time (driverRoutes.fromLat/fromLng,
+  // workJobs/errandJobs.locationLat/locationLng). Null when the listing
+  // predates coordinate-saving; such items simply never qualify as
+  // "nearby" and only ever show up in "All rides".
+  originLatitude: number | null;
+  originLongitude: number | null;
 
   isWeekly: boolean;
   // Only the days that still have room — used for the weekly day-picker.
@@ -179,6 +186,9 @@ const normalizeDriverRouteItem = (id: string, data: any): FeedItem | null => {
     fromLocationNames: data.fromLocationNames || undefined,
     toLocationNames: data.toLocationNames || undefined,
 
+    originLatitude: typeof data.fromLat === "number" ? data.fromLat : null,
+    originLongitude: typeof data.fromLng === "number" ? data.fromLng : null,
+
     isWeekly,
     availableWeeklyDays,
 
@@ -237,6 +247,9 @@ const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
     toLocationId: "",
     locationId: data.locationId || "",
     locationNames: data.locationNames || undefined,
+
+    originLatitude: typeof data.locationLat === "number" ? data.locationLat : null,
+    originLongitude: typeof data.locationLng === "number" ? data.locationLng : null,
 
     isWeekly: false,
     availableWeeklyDays: [],
@@ -307,6 +320,9 @@ const normalizeErrandJobItem = (id: string, data: any): FeedItem | null => {
     locationId: data.locationId || "",
     locationNames: data.locationNames || undefined,
 
+    originLatitude: typeof data.locationLat === "number" ? data.locationLat : null,
+    originLongitude: typeof data.locationLng === "number" ? data.locationLng : null,
+
     isWeekly: false,
     availableWeeklyDays: [],
 
@@ -356,51 +372,70 @@ const withProviderRating = async (item: FeedItem): Promise<FeedItem> => {
 };
 
 // ---------------------------------------------------------------------------
-// Relevance ranking — matched location first, then nearest upcoming
-// date/time, then higher rating as a tie-breaker.
+// GPS-based distance — the ONE place every "how far is this ride's starting
+// point from the user" calculation goes through. Coordinates are used
+// locally only (never written to Firestore, never sent to other users) —
+// see useCurrentLocation.ts for how the user's own position is obtained.
 // ---------------------------------------------------------------------------
 
-// Resolves the user's saved locality to its own multilingual names so old
-// listings (no id, only text/names saved) can still be recognized as a
-// match via sameLocation's names fallback, not just a bare id comparison.
-const itemMatchesUser = (item: FeedItem, userLocationId: string) => {
-  const userLocation = getIsraelLocationById(userLocationId);
-  const userNames: LocationNames | undefined = userLocation
-    ? {
-        english: userLocation.english,
-        arabic: userLocation.arabic,
-        hebrew: userLocation.hebrew,
-      }
-    : undefined;
-  const userText = userNames?.english || "";
+export const NEARBY_RIDE_RADIUS_KM = 25;
 
-  return (
-    sameLocation(
-      item.fromLocationId,
-      userLocationId,
-      item.from,
-      userText,
-      item.fromLocationNames,
-      userNames,
-    ) ||
-    sameLocation(
-      item.toLocationId,
-      userLocationId,
-      item.to,
-      userText,
-      item.toLocationNames,
-      userNames,
-    ) ||
-    sameLocation(
-      item.locationId,
-      userLocationId,
-      item.location,
-      userText,
-      item.locationNames,
-      userNames,
-    )
+export function calculateDistanceKm(
+  userLatitude: number,
+  userLongitude: number,
+  rideLatitude: number,
+  rideLongitude: number,
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+
+  const dLat = toRad(rideLatitude - userLatitude);
+  const dLng = toRad(rideLongitude - userLongitude);
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(userLatitude)) *
+      Math.cos(toRad(rideLatitude)) *
+      Math.sin(dLng / 2) ** 2;
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return earthRadiusKm * c;
+}
+
+export type FeedItemWithDistance = FeedItem & { distanceKm: number | null };
+
+// Attaches distanceKm to every item — null when either the user's position
+// is unavailable or the item predates coordinate-saving. Never fabricates a
+// distance in those cases.
+export const attachDistances = (
+  items: FeedItem[],
+  userCoords: { latitude: number; longitude: number } | null,
+): FeedItemWithDistance[] =>
+  items.map((item) => ({
+    ...item,
+    distanceKm:
+      userCoords &&
+      item.originLatitude !== null &&
+      item.originLongitude !== null
+        ? calculateDistanceKm(
+            userCoords.latitude,
+            userCoords.longitude,
+            item.originLatitude,
+            item.originLongitude,
+          )
+        : null,
+  }));
+
+// A ride is "nearby" when its starting point is within NEARBY_RIDE_RADIUS_KM
+// of the user's current position — items without a distance never qualify.
+export const filterNearbyItems = (
+  items: FeedItemWithDistance[],
+): FeedItemWithDistance[] =>
+  items.filter(
+    (item) =>
+      item.distanceKm !== null && item.distanceKm <= NEARBY_RIDE_RADIUS_KM,
   );
-};
 
 const dateTimeKey = (item: FeedItem) => {
   const date = item.isWeekly
@@ -415,16 +450,22 @@ const dateTimeKey = (item: FeedItem) => {
   return Number.isNaN(ts) ? Number.MAX_SAFE_INTEGER : ts;
 };
 
+// Nearest-first, then nearest upcoming date/time, then higher rating as a
+// tie-breaker. Items with no distance (coordinates missing, or user position
+// unavailable) sort after every item that does have one.
 export const sortFeedItems = (
-  items: FeedItem[],
-  userLocationId: string | null,
-): FeedItem[] => {
-  return [...items].sort((a, b) => {
-    if (userLocationId) {
-      const aMatch = itemMatchesUser(a, userLocationId);
-      const bMatch = itemMatchesUser(b, userLocationId);
-      if (aMatch !== bMatch) return aMatch ? -1 : 1;
+  items: FeedItemWithDistance[],
+): FeedItemWithDistance[] =>
+  [...items].sort((a, b) => {
+    if (
+      a.distanceKm !== null &&
+      b.distanceKm !== null &&
+      a.distanceKm !== b.distanceKm
+    ) {
+      return a.distanceKm - b.distanceKm;
     }
+    if (a.distanceKm !== null && b.distanceKm === null) return -1;
+    if (a.distanceKm === null && b.distanceKm !== null) return 1;
 
     const aTime = dateTimeKey(a);
     const bTime = dateTimeKey(b);
@@ -432,7 +473,6 @@ export const sortFeedItems = (
 
     return b.ratingAverage - a.ratingAverage;
   });
-};
 
 export const FEED_PAGE_SIZE = 20;
 
@@ -625,27 +665,3 @@ export const buildErrandBookNav = (item: FeedItem): FeedNavTarget => ({
     source: "home_feed",
   },
 });
-
-// Reads the current user's saved area, per the field-name fallback chain the
-// spec lists. None of these fields exist on the user doc yet (Profile has no
-// "home city" picker) — this simply returns null until that's added, and the
-// feed falls back to showing recent available trips, exactly as required.
-export const getUserHomeLocationId = async (
-  uid: string,
-): Promise<string | null> => {
-  try {
-    const snap = await getDoc(doc(db, "users", uid));
-    if (!snap.exists()) return null;
-
-    const data = snap.data();
-
-    return (
-      data.homeLocationId ||
-      data.cityLocationId ||
-      data.fromLocationId ||
-      null
-    );
-  } catch {
-    return null;
-  }
-};

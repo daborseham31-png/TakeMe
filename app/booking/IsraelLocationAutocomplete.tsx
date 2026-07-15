@@ -9,16 +9,23 @@
 // dataset entirely on-device (see locationSearch.ts for the language
 // detection + normalization + ranking logic).
 //
-// The dropdown is an absolutely-positioned sibling of the input (not a
-// Modal/Portal), so it works inside a ScrollView, inside a modal, inside the
-// weekly booking form, etc. — the one requirement on the CALLER is that the
-// surrounding ScrollView passes `keyboardShouldPersistTaps="handled"`,
-// otherwise the first tap on a suggestion just dismisses the keyboard
-// instead of registering the press.
+// The dropdown renders in normal document flow directly below the input
+// (NOT position: "absolute") so it pushes whatever comes after it — the next
+// field's label, input, etc. — further down instead of overlapping it. This
+// matters on screens with two of these stacked back-to-back (e.g. From/To in
+// RideForm.tsx) — the one requirement on the CALLER is that the surrounding
+// ScrollView passes `keyboardShouldPersistTaps="handled"`, otherwise the
+// first tap on a suggestion just dismisses the keyboard instead of
+// registering the press.
+//
+// Only one instance's dropdown is ever open at a time: focusing one instance
+// broadcasts to every other mounted instance (module-level pub/sub below) so
+// e.g. focusing "To" always closes "From"'s suggestions first, regardless of
+// how many of these are on the same screen.
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -43,6 +50,15 @@ type Props = {
   placeholder?: string;
   label?: string;
   error?: string;
+};
+
+// Module-level "only one dropdown open at a time" coordinator. Every mounted
+// instance registers a listener; focusing one instance tells every other
+// instance (on any screen currently mounted) to close its own dropdown.
+let nextInstanceId = 0;
+const focusListeners = new Set<(sourceId: number) => void>();
+const broadcastFocus = (sourceId: number) => {
+  focusListeners.forEach((listener) => listener(sourceId));
 };
 
 // Splits `name` into [before, match, after] around the first case/diacritic
@@ -78,6 +94,27 @@ export default function IsraelLocationAutocomplete({
   const [focused, setFocused] = useState(false);
   const blurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const instanceIdRef = useRef<number | null>(null);
+  if (instanceIdRef.current === null) {
+    instanceIdRef.current = ++nextInstanceId;
+  }
+  const instanceId = instanceIdRef.current;
+
+  // Close this instance's dropdown whenever a DIFFERENT instance is focused
+  // — this is what keeps From/To (or any other pair on the same screen) from
+  // both staying open at once.
+  useEffect(() => {
+    const listener = (sourceId: number) => {
+      if (sourceId !== instanceId) {
+        setFocused(false);
+      }
+    };
+    focusListeners.add(listener);
+    return () => {
+      focusListeners.delete(listener);
+    };
+  }, [instanceId]);
+
   const language = useMemo(() => detectInputLanguage(value), [value]);
 
   const results = useMemo(
@@ -110,6 +147,7 @@ export default function IsraelLocationAutocomplete({
       clearTimeout(blurTimeout.current);
       blurTimeout.current = null;
     }
+    broadcastFocus(instanceId);
     setFocused(true);
   };
 
@@ -203,11 +241,8 @@ export default function IsraelLocationAutocomplete({
 
 const styles = StyleSheet.create({
   wrapper: {
-    // Dropdown is positioned absolutely relative to this wrapper, and must
-    // render above sibling fields below it in the same form.
-    position: "relative",
-    zIndex: 20,
-    marginBottom: 14,
+    width: "100%",
+    marginBottom: 18,
   },
   label: {
     fontSize: 14,
@@ -243,21 +278,20 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   dropdown: {
-    position: "absolute",
-    top: "100%",
-    left: 0,
-    right: 0,
-    marginTop: 4,
+    // Normal document flow — NOT absolute — so it pushes whatever renders
+    // after this field (the next label/input) further down the screen
+    // instead of floating over it.
+    width: "100%",
+    marginTop: 6,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#E2D8CF",
-    borderRadius: 12,
+    borderColor: "#E7DCD1",
+    borderRadius: 16,
     shadowColor: "#000",
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.08,
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 10,
-    elevation: 6,
-    zIndex: 30,
+    elevation: 3,
     overflow: "hidden",
   },
   dropdownScroll: {

@@ -90,13 +90,27 @@ export default function AdminDashboardScreen() {
           }
         >
           <View style={styles.headerRow}>
-            <Text style={styles.sectionTitle}>Overview</Text>
+            <Text style={styles.sectionTitle}>Quick actions</Text>
             <Pressable style={styles.refreshButton} onPress={() => load(true)}>
               <Ionicons name="refresh" size={16} color={adminColors.primary} />
               <Text style={styles.refreshText}>Refresh</Text>
             </Pressable>
           </View>
 
+          <View style={styles.quickActions}>
+            <QuickAction icon="people-outline" label="Users" onPress={() => router.push("/admin/users" as any)} />
+            <QuickAction icon="car-outline" label="Drivers" onPress={() => router.push("/admin/drivers" as any)} />
+            <QuickAction icon="navigate-outline" label="Rides" onPress={() => router.push("/admin/rides" as any)} />
+            <QuickAction icon="book-outline" label="Bookings" onPress={() => router.push("/admin/bookings" as any)} />
+            <QuickAction icon="flag-outline" label="Reports" onPress={() => router.push("/admin/reports" as any)} />
+            <QuickAction
+              icon="notifications-outline"
+              label="Notify"
+              onPress={() => router.push("/admin/notifications" as any)}
+            />
+          </View>
+
+          <Text style={styles.sectionTitle}>Overview</Text>
           <View style={styles.statsGrid}>
             <StatCard icon="people-outline" label="Total users" value={stats.totalUsers} />
             <StatCard icon="person-outline" label="Passengers" value={stats.totalPassengers} tint="#EC4899" />
@@ -130,20 +144,6 @@ export default function AdminDashboardScreen() {
             <StatCard icon="flag-outline" label="Open reports" value={stats.openReports} tint="#DC2626" />
             <StatCard icon="add-circle-outline" label="Rides created today" value={stats.ridesCreatedToday} />
             <StatCard icon="person-add-outline" label="New users this week" value={stats.newUsersThisWeek} />
-          </View>
-
-          <Text style={styles.sectionTitle}>Quick actions</Text>
-          <View style={styles.quickActions}>
-            <QuickAction icon="people-outline" label="Users" onPress={() => router.push("/admin/users" as any)} />
-            <QuickAction icon="car-outline" label="Drivers" onPress={() => router.push("/admin/drivers" as any)} />
-            <QuickAction icon="navigate-outline" label="Rides" onPress={() => router.push("/admin/rides" as any)} />
-            <QuickAction icon="book-outline" label="Bookings" onPress={() => router.push("/admin/bookings" as any)} />
-            <QuickAction icon="flag-outline" label="Reports" onPress={() => router.push("/admin/reports" as any)} />
-            <QuickAction
-              icon="notifications-outline"
-              label="Notify"
-              onPress={() => router.push("/admin/notifications" as any)}
-            />
           </View>
 
           <Text style={styles.sectionTitle}>Recent rides</Text>
