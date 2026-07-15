@@ -1,0 +1,160 @@
+// -----------------------------------------------------------------------
+// TakeMe Firestore Security Rules
+// -----------------------------------------------------------------------
+// No rules file existed in this repo before this change — access control
+// was previously enforced ONLY on the client (see app/admin/_layout.tsx's
+// comment). These rules add real server-side enforcement for the two
+// things the admin brief explicitly calls out as unsafe to leave to the
+// client alone:
+//   1. A user must never be able to set their own role to "admin".
+//   2. A user must never be able to approve themselves as a driver.
+//
+// IMPORTANT — READ BEFORE DEPLOYING:
+// This project has no firebase.json/.firebaserc checked in either, which
+// means whatever rules are live today were set directly in the Firebase
+// console (or are the SDK's insecure defaults) and are NOT visible from
+// this repo. Deploying this file will REPLACE those rules. Test every
+// screen (signup, booking, chat, roadside help, driver creation, ratings)
+// against the Firestore emulator or a staging project before deploying to
+// production — see the deployment steps in the final summary.
+//
+// Everything below intentionally stays close to the app's current
+// de-facto behavior (any signed-in user can read/write most collections)
+// EXCEPT the specific fields/collections called out in the brief, because
+// a full lockdown would require verifying every read/write path in a
+// ~60-screen app one by one, which risks silently breaking a working
+// feature. Tightening these further is a reasonable follow-up once each
+// screen's exact access pattern has been audited.
+// -----------------------------------------------------------------------
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Never trust a client-sent "role" field — this reads the CALLER's own
+    // stored document, which only an admin write (see below) can set.
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    function unchanged(field) {
+      return !(field in request.resource.data) ||
+        !(field in resource.data) ||
+        request.resource.data[field] == resource.data[field];
+    }
+
+    // ---------------------------------------------------------------
+    // users/{userId}
+    // ---------------------------------------------------------------
+    match /users/{userId} {
+      // Broad authenticated read: driver search, chat search, profile
+      // lookups, reviews, and the admin screens all need to read other
+      // users' profiles today.
+      allow read: if isSignedIn();
+
+      // A brand-new signup writes its own doc once, and can never write
+      // itself in as an admin or as an already-approved driver.
+      allow create: if isSelf(userId)
+        && request.resource.data.role in ["passenger", "driver"]
+        && request.resource.data.get("driverVerificationStatus", "pending_admin_review")
+             != "approved";
+
+      // A user may update their own profile fields, but never their own
+      // role, verification status, or account status — those are
+      // admin-only (see the isAdmin() branch below). An admin may update
+      // any user doc, including those fields.
+      allow update: if isAdmin() || (
+        isSelf(userId) &&
+        unchanged("role") &&
+        unchanged("isDriver") &&
+        unchanged("driverVerificationStatus") &&
+        unchanged("accountStatus")
+      );
+
+      allow delete: if isAdmin() && request.auth.uid != userId;
+    }
+
+    // ---------------------------------------------------------------
+    // Admin-only collections
+    // ---------------------------------------------------------------
+    match /adminAuditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && request.resource.data.adminId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /adminReports/{reportId} {
+      allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid;
+      allow read: if isAdmin() || (isSignedIn() && resource.data.reporterId == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------
+    // Everything else the app already uses — authenticated read/write,
+    // matching today's effective (rules-free) behavior. See the note at
+    // the top of this file about tightening these per-collection later.
+    // ---------------------------------------------------------------
+    match /bookings/{bookingId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /driverRoutes/{routeId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /workJobs/{jobId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /errandJobs/{errandId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /workApplications/{applicationId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /errandApplications/{applicationId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /roadsideRequests/{requestId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /roadsideOffers/{offerId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /driverReviews/{reviewId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /notifications/{notificationId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /driverNotifications/{notificationId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /conversations/{conversationId} {
+      allow read, write: if isSignedIn();
+
+      match /messages/{messageId} {
+        allow read, write: if isSignedIn();
+      }
+    }
+  }
+}

@@ -4,8 +4,10 @@ import { signOut } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -16,6 +18,17 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../firebase";
+import { createReport } from "../admin/adminReportsLib";
+import { ReportCategory } from "../admin/adminTypes";
+
+const REPORT_CATEGORIES: { key: ReportCategory; label: string }[] = [
+  { key: "user", label: "A user" },
+  { key: "driver", label: "A driver" },
+  { key: "ride", label: "A ride" },
+  { key: "booking", label: "A booking" },
+  { key: "payment", label: "Payment" },
+  { key: "other", label: "Other" },
+];
 
 export default function ProfileScreen() {
   const [name, setName] = useState("");
@@ -23,6 +36,11 @@ export default function ProfileScreen() {
   const [phone, setPhone] = useState("");
   const [gender, setGender] = useState("No Preference");
   const [photo, setPhoto] = useState<string | null>(null);
+
+  const [reportVisible, setReportVisible] = useState(false);
+  const [reportCategory, setReportCategory] = useState<ReportCategory>("other");
+  const [reportDescription, setReportDescription] = useState("");
+  const [submittingReport, setSubmittingReport] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -81,6 +99,23 @@ export default function ProfileScreen() {
   const handleLogout = async () => {
     await signOut(auth);
     router.replace("/");
+  };
+
+  const submitReport = async () => {
+    if (!reportDescription.trim() || submittingReport) return;
+
+    try {
+      setSubmittingReport(true);
+      await createReport({ category: reportCategory, description: reportDescription });
+      setReportVisible(false);
+      setReportDescription("");
+      setReportCategory("other");
+      Alert.alert("Report sent", "Thank you — our team will review it shortly.");
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not send your report.");
+    } finally {
+      setSubmittingReport(false);
+    }
   };
 
   return (
@@ -142,11 +177,86 @@ export default function ProfileScreen() {
             <Text style={styles.saveText}>Save Changes</Text>
           </Pressable>
 
+          <Pressable style={styles.reportButton} onPress={() => setReportVisible(true)}>
+            <Text style={styles.reportText}>Report a Problem</Text>
+          </Pressable>
+
           <Pressable style={styles.logoutButton} onPress={handleLogout}>
             <Text style={styles.logoutText}>Log Out</Text>
           </Pressable>
         </View>
       </ScrollView>
+
+      <Modal
+        visible={reportVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReportVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Report a Problem</Text>
+
+            <Text style={styles.label}>What is this about?</Text>
+            <View style={styles.categoryRow}>
+              {REPORT_CATEGORIES.map((option) => (
+                <Pressable
+                  key={option.key}
+                  style={[
+                    styles.categoryChip,
+                    reportCategory === option.key && styles.categoryChipActive,
+                  ]}
+                  onPress={() => setReportCategory(option.key)}
+                >
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      reportCategory === option.key && styles.categoryChipTextActive,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Description</Text>
+            <TextInput
+              style={[styles.input, styles.reportInput]}
+              value={reportDescription}
+              onChangeText={setReportDescription}
+              placeholder="Describe what happened"
+              placeholderTextColor="#8B7B6B"
+              multiline
+            />
+
+            <View style={styles.modalButtonsRow}>
+              <Pressable
+                style={styles.modalCancelButton}
+                onPress={() => setReportVisible(false)}
+                disabled={submittingReport}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.modalSubmitButton,
+                  (!reportDescription.trim() || submittingReport) && styles.modalSubmitDisabled,
+                ]}
+                onPress={submitReport}
+                disabled={!reportDescription.trim() || submittingReport}
+              >
+                {submittingReport ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modalSubmitText}>Submit</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -254,5 +364,96 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "900",
     fontSize: 16,
+  },
+  reportButton: {
+    borderWidth: 1.5,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 14,
+    backgroundColor: "#FFFDFC",
+  },
+  reportText: {
+    color: "#7C5F46",
+    textAlign: "center",
+    fontWeight: "900",
+    fontSize: 16,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 6,
+  },
+  categoryRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  categoryChip: {
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    backgroundColor: "#FFFDFC",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  categoryChipActive: {
+    backgroundColor: "#F58220",
+    borderColor: "#F58220",
+  },
+  categoryChipText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 12.5,
+  },
+  categoryChipTextActive: {
+    color: "#FFFFFF",
+  },
+  reportInput: {
+    minHeight: 90,
+    textAlignVertical: "top",
+  },
+  modalButtonsRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 20,
+  },
+  modalCancelButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  modalCancelText: {
+    color: "#7C5F46",
+    fontWeight: "900",
+  },
+  modalSubmitButton: {
+    flex: 1,
+    backgroundColor: "#F58220",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  modalSubmitDisabled: {
+    opacity: 0.5,
+  },
+  modalSubmitText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
   },
 });

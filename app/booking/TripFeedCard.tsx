@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -78,9 +79,19 @@ export default function TripFeedCard({ item, onPressBook }: Props) {
 
       {/* Route / title row */}
       {item.category === "personal" ? (
-        <Text style={styles.routeText}>
-          {item.from || "?"} → {item.to || "?"}
-        </Text>
+        <View style={styles.routeDotsRow}>
+          <View style={styles.routeDotsColumn}>
+            <View style={styles.routeDotStart} />
+            <View style={styles.routeDotLine} />
+            <View style={styles.routeDotEnd} />
+          </View>
+          <View style={styles.routeDotsText}>
+            <Text style={styles.routeText}>{item.from || "?"}</Text>
+            <Text style={[styles.routeText, styles.routeTextMuted]}>
+              {item.to || "?"}
+            </Text>
+          </View>
+        </View>
       ) : item.category === "school" ? (
         <>
           {item.schoolName ? (
@@ -226,28 +237,34 @@ export default function TripFeedCard({ item, onPressBook }: Props) {
             {item.gender ? (item.gender === "male" ? " ♂" : " ♀") : ""}
           </Text>
 
-          <View style={styles.ratingRow}>
-            <Ionicons name="star" size={12} color="#F58220" />
-            {item.ratingCount > 0 ? (
-              <Text style={styles.ratingText}>
-                {item.ratingAverage.toFixed(1)} ({item.ratingCount})
-              </Text>
-            ) : (
-              <Text style={styles.ratingText}>New</Text>
-            )}
+          {languageLabels.length > 0 ? (
+            <Text style={styles.languagesText} numberOfLines={1}>
+              {languageLabels.join(", ")}
+            </Text>
+          ) : null}
+        </View>
 
-            {languageLabels.length > 0 ? (
-              <Text style={styles.languagesText} numberOfLines={1}>
-                {" "}
-                · {languageLabels.join(", ")}
-              </Text>
-            ) : null}
-          </View>
+        <View style={styles.ratingPill}>
+          <Ionicons name="star" size={12} color="#F58220" />
+          {item.ratingCount > 0 ? (
+            <Text style={styles.ratingText}>
+              {item.ratingAverage.toFixed(1)}
+            </Text>
+          ) : (
+            <Text style={styles.ratingText}>New</Text>
+          )}
         </View>
       </View>
 
-      <Pressable style={styles.bookButton} onPress={onPressBook}>
-        <Text style={styles.bookButtonText}>{meta.bookLabel}</Text>
+      <Pressable onPress={onPressBook}>
+        <LinearGradient
+          colors={["#FFB870", "#F58220"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.bookButton}
+        >
+          <Text style={styles.bookButtonText}>{meta.bookLabel}</Text>
+        </LinearGradient>
       </Pressable>
     </View>
   );
@@ -257,15 +274,15 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#E7DCD1",
-    borderRadius: 18,
+    borderColor: "#F0E5DC",
+    borderRadius: 22,
     padding: 16,
     marginBottom: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 8,
-    elevation: 1,
+    shadowColor: "#D8541F",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 14,
+    elevation: 2,
   },
   topRow: {
     flexDirection: "row",
@@ -304,6 +321,42 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#111827",
     marginBottom: 2,
+  },
+  routeTextMuted: {
+    color: "#7C5F46",
+  },
+  routeDotsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 4,
+  },
+  routeDotsColumn: {
+    alignItems: "center",
+    paddingTop: 6,
+  },
+  routeDotStart: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#F58220",
+  },
+  routeDotLine: {
+    width: 2,
+    flex: 1,
+    minHeight: 14,
+    backgroundColor: "#F0D9C4",
+    marginVertical: 3,
+  },
+  routeDotEnd: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: "#F58220",
+  },
+  routeDotsText: {
+    flex: 1,
+    justifyContent: "space-between",
   },
   subRouteText: {
     fontSize: 13,
@@ -358,10 +411,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "#FFF2E8",
+    borderWidth: 1.5,
+    borderColor: "#FFDCB8",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -373,26 +428,29 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#111827",
   },
-  ratingRow: {
+  ratingPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    marginTop: 2,
+    backgroundColor: "#FFF2E8",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
   },
   ratingText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#7C5F46",
+    fontSize: 12.5,
+    fontWeight: "900",
+    color: "#B86115",
   },
   languagesText: {
     fontSize: 12,
     color: "#7C5F46",
     flexShrink: 1,
+    marginTop: 2,
   },
   bookButton: {
-    backgroundColor: "#F58220",
-    borderRadius: 12,
-    paddingVertical: 13,
+    borderRadius: 14,
+    paddingVertical: 14,
     alignItems: "center",
   },
   bookButtonText: {

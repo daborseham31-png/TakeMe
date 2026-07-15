@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
@@ -34,7 +35,7 @@ import {
 import { WeeklyDriverDay } from "../booking/weeklyBookingLib";
 import TripFeedCard from "../booking/TripFeedCard";
 
-const logoImg = require("../../assets/images/logo-new.jpg");
+const logoImg = require("../../assets/images/logo.jpeg");
 
 type FilterKey = "all" | FeedCategory;
 
@@ -320,98 +321,152 @@ export default function HomeScreen() {
 
   const listHeader = (
     <View>
-      {/* Top notification icons (Instagram/Facebook style) */}
+      {/* Top brand row: logo + wordmark on the left, notification icons on
+          the right (Instagram/Facebook style). */}
       <View style={styles.topBar}>
-        <Pressable
-          style={styles.iconButton}
-          onPress={() => router.push("/notifications" as any)}
-          hitSlop={8}
-        >
-          <Ionicons name="notifications-outline" size={26} color="#7C5F46" />
-          {unreadNotifs > 0 ? (
-            <View style={styles.iconBadge}>
-              <Text style={styles.iconBadgeText}>
-                {unreadNotifs > 99 ? "99+" : unreadNotifs}
-              </Text>
-            </View>
-          ) : null}
-        </Pressable>
-
-        <Pressable
-          style={styles.iconButton}
-          onPress={() => router.push("/driver/help-requests" as any)}
-          hitSlop={8}
-        >
-          <Ionicons name="help-buoy-outline" size={26} color="#7C5F46" />
-          {unreadHelp > 0 ? (
-            <View style={styles.iconBadge}>
-              <Text style={styles.iconBadgeText}>
-                {unreadHelp > 99 ? "99+" : unreadHelp}
-              </Text>
-            </View>
-          ) : null}
-        </Pressable>
-
-        <Pressable
-          style={styles.iconButton}
-          onPress={() => router.push("/messages" as any)}
-          hitSlop={8}
-        >
-          <Ionicons
-            name="chatbubble-ellipses-outline"
-            size={26}
-            color="#7C5F46"
+        <View style={styles.brandRow}>
+          <Image
+            source={logoImg}
+            style={styles.logo}
+            resizeMode="contain"
           />
-          {unreadChats > 0 ? (
-            <View style={styles.iconBadge}>
-              <Text style={styles.iconBadgeText}>
-                {unreadChats > 99 ? "99+" : unreadChats}
-              </Text>
-            </View>
-          ) : null}
-        </Pressable>
+          <View>
+            <Text style={styles.brandTitle}>Take Me</Text>
+            <Text style={styles.brandTagline}>Community Rides</Text>
+          </View>
+        </View>
+
+        <View style={styles.topBarIcons}>
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => router.push("/notifications" as any)}
+            hitSlop={8}
+          >
+            <Ionicons name="notifications-outline" size={22} color="#7C5F46" />
+            {unreadNotifs > 0 ? (
+              <View style={styles.iconBadge}>
+                <Text style={styles.iconBadgeText}>
+                  {unreadNotifs > 99 ? "99+" : unreadNotifs}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
+
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => router.push("/driver/help-requests" as any)}
+            hitSlop={8}
+          >
+            <Ionicons name="help-buoy-outline" size={22} color="#7C5F46" />
+            {unreadHelp > 0 ? (
+              <View style={styles.iconBadge}>
+                <Text style={styles.iconBadgeText}>
+                  {unreadHelp > 99 ? "99+" : unreadHelp}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
+
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => router.push("/messages" as any)}
+            hitSlop={8}
+          >
+            <Ionicons
+              name="chatbubble-ellipses-outline"
+              size={22}
+              color="#7C5F46"
+            />
+            {unreadChats > 0 ? (
+              <View style={styles.iconBadge}>
+                <Text style={styles.iconBadgeText}>
+                  {unreadChats > 99 ? "99+" : unreadChats}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
       </View>
 
-      <View style={styles.hero}>
-        <Image source={logoImg} style={styles.logo} />
-
-        <Text style={styles.title}>Take Me</Text>
-
-        <Text style={styles.description}>
-          Connect with neighbors heading your way. Safe, affordable rides for
-          your community.
-        </Text>
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.primaryButton,
-            pressed && styles.primaryButtonPressed,
-          ]}
-          onPress={() => router.push("/booking/ride-category" as any)}
+      {/* --- Hero: gradient card, no custom illustration — depth comes from
+          the gradient + soft decorative circles + icon-row buttons. --- */}
+      <View style={styles.heroWrap}>
+        <LinearGradient
+          colors={["#FFB870", "#F58220", "#D8541F"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.hero}
         >
-          <Ionicons name="search" size={19} color="#FFFFFF" />
-          <Text style={styles.primaryButtonText}>Find a Ride</Text>
-        </Pressable>
+          <View style={styles.heroBlobOne} pointerEvents="none" />
+          <View style={styles.heroBlobTwo} pointerEvents="none" />
+          <Ionicons
+            name="car-sport"
+            size={140}
+            color="rgba(255,255,255,0.12)"
+            style={styles.heroWatermark}
+          />
 
-        <Pressable
-          style={({ pressed }) => [
-            styles.outlineButton,
-            pressed && styles.outlineButtonPressed,
-            checkingDriver && styles.outlineButtonDisabled,
-          ]}
-          onPress={handleBecomeDriver}
-          disabled={checkingDriver}
-        >
-          {checkingDriver ? (
-            <ActivityIndicator color="#2B2118" />
-          ) : (
-            <>
-              <Ionicons name="car-sport-outline" size={19} color="#2B2118" />
-              <Text style={styles.outlineButtonText}>Become a Driver</Text>
-              <Ionicons name="arrow-forward" size={17} color="#2B2118" />
-            </>
-          )}
-        </Pressable>
+          <View style={styles.heroBadge}>
+            <Ionicons name="sparkles" size={13} color="#FFFFFF" />
+            <Text style={styles.heroBadgeText}>Connecting people</Text>
+          </View>
+
+          <Text style={styles.heroTitle}>Where would you{"\n"}like to go?</Text>
+
+          <Text style={styles.heroDescription}>
+            Connect with trusted neighbors heading your way. Safe, affordable
+            rides for your community.
+          </Text>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.heroRow,
+              pressed && styles.heroRowPressed,
+            ]}
+            onPress={() => router.push("/booking/ride-category" as any)}
+          >
+            <View style={styles.heroRowIcon}>
+              <Ionicons name="search" size={18} color="#F58220" />
+            </View>
+            <View style={styles.heroRowText}>
+              <Text style={styles.heroRowTitle}>Find a Ride</Text>
+              <Text style={styles.heroRowSubtitle}>
+                Search for rides near you
+              </Text>
+            </View>
+            <View style={styles.heroRowArrow}>
+              <Ionicons name="arrow-forward" size={16} color="#F58220" />
+            </View>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.heroRow,
+              styles.heroRowSecondary,
+              pressed && styles.heroRowPressed,
+              checkingDriver && styles.outlineButtonDisabled,
+            ]}
+            onPress={handleBecomeDriver}
+            disabled={checkingDriver}
+          >
+            <View style={styles.heroRowIcon}>
+              {checkingDriver ? (
+                <ActivityIndicator size="small" color="#F58220" />
+              ) : (
+                <Ionicons name="car-sport-outline" size={18} color="#F58220" />
+              )}
+            </View>
+            <View style={styles.heroRowText}>
+              <Text style={styles.heroRowTitle}>Become a Driver</Text>
+              <Text style={styles.heroRowSubtitle}>
+                Join our community of drivers
+              </Text>
+            </View>
+            <View style={styles.heroRowArrow}>
+              <Ionicons name="arrow-forward" size={16} color="#F58220" />
+            </View>
+          </Pressable>
+        </LinearGradient>
       </View>
 
       {/* --- Trips near you ------------------------------------------- */}
@@ -427,6 +482,16 @@ export default function HomeScreen() {
                 Available rides and services around your area
               </Text>
             </View>
+
+            {filter !== "all" ? (
+              <Pressable
+                style={styles.viewAllChip}
+                onPress={() => setFilter("all")}
+              >
+                <Text style={styles.viewAllChipText}>View all</Text>
+                <Ionicons name="arrow-forward" size={13} color="#F58220" />
+              </Pressable>
+            ) : null}
           </View>
 
           {!userLocationId ? (
@@ -450,29 +515,35 @@ export default function HomeScreen() {
           data={FILTERS}
           keyExtractor={(f) => f.key}
           contentContainerStyle={styles.filterRow}
-          renderItem={({ item: f }) => (
-            <Pressable
-              style={[
-                styles.filterChip,
-                filter === f.key && styles.filterChipActive,
-              ]}
-              onPress={() => setFilter(f.key)}
-            >
-              <Ionicons
-                name={FILTER_ICONS[f.key]}
-                size={14}
-                color={filter === f.key ? "#FFFFFF" : "#7C5F46"}
-              />
-              <Text
-                style={[
-                  styles.filterChipText,
-                  filter === f.key && styles.filterChipTextActive,
-                ]}
-              >
-                {f.label}
-              </Text>
-            </Pressable>
-          )}
+          renderItem={({ item: f }) => {
+            const active = filter === f.key;
+
+            return (
+              <Pressable style={styles.filterChip} onPress={() => setFilter(f.key)}>
+                {active ? (
+                  <LinearGradient
+                    colors={["#FFB870", "#F58220"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                ) : null}
+                <Ionicons
+                  name={FILTER_ICONS[f.key]}
+                  size={14}
+                  color={active ? "#FFFFFF" : "#7C5F46"}
+                />
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    active && styles.filterChipTextActive,
+                  ]}
+                >
+                  {f.label}
+                </Text>
+              </Pressable>
+            );
+          }}
         />
 
         {feedLoading ? (
@@ -584,93 +655,46 @@ const styles = StyleSheet.create({
   scroll: {
     paddingBottom: 40,
   },
-  hero: {
-    alignItems: "center",
-    paddingHorizontal: 24,
-    paddingTop: 4,
-    paddingBottom: 8,
-  },
-  logo: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
-    marginBottom: 14,
-  },
-  title: {
-    fontSize: 38,
-    fontWeight: "900",
-    color: "#F39C2D",
-    marginBottom: 8,
-  },
-  description: {
-    textAlign: "center",
-    fontSize: 15,
-    lineHeight: 21,
-    color: "#8A7A6C",
-    marginBottom: 22,
-    paddingHorizontal: 8,
-  },
-  primaryButton: {
-    width: "100%",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#F28C28",
-    paddingVertical: 16,
-    borderRadius: 16,
-    marginBottom: 10,
-    shadowColor: "#F28C28",
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  primaryButtonPressed: {
-    opacity: 0.9,
-  },
-  primaryButtonText: {
-    textAlign: "center",
-    color: "#FFFFFF",
-    fontWeight: "800",
-    fontSize: 16,
-  },
-  outlineButton: {
-    width: "100%",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1.5,
-    borderColor: "#E7DCD1",
-    paddingVertical: 16,
-    borderRadius: 16,
-  },
-  outlineButtonPressed: {
-    backgroundColor: "#FBF7F1",
-  },
-  outlineButtonText: {
-    textAlign: "center",
-    color: "#2B2118",
-    fontWeight: "800",
-    fontSize: 16,
-  },
-  outlineButtonDisabled: {
-    opacity: 0.6,
-  },
+  // --- Top brand bar -------------------------------------------------------
   topBar: {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 14,
+  },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  logo: {
+    // Source art is 516x422 (not square) — size by aspect ratio and use
+    // resizeMode="contain" above so it's never cropped/squished.
+    width: 54,
+    height: 44,
+  },
+  brandTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#F58220",
+    lineHeight: 22,
+  },
+  brandTagline: {
+    fontSize: 12,
+    color: "#8A7A6C",
+    fontWeight: "600",
+  },
+  topBarIcons: {
+    flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingHorizontal: 18,
-    paddingTop: 10,
   },
   iconButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#EADFD2",
@@ -681,6 +705,123 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowRadius: 6,
     elevation: 2,
+  },
+
+  // --- Hero ------------------------------------------------------------
+  heroWrap: {
+    paddingHorizontal: 20,
+    marginBottom: 8,
+  },
+  hero: {
+    borderRadius: 28,
+    padding: 22,
+    overflow: "hidden",
+    shadowColor: "#D8541F",
+    shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 12 },
+    shadowRadius: 20,
+    elevation: 6,
+  },
+  heroBlobOne: {
+    position: "absolute",
+    top: -40,
+    right: -30,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: "rgba(255,255,255,0.10)",
+  },
+  heroBlobTwo: {
+    position: "absolute",
+    bottom: -50,
+    left: -40,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "rgba(255,255,255,0.07)",
+  },
+  heroWatermark: {
+    position: "absolute",
+    top: 10,
+    right: -10,
+    transform: [{ rotate: "-12deg" }],
+  },
+  heroBadge: {
+    flexDirection: "row",
+    alignSelf: "flex-start",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.22)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    marginBottom: 14,
+  },
+  heroBadgeText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  heroTitle: {
+    fontSize: 30,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    lineHeight: 36,
+    marginBottom: 10,
+  },
+  heroDescription: {
+    fontSize: 14.5,
+    lineHeight: 21,
+    color: "rgba(255,255,255,0.92)",
+    marginBottom: 20,
+  },
+  heroRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 10,
+  },
+  heroRowSecondary: {
+    backgroundColor: "rgba(255,255,255,0.85)",
+  },
+  heroRowPressed: {
+    opacity: 0.85,
+  },
+  heroRowIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "#FFF2E8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroRowText: {
+    flex: 1,
+  },
+  heroRowTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  heroRowSubtitle: {
+    fontSize: 12,
+    color: "#7C5F46",
+    marginTop: 1,
+  },
+  heroRowArrow: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#FFF2E8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  outlineButtonDisabled: {
+    opacity: 0.6,
   },
   iconBadge: {
     position: "absolute",
@@ -736,6 +877,20 @@ const styles = StyleSheet.create({
     color: "#7C5F46",
     marginTop: 2,
   },
+  viewAllChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FFF2E8",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  viewAllChipText: {
+    color: "#F58220",
+    fontWeight: "800",
+    fontSize: 12.5,
+  },
   noAreaBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -760,6 +915,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    overflow: "hidden",
     borderWidth: 1,
     borderColor: "#E7DCD1",
     backgroundColor: "#FFFFFF",
@@ -772,10 +928,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 4,
     elevation: 1,
-  },
-  filterChipActive: {
-    backgroundColor: "#F58220",
-    borderColor: "#F58220",
   },
   filterChipText: {
     color: "#7C5F46",
