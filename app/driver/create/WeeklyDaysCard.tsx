@@ -266,7 +266,7 @@ export default function WeeklyDaysCard({
                   <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
                   <TextInput
                     style={sharedStyles.rowInput}
-                    placeholder="₪"
+                    placeholder="Enter price"
                     placeholderTextColor="#8B7B6B"
                     keyboardType="numeric"
                     value={row.price}

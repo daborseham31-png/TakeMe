@@ -14,6 +14,8 @@ import {
   View,
 } from "react-native";
 
+import IsraelLocationAutocomplete from "../../IsraelLocationAutocomplete";
+import { IsraelLocation } from "../../israelLocations";
 import {
   createApplication,
   detectCurrentLocation,
@@ -78,6 +80,15 @@ export default function WorkApplyScreen() {
   }, [params.job]);
 
   const [city, setCity] = useState("");
+  const [cityPlace, setCityPlace] = useState<IsraelLocation | null>(null);
+  const [cityError, setCityError] = useState("");
+
+  const handleCityChange = (text: string) => {
+    setCity(text);
+    setCityPlace(null);
+    if (cityError) setCityError("");
+  };
+
   const [neighborhood, setNeighborhood] = useState("");
   const [notes, setNotes] = useState("");
   const [location, setLocation] = useState<GeoPoint | null>(null);
@@ -109,6 +120,11 @@ export default function WorkApplyScreen() {
       return;
     }
 
+    if (!cityPlace) {
+      setCityError("Please select a location from the list.");
+      return;
+    }
+
     if (!location || location.latitude === null || location.longitude === null) {
       Alert.alert(
         "Location needed",
@@ -135,6 +151,12 @@ export default function WorkApplyScreen() {
         },
         {
           city: cleanCity,
+          cityLocationId: cityPlace.id,
+          cityLocationNames: {
+            english: cityPlace.english,
+            arabic: cityPlace.arabic,
+            hebrew: cityPlace.hebrew,
+          },
           neighborhood: cleanNeighborhood,
           notes: notes.trim(),
           location,
@@ -179,7 +201,10 @@ export default function WorkApplyScreen() {
         style={styles.keyboard}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <ScrollView contentContainerStyle={styles.container}>
+        <ScrollView
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
+        >
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#7A665C" />
           </Pressable>
@@ -292,13 +317,16 @@ export default function WorkApplyScreen() {
 
           <View style={styles.row}>
             <View style={styles.halfField}>
-              <Text style={styles.label}>City / Village</Text>
-              <TextInput
-                style={styles.input}
+              <IsraelLocationAutocomplete
+                label="City / Village"
                 value={city}
-                onChangeText={setCity}
-                placeholder="e.g. Nazareth"
-                placeholderTextColor="#9B7A68"
+                onChangeText={handleCityChange}
+                onSelectLocation={(location) => {
+                  setCityPlace(location);
+                  setCityError("");
+                }}
+                placeholder="Enter city or village"
+                error={cityError}
               />
             </View>
 
@@ -308,7 +336,7 @@ export default function WorkApplyScreen() {
                 style={styles.input}
                 value={neighborhood}
                 onChangeText={setNeighborhood}
-                placeholder="e.g. Al- Maidan"
+                placeholder="Enter neighborhood"
                 placeholderTextColor="#9B7A68"
               />
             </View>

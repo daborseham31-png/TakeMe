@@ -63,7 +63,8 @@ export const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
 
 export type RidePayment =
   | { method: "cash" }
-  | { method: "card"; cardLast4: string };
+  | { method: "card"; cardLast4: string }
+  | { method: "bit" };
 
 const getLast3Digits = (value: string) => {
   const digits = String(value || "").replace(/\D/g, "");
@@ -86,6 +87,8 @@ export type CreateRideBookingInput = {
   routeId: string;
   from: string;
   to: string;
+  schoolName?: string;
+  destinationDetails?: string;
   date: string;
   day: string;
   time: string;
@@ -123,11 +126,17 @@ export const createRideBooking = async (
           paymentStatus: "cash_selected",
           cardLast4: null,
         }
-      : {
-          paymentMethod: "card",
-          paymentStatus: "mock_paid",
-          cardLast4: input.payment.cardLast4.slice(-4),
-        };
+      : input.payment.method === "bit"
+        ? {
+            paymentMethod: "bit",
+            paymentStatus: "mock_paid",
+            cardLast4: null,
+          }
+        : {
+            paymentMethod: "card",
+            paymentStatus: "mock_paid",
+            cardLast4: input.payment.cardLast4.slice(-4),
+          };
 
   const pickup =
     input.pickup &&
@@ -444,6 +453,8 @@ export type RideBooking = {
 
   from: string;
   to: string;
+  schoolName: string;
+  destinationDetails: string;
   date: string;
   day: string;
   time: string;
@@ -555,6 +566,8 @@ export const normalizeRideBooking = (id: string, data: any): RideBooking => {
 
     from: data.from || "",
     to: data.to || "",
+    schoolName: data.schoolName || "",
+    destinationDetails: data.destinationDetails || "",
     date: data.date || "",
     day: data.day || "",
     time: data.time || "",

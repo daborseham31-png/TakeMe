@@ -21,7 +21,6 @@ export default function ProfileScreen() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [language, setLanguage] = useState("English");
   const [gender, setGender] = useState("No Preference");
   const [photo, setPhoto] = useState<string | null>(null);
 
@@ -44,7 +43,6 @@ export default function ProfileScreen() {
       setName(data.name || "");
       setEmail(data.email || user.email || "");
       setPhone(data.phone || "");
-      setLanguage(data.language || "English");
       setGender(data.gender || "No Preference");
       setPhoto(data.photo || null);
     } else {
@@ -73,7 +71,6 @@ export default function ProfileScreen() {
     await updateDoc(doc(db, "users", user.uid), {
       name,
       phone,
-      language,
       gender,
       photo,
     });
@@ -121,22 +118,6 @@ export default function ProfileScreen() {
             onChangeText={setPhone}
             keyboardType="phone-pad"
           />
-
-          <Text style={styles.label}>Preferred Communication Language</Text>
-          <Pressable
-            style={styles.selectBox}
-            onPress={() =>
-              Alert.alert("Choose language", "", [
-                { text: "English", onPress: () => setLanguage("English") },
-                { text: "עברית", onPress: () => setLanguage("עברית") },
-                { text: "عربي", onPress: () => setLanguage("عربي") },
-                { text: "Cancel", style: "cancel" },
-              ])
-            }
-          >
-            <Text>{language}</Text>
-            <Text>⌄</Text>
-          </Pressable>
 
           <Text style={styles.label}>Preferred Driver Gender</Text>
           <Pressable

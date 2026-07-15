@@ -75,6 +75,7 @@ import RoadsideAcceptedCard from "../booking/roadside-help/RoadsideAcceptedCard"
 import {
   normalizeRoadsideRequest,
   RoadsideRequestRecord,
+  submitRoadsideRating,
 } from "../booking/roadside-help/roadsideLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
 
@@ -89,6 +90,9 @@ const getLast3Digits = (value: string) => {
   const digits = String(value || "").replace(/\D/g, "");
   return digits.length >= 3 ? digits.slice(-3) : digits;
 };
+
+const paymentMethodLabel = (method?: string | null) =>
+  method === "cash" ? "Cash" : method === "bit" ? "BIT" : "Card";
 
 const formatPhoneForDisplay = (phone?: string | null) => {
   const digits = String(phone || "").replace(/\D/g, "");
@@ -269,6 +273,8 @@ export default function BookingsScreen() {
     useState<BookingItem | null>(null);
   const [appRatingBooking, setAppRatingBooking] =
     useState<NormalizedApplication | null>(null);
+  const [roadsideRatingBooking, setRoadsideRatingBooking] =
+    useState<BookingItem | null>(null);
   const [ratedSchoolBookingIds, setRatedSchoolBookingIds] = useState<string[]>(
     [],
   );
@@ -1001,6 +1007,7 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         payerName: a.providerName,
         payeeId: a.customerId,
         payeeName: a.customerName,
+        payeePhone: a.customerPhone,
         category: "work",
       },
     } as any);
@@ -1378,6 +1385,7 @@ const openSchoolRatingModal = (b: BookingItem) => {
   setSchoolRatingBooking(b);
   setRatingBooking(null);
   setAppRatingBooking(null);
+  setRoadsideRatingBooking(null);
   setRatingStars(0);
   setRatingComment("");
 };
@@ -1386,6 +1394,16 @@ const openAppRatingModal = (a: NormalizedApplication) => {
   setAppRatingBooking(a);
   setRatingBooking(null);
   setSchoolRatingBooking(null);
+  setRoadsideRatingBooking(null);
+  setRatingStars(0);
+  setRatingComment("");
+};
+
+const openRoadsideRatingModal = (b: BookingItem) => {
+  setRoadsideRatingBooking(b);
+  setRatingBooking(null);
+  setSchoolRatingBooking(null);
+  setAppRatingBooking(null);
   setRatingStars(0);
   setRatingComment("");
 };
@@ -1485,6 +1503,7 @@ const submitSchoolRating = async (
     setRatingBooking(r);
     setSchoolRatingBooking(null);
     setAppRatingBooking(null);
+    setRoadsideRatingBooking(null);
     setRatingStars(0);
     setRatingComment("");
   };
@@ -1574,6 +1593,40 @@ const submitRating = async () => {
       return;
     }
 
+    if (roadsideRatingBooking) {
+      const bookingToRate = roadsideRatingBooking;
+      const ratedId = bookingToRate.id;
+      const stars = ratingStars;
+      const comment = ratingComment.trim();
+
+      // Close the rating popup immediately and block it from reopening
+      // while Firestore is saving the rating.
+      setRatedSchoolBookingIds((prev) =>
+        prev.includes(ratedId) ? prev : [...prev, ratedId],
+      );
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.id === ratedId
+            ? {
+                ...b,
+                rating: stars,
+                reviewComment: comment,
+                ratingSubmitted: true,
+                needsPassengerRating: false,
+              }
+            : b,
+        ),
+      );
+
+      setRoadsideRatingBooking(null);
+      setRatingStars(0);
+      setRatingComment("");
+
+      await submitRoadsideRating(bookingToRate.id, bookingToRate, stars, comment);
+      return;
+    }
+
     if (ratingBooking) {
       const bookingToRate = ratingBooking;
       const ratedId = bookingToRate.id;
@@ -1615,7 +1668,13 @@ const submitRating = async () => {
 
 useEffect(() => {
   if (tab !== "passenger") return;
-  if (ratingBooking || schoolRatingBooking || appRatingBooking || ratingBusy) {
+  if (
+    ratingBooking ||
+    schoolRatingBooking ||
+    appRatingBooking ||
+    roadsideRatingBooking ||
+    ratingBusy
+  ) {
     return;
   }
 
@@ -1626,10 +1685,27 @@ useEffect(() => {
     return;
   }
 
-  const pendingSchoolRating = bookings.find((b) => bookingNeedsRating(b));
+  // Roadside is scanned separately below (openRoadsideRatingModal, distinct
+  // title/subtitle) — everything else in `bookings` (School, ...) uses the
+  // generic modal text.
+  const pendingSchoolRating = bookings.find(
+    (b) => b.category !== "roadside" && bookingNeedsRating(b),
+  );
 
   if (pendingSchoolRating) {
     openSchoolRatingModal(pendingSchoolRating);
+    return;
+  }
+
+  // Roadside rates right after "Finished Help", same trigger point as every
+  // other category — payment is a separate, independent step and no longer
+  // gates the rating modal.
+  const pendingRoadsideRating = bookings.find(
+    (b) => b.category === "roadside" && bookingNeedsRating(b),
+  );
+
+  if (pendingRoadsideRating) {
+    openRoadsideRatingModal(pendingRoadsideRating);
     return;
   }
 
@@ -1646,6 +1722,7 @@ useEffect(() => {
   ratingBooking,
   schoolRatingBooking,
   appRatingBooking,
+  roadsideRatingBooking,
   ratingBusy,
   ratedSchoolBookingIds,
 ]);
@@ -1759,6 +1836,20 @@ useEffect(() => {
 
         {renderRouteLine(r.from, r.to, "")}
 
+        {r.schoolName ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="school-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>{r.schoolName}</Text>
+          </View>
+        ) : null}
+
+        {r.destinationDetails ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="flag-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>{r.destinationDetails}</Text>
+          </View>
+        ) : null}
+
         {r.date ? (
           <View style={styles.infoRow}>
             <Ionicons name="calendar-outline" size={15} color="#7C5F46" />
@@ -1803,7 +1894,7 @@ useEffect(() => {
           <View style={styles.payRow}>
             <Ionicons name="card-outline" size={14} color="#7C5F46" />
             <Text style={styles.payText}>
-              {r.paymentMethod === "cash" ? "Cash" : "Card"}
+              {paymentMethodLabel(r.paymentMethod)}
               {r.cardLast4 ? ` (•••• ${r.cardLast4})` : ""}
             </Text>
           </View>
@@ -2390,6 +2481,35 @@ useEffect(() => {
             <Text style={styles.primaryButtonText}>Pay Now</Text>
           </Pressable>
         ) : null}
+
+        {typeof b.rating === "number" ? (
+          <View style={styles.ratingSummaryRow}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Ionicons
+                key={i}
+                name={i < (b.rating || 0) ? "star" : "star-outline"}
+                size={16}
+                color="#F58220"
+              />
+            ))}
+
+            {b.reviewComment ? (
+              <Text style={styles.ratingComment}>“{b.reviewComment}”</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* Rating no longer waits on payment — it opens right after
+            Finished Help, same trigger point as every other category. */}
+        {!isDriverView && bookingNeedsRating(b) ? (
+          <Pressable
+            style={styles.primaryButton}
+            onPress={() => openRoadsideRatingModal(b)}
+          >
+            <Ionicons name="star-outline" size={17} color="#FFFFFF" />
+            <Text style={styles.primaryButtonText}>Rate Helper</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   };
@@ -2621,14 +2741,14 @@ useEffect(() => {
                 a.driverPaymentStatus === "paid"
                 ? `Paid to worker${
                     a.paymentMethod
-                      ? ` · ${a.paymentMethod === "cash" ? "Cash" : "Card"}`
+                      ? ` · ${paymentMethodLabel(a.paymentMethod)}`
                       : ""
                   }${a.cardLast4 ? ` (•••• ${a.cardLast4})` : ""}`
                 : a.status === "completed"
                   ? "Payment to worker: pending"
                   : "Payment to worker: due after Finish Work"
               : a.paymentMethod
-                ? `${a.paymentMethod === "cash" ? "Cash" : "Card"} · ${
+                ? `${paymentMethodLabel(a.paymentMethod)} · ${
                     a.paymentStatus
                   }${a.cardLast4 ? ` (•••• ${a.cardLast4})` : ""}`
                 : "Payment: unpaid"}
@@ -3060,13 +3180,19 @@ useEffect(() => {
       </Modal>
 
       <Modal
-        visible={!!ratingBooking || !!schoolRatingBooking || !!appRatingBooking}
+        visible={
+          !!ratingBooking ||
+          !!schoolRatingBooking ||
+          !!appRatingBooking ||
+          !!roadsideRatingBooking
+        }
         transparent
         animationType="fade"
         onRequestClose={() => {
           setRatingBooking(null);
           setSchoolRatingBooking(null);
           setAppRatingBooking(null);
+          setRoadsideRatingBooking(null);
         }}
       >
         <View style={styles.ratingBackdrop}>
@@ -3076,6 +3202,7 @@ useEffect(() => {
               setRatingBooking(null);
               setSchoolRatingBooking(null);
               setAppRatingBooking(null);
+              setRoadsideRatingBooking(null);
             }}
           />
 
@@ -3084,8 +3211,20 @@ useEffect(() => {
               <Ionicons name="checkmark-circle" size={34} color="#F58220" />
             </View>
 
-            <Text style={styles.ratingTitle}>You have arrived safely!</Text>
-            <Text style={styles.ratingSubtitle}>Rate Your Driver</Text>
+            {roadsideRatingBooking ? (
+              <>
+                <Text style={styles.ratingTitle}>Rate your helper</Text>
+                <Text style={styles.ratingSubtitle}>
+                  How was your Roadside Help experience with{" "}
+                  {roadsideRatingBooking.driverName}?
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.ratingTitle}>You have arrived safely!</Text>
+                <Text style={styles.ratingSubtitle}>Rate Your Driver</Text>
+              </>
+            )}
 
             <View style={styles.ratingStarsRow}>
               {Array.from({ length: 5 }).map((_, i) => {

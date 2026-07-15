@@ -568,7 +568,8 @@ export const computeWeeklyTotal = (
 
 export type WeeklyPayment =
   | { method: "cash" }
-  | { method: "card"; cardLast4: string };
+  | { method: "card"; cardLast4: string }
+  | { method: "bit" };
 
 export type CreateWeeklyBookingsInput = {
   category: "school" | "personal";
@@ -584,6 +585,11 @@ export type CreateWeeklyBookingsInput = {
   routeId: string;
   from: string;
   to: string;
+  // School only — the exact school/university name.
+  schoolName?: string;
+  // The exact place within the destination city (optional, Personal Ride
+  // only) — informational for the driver, never used for matching.
+  destinationDetails?: string;
   // "Use my current location" on the passenger booking form — optional,
   // same GeoPoint shape used by the quick-booking path.
   pickup?: GeoPoint | null;
@@ -644,11 +650,13 @@ export const createWeeklyBookings = async (
   const paymentFields =
     input.payment.method === "cash"
       ? { paymentMethod: "cash", paymentStatus: "cash_pending", cardLast4: null }
-      : {
-          paymentMethod: "card",
-          paymentStatus: "mock_paid",
-          cardLast4: input.payment.cardLast4.slice(-4),
-        };
+      : input.payment.method === "bit"
+        ? { paymentMethod: "bit", paymentStatus: "mock_paid", cardLast4: null }
+        : {
+            paymentMethod: "card",
+            paymentStatus: "mock_paid",
+            cardLast4: input.payment.cardLast4.slice(-4),
+          };
 
   await runTransaction(db, async (transaction) => {
     const routeSnap = await transaction.get(routeRef);
@@ -754,6 +762,8 @@ export const createWeeklyBookings = async (
         routeId: input.routeId,
         from: input.from || "",
         to: input.to || "",
+        schoolName: input.schoolName || null,
+        destinationDetails: input.destinationDetails || null,
 
         // Same shape/fields as the quick-booking path (ride-payment.tsx).
         // Never defaulted to `from`/`to` (the matching fields) — when no GPS

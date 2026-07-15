@@ -13,10 +13,13 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../../firebase";
+import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
+import { IsraelLocation } from "../../booking/israelLocations";
 import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
 import {
   getDigitsOnly,
+  isValidCarPlate,
   normalize,
   styles,
   useDriverAccount,
@@ -39,7 +42,10 @@ export default function DeliveryScreen() {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#7C5F46" />
         </Pressable>
@@ -96,6 +102,24 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [fromLocation, setFromLocation] = useState<IsraelLocation | null>(
+    null,
+  );
+  const [toLocation, setToLocation] = useState<IsraelLocation | null>(null);
+  const [fromError, setFromError] = useState("");
+  const [toError, setToError] = useState("");
+
+  const handleFromChange = (text: string) => {
+    setFrom(text);
+    setFromLocation(null);
+    if (fromError) setFromError("");
+  };
+
+  const handleToChange = (text: string) => {
+    setTo(text);
+    setToLocation(null);
+    if (toError) setToError("");
+  };
 
   const [deliveryDate, setDeliveryDate] = useState("");
   const [showDeliveryDatePicker, setShowDeliveryDatePicker] = useState(false);
@@ -150,6 +174,24 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
       !itemDescription
     ) {
       Alert.alert("Missing details", "Please fill in all fields.");
+      return;
+    }
+
+    if (!isValidCarPlate(carPlate)) {
+      Alert.alert(
+        "Invalid vehicle number",
+        "Vehicle number must contain between 7 and 9 digits.",
+      );
+      return;
+    }
+
+    if (!fromLocation) {
+      setFromError("Please select a location from the list.");
+      return;
+    }
+
+    if (!toLocation) {
+      setToError("Please select a location from the list.");
       return;
     }
 
@@ -208,6 +250,19 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
         to,
         fromNormalized: normalize(from),
         toNormalized: normalize(to),
+        // Stable ids for cross-language matching — see israelLocations.ts.
+        fromLocationId: fromLocation.id,
+        toLocationId: toLocation.id,
+        fromLocationNames: {
+          english: fromLocation.english,
+          arabic: fromLocation.arabic,
+          hebrew: fromLocation.hebrew,
+        },
+        toLocationNames: {
+          english: toLocation.english,
+          arabic: toLocation.arabic,
+          hebrew: toLocation.hebrew,
+        },
 
         tripDate: cleanDeliveryDate,
         deliveryDate: cleanDeliveryDate,
@@ -239,7 +294,10 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable style={styles.backButton} onPress={onBack}>
           <Ionicons name="arrow-back" size={24} color="#7C5F46" />
         </Pressable>
@@ -253,7 +311,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="car-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Toyota Corolla 2022"
+              placeholder="Enter your car model"
               placeholderTextColor="#8B7B6B"
               value={car}
               onChangeText={setCar}
@@ -265,7 +323,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. White / Black / Silver"
+              placeholder="Enter your car color"
               placeholderTextColor="#8B7B6B"
               value={carColor}
               onChangeText={setCarColor}
@@ -277,36 +335,37 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. 1234567"
+              placeholder="Enter your car plate number"
               placeholderTextColor="#8B7B6B"
+              keyboardType="number-pad"
               value={carPlate}
-              onChangeText={setCarPlate}
+              onChangeText={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
             />
           </View>
 
-          <Text style={styles.label}>From</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder="e.g. Nazareth"
-              placeholderTextColor="#8B7B6B"
-              value={from}
-              onChangeText={setFrom}
-            />
-          </View>
+          <IsraelLocationAutocomplete
+            label="From"
+            value={from}
+            onChangeText={handleFromChange}
+            onSelectLocation={(location) => {
+              setFromLocation(location);
+              setFromError("");
+            }}
+            placeholder="Enter departure city"
+            error={fromError}
+          />
 
-          <Text style={styles.label}>To</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder="e.g. Mashhad"
-              placeholderTextColor="#8B7B6B"
-              value={to}
-              onChangeText={setTo}
-            />
-          </View>
+          <IsraelLocationAutocomplete
+            label="To"
+            value={to}
+            onChangeText={handleToChange}
+            onSelectLocation={(location) => {
+              setToLocation(location);
+              setToError("");
+            }}
+            placeholder="Enter destination city"
+            error={toError}
+          />
 
           <DateInput
             label="Delivery Date"
@@ -329,7 +388,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="call-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="05XXXXXXXX"
+              placeholder="Enter recipient's phone number"
               placeholderTextColor="#8B7B6B"
               keyboardType="numeric"
               maxLength={10}
@@ -353,7 +412,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="₪"
+              placeholder="Enter price"
               placeholderTextColor="#8B7B6B"
               keyboardType="numeric"
               value={price}
@@ -390,6 +449,25 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [fromLocation, setFromLocation] = useState<IsraelLocation | null>(
+    null,
+  );
+  const [toLocation, setToLocation] = useState<IsraelLocation | null>(null);
+  const [fromError, setFromError] = useState("");
+  const [toError, setToError] = useState("");
+
+  const handleFromChange = (text: string) => {
+    setFrom(text);
+    setFromLocation(null);
+    if (fromError) setFromError("");
+  };
+
+  const handleToChange = (text: string) => {
+    setTo(text);
+    setToLocation(null);
+    if (toError) setToError("");
+  };
+
   const [storeName, setStoreName] = useState("");
 
   const [deliveryDate, setDeliveryDate] = useState("");
@@ -444,6 +522,24 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
       return;
     }
 
+    if (!isValidCarPlate(carPlate)) {
+      Alert.alert(
+        "Invalid vehicle number",
+        "Vehicle number must contain between 7 and 9 digits.",
+      );
+      return;
+    }
+
+    if (!fromLocation) {
+      setFromError("Please select a location from the list.");
+      return;
+    }
+
+    if (!toLocation) {
+      setToError("Please select a location from the list.");
+      return;
+    }
+
     const dateTimeValidation = validateDateAndTimeNotPassed(
       deliveryDate,
       time,
@@ -489,6 +585,19 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
         to,
         fromNormalized: normalize(from),
         toNormalized: normalize(to),
+        // Stable ids for cross-language matching — see israelLocations.ts.
+        fromLocationId: fromLocation.id,
+        toLocationId: toLocation.id,
+        fromLocationNames: {
+          english: fromLocation.english,
+          arabic: fromLocation.arabic,
+          hebrew: fromLocation.hebrew,
+        },
+        toLocationNames: {
+          english: toLocation.english,
+          arabic: toLocation.arabic,
+          hebrew: toLocation.hebrew,
+        },
 
         storeName,
 
@@ -520,7 +629,10 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable style={styles.backButton} onPress={onBack}>
           <Ionicons name="arrow-back" size={24} color="#7C5F46" />
         </Pressable>
@@ -536,7 +648,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="car-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Toyota Corolla 2022"
+              placeholder="Enter your car model"
               placeholderTextColor="#8B7B6B"
               value={car}
               onChangeText={setCar}
@@ -548,7 +660,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. White / Black / Silver"
+              placeholder="Enter your car color"
               placeholderTextColor="#8B7B6B"
               value={carColor}
               onChangeText={setCarColor}
@@ -560,43 +672,44 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. 1234567"
+              placeholder="Enter your car plate number"
               placeholderTextColor="#8B7B6B"
+              keyboardType="number-pad"
               value={carPlate}
-              onChangeText={setCarPlate}
+              onChangeText={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
             />
           </View>
 
-          <Text style={styles.label}>From</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder="e.g. Nazareth"
-              placeholderTextColor="#8B7B6B"
-              value={from}
-              onChangeText={setFrom}
-            />
-          </View>
+          <IsraelLocationAutocomplete
+            label="From"
+            value={from}
+            onChangeText={handleFromChange}
+            onSelectLocation={(location) => {
+              setFromLocation(location);
+              setFromError("");
+            }}
+            placeholder="Enter departure city"
+            error={fromError}
+          />
 
-          <Text style={styles.label}>To</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder="e.g. Mashhad"
-              placeholderTextColor="#8B7B6B"
-              value={to}
-              onChangeText={setTo}
-            />
-          </View>
+          <IsraelLocationAutocomplete
+            label="To"
+            value={to}
+            onChangeText={handleToChange}
+            onSelectLocation={(location) => {
+              setToLocation(location);
+              setToError("");
+            }}
+            placeholder="Enter destination city"
+            error={toError}
+          />
 
           <Text style={styles.label}>Store Name</Text>
           <View style={styles.inputRow}>
             <Ionicons name="storefront-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Big Mall"
+              placeholder="Enter store name"
               placeholderTextColor="#8B7B6B"
               value={storeName}
               onChangeText={setStoreName}
@@ -624,7 +737,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="₪"
+              placeholder="Enter price"
               placeholderTextColor="#8B7B6B"
               keyboardType="numeric"
               value={price}

@@ -18,6 +18,7 @@ import { db } from "../../firebase";
 import { createPassengerBooking } from "./bookingsLib";
 import DriverReviewsSection from "./DriverReviewsSection";
 import { getDisplayedDriverId } from "./driverReviewsLib";
+import { LocationNames, sameLocation } from "./locationSearch";
 import {
   buildBookingDayFromMatch,
   computeWeeklyTotal,
@@ -62,6 +63,19 @@ type DriverRoute = {
   to?: string;
   fromNormalized?: string;
   toNormalized?: string;
+  // Stable Israeli-locality ids (see israelLocations.ts) — preferred over
+  // fromNormalized/toNormalized text matching whenever both sides have one,
+  // so a driver in Hebrew and a passenger in Arabic still match the same
+  // place. Absent on documents created before this existed.
+  fromLocationId?: string;
+  toLocationId?: string;
+  fromLocationNames?: LocationNames;
+  toLocationNames?: LocationNames;
+  // School: the exact school/university name (required at creation, so
+  // absent only on documents created before this existed). Personal: the
+  // exact place within the destination city (optional either way).
+  schoolName?: string;
+  destinationDetails?: string;
   tripDate?: string;
   deliveryDate?: string;
   day?: string;
@@ -90,13 +104,41 @@ const MAX_TIME_DIFF_MINUTES = 30;
 
 const normalize = (value: string) => value.trim().toLowerCase();
 
-const locationMatches = (driverValue: string, userValue: string) => {
+const locationMatches = (
+  driverValue: string,
+  userValue: string,
+  driverLocationId?: string,
+  userLocationId?: string,
+  driverNames?: LocationNames,
+  userNames?: LocationNames,
+) => {
+  if (!userValue && !userLocationId) return true;
+
+  // Stable-id match wins whenever both sides picked a suggestion from
+  // IsraelLocationAutocomplete — correct even across display languages
+  // ("נצרת" vs "الناصرة" vs "Nazareth"). Falls back to comparing every known
+  // multilingual name for documents created before location ids existed —
+  // see sameLocation in locationSearch.ts.
+  if (
+    sameLocation(
+      driverLocationId,
+      userLocationId,
+      driverValue,
+      userValue,
+      driverNames,
+      userNames,
+    )
+  ) {
+    return true;
+  }
+
+  // Last-resort safety net for the oldest free-text-only documents (no id,
+  // no multilingual names at all) — a loose substring match beats hiding
+  // the trip outright.
   const driver = normalize(driverValue);
   const user = normalize(userValue);
 
-  if (!user) return true;
-
-  return driver === user || driver.includes(user) || user.includes(driver);
+  return driver.includes(user) || user.includes(driver);
 };
 
 const timeToMinutes = (time: string) => {
@@ -260,8 +302,30 @@ export default function DriverResultsScreen() {
     new Set(),
   );
 
+  const parseLocationNames = (value: unknown): LocationNames | undefined => {
+    try {
+      const parsed = JSON.parse(String(value || ""));
+      return parsed && typeof parsed === "object" ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   const from = String(params.from || "");
   const to = String(params.to || "");
+  const fromLocationId = String(params.fromLocationId || "");
+  const toLocationId = String(params.toLocationId || "");
+  const fromLocationNames = parseLocationNames(params.fromLocationNames);
+  const toLocationNames = parseLocationNames(params.toLocationNames);
+  // The exact place within the destination city (optional, Personal Ride
+  // only) — pure passthrough to ride-payment/the booking doc, never used
+  // for matching.
+  const destinationDetails = String(params.destinationDetails || "");
+  // Passenger's own typed school name from the search form — only ever a
+  // fallback for routes created before the driver's own School Name field
+  // existed; the driver's own driverRoutes.schoolName wins whenever set
+  // (see commonFiltered/handleBookDriver below).
+  const searchedSchoolName = String(params.schoolName || "");
   const category = String(params.category || "");
   const genderPref = String(params.genderPref || "any");
   const seats = Number(params.seats || 1);
@@ -353,15 +417,25 @@ export default function DriverResultsScreen() {
       );
 
       const commonFiltered = routesWithProfiles.filter((driver) => {
-        const driverFrom =
-          driver.fromNormalized || normalize(driver.from || "");
-        const driverTo = driver.toNormalized || normalize(driver.to || "");
-
         const activeMatches = driver.active !== false;
         const categoryMatches = !category || driver.category === category;
 
-        const fromMatches = locationMatches(driverFrom, from);
-        const toMatches = locationMatches(driverTo, to);
+        const fromMatches = locationMatches(
+          driver.from || driver.fromNormalized || "",
+          from,
+          driver.fromLocationId,
+          fromLocationId,
+          driver.fromLocationNames,
+          fromLocationNames,
+        );
+        const toMatches = locationMatches(
+          driver.to || driver.toNormalized || "",
+          to,
+          driver.toLocationId,
+          toLocationId,
+          driver.toLocationNames,
+          toLocationNames,
+        );
 
         const driverGender = getDriverGender(driver);
         const driverLanguages = getDriverLanguages(driver);
@@ -467,6 +541,18 @@ const handleBookDriver = async (driver: DriverRoute) => {
 
         from: driver.from || from,
         to: driver.to || to,
+        // The driver's own route-level value wins (it's what actually
+        // describes this route); the passenger's own typed value is only a
+        // fallback for routes created before these fields existed.
+        ...(isSchool
+          ? { schoolName: driver.schoolName || searchedSchoolName }
+          : {}),
+        ...(isPersonal
+          ? {
+              destinationDetails:
+                driver.destinationDetails || destinationDetails || "",
+            }
+          : {}),
         ...pickupCoordsParams,
 
         date: selectedDate,
@@ -595,6 +681,11 @@ const confirmWeeklyDayPicker = () => {
 
       from: driver.from || from,
       to: driver.to || to,
+      // The driver's own route-level value wins; the passenger's own typed
+      // value is only a fallback for routes created before these existed.
+      ...(category === "school"
+        ? { schoolName: driver.schoolName || searchedSchoolName }
+        : { destinationDetails: driver.destinationDetails || destinationDetails || "" }),
       ...pickupCoordsParams,
 
       driverCar: driver.car || "",
@@ -606,7 +697,6 @@ const confirmWeeklyDayPicker = () => {
 
       // Passthrough so ride-payment can rebuild this results search if
       // some requested days still need a driver after this booking.
-      schoolName: String(params.schoolName || ""),
       genderPref,
       languages: String(params.languages || ""),
     },
@@ -721,6 +811,33 @@ const availableDrivers = drivers.filter((driver: any) => {
                             {driver.from || from} → {driver.to || to}
                           </Text>
                         </View>
+
+                        {driver.category === "school" && driver.schoolName ? (
+                          <View style={styles.driverMetaRow}>
+                            <Ionicons
+                              name="school-outline"
+                              size={15}
+                              color="#7C5F46"
+                            />
+                            <Text style={styles.driverMetaText}>
+                              {driver.schoolName}
+                            </Text>
+                          </View>
+                        ) : null}
+
+                        {driver.category !== "school" &&
+                        driver.destinationDetails ? (
+                          <View style={styles.driverMetaRow}>
+                            <Ionicons
+                              name="flag-outline"
+                              size={15}
+                              color="#7C5F46"
+                            />
+                            <Text style={styles.driverMetaText}>
+                              {driver.destinationDetails}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                     </View>
 

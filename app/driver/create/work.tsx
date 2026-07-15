@@ -13,6 +13,8 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../../firebase";
+import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
+import { IsraelLocation } from "../../booking/israelLocations";
 import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
 
@@ -35,6 +37,15 @@ export default function WorkJobScreen() {
   const [jobTitle, setJobTitle] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [jobLocation, setJobLocation] = useState("");
+  const [jobLocationPlace, setJobLocationPlace] =
+    useState<IsraelLocation | null>(null);
+  const [jobLocationError, setJobLocationError] = useState("");
+
+  const handleJobLocationChange = (text: string) => {
+    setJobLocation(text);
+    setJobLocationPlace(null);
+    if (jobLocationError) setJobLocationError("");
+  };
 
   const [jobDate, setJobDate] = useState("");
   const [showJobDatePicker, setShowJobDatePicker] = useState(false);
@@ -90,6 +101,11 @@ export default function WorkJobScreen() {
       !workersNeeded
     ) {
       Alert.alert("Missing details", "Please fill in all work details.");
+      return;
+    }
+
+    if (!jobLocationPlace) {
+      setJobLocationError("Please select a location from the list.");
       return;
     }
 
@@ -169,6 +185,13 @@ export default function WorkJobScreen() {
 
         location: jobLocation,
         locationNormalized: normalize(jobLocation),
+        // Stable id for cross-language matching — see israelLocations.ts.
+        locationId: jobLocationPlace.id,
+        locationNames: {
+          english: jobLocationPlace.english,
+          arabic: jobLocationPlace.arabic,
+          hebrew: jobLocationPlace.hebrew,
+        },
 
         date: cleanJobDate,
         day: jobDay,
@@ -215,7 +238,10 @@ export default function WorkJobScreen() {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#7C5F46" />
         </Pressable>
@@ -230,7 +256,7 @@ export default function WorkJobScreen() {
           <Text style={styles.label}>Job Title</Text>
           <TextInput
             style={styles.input}
-            placeholder="e.g. Carpenter, Painter, Cleaner"
+            placeholder="Enter job title"
             placeholderTextColor="#8B7B6B"
             value={jobTitle}
             onChangeText={setJobTitle}
@@ -246,17 +272,17 @@ export default function WorkJobScreen() {
             multiline
           />
 
-          <Text style={styles.label}>Work Location</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder="e.g. Nazareth"
-              placeholderTextColor="#8B7B6B"
-              value={jobLocation}
-              onChangeText={setJobLocation}
-            />
-          </View>
+          <IsraelLocationAutocomplete
+            label="Work Location"
+            value={jobLocation}
+            onChangeText={handleJobLocationChange}
+            onSelectLocation={(location) => {
+              setJobLocationPlace(location);
+              setJobLocationError("");
+            }}
+            placeholder="Enter work location"
+            error={jobLocationError}
+          />
 
           <DateInput
             label="Work Date"
@@ -308,7 +334,7 @@ export default function WorkJobScreen() {
                 <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="80"
+                  placeholder="Enter hourly pay"
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   value={hourlyPay}
@@ -324,7 +350,7 @@ export default function WorkJobScreen() {
                 <Ionicons name="people-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="2"
+                  placeholder="Enter workers needed"
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   maxLength={2}

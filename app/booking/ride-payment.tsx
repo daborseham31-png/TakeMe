@@ -18,11 +18,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 
 import { auth, db } from "../../firebase";
+import BitBadge from "./BitBadge";
+import { openBitPayment } from "./bitPayment";
 import { RIDE_CATEGORY, RidePayment } from "./rideBookingLib";
 import {
   computeWeeklyTotal,
@@ -32,7 +33,7 @@ import {
 } from "./weeklyBookingLib";
 import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
-type Method = "cash" | "card" | null;
+type Method = "cash" | "bit" | null;
 
 const num = (value: unknown): number | null => {
   const n = Number(value);
@@ -63,6 +64,12 @@ export default function RidePaymentScreen() {
   const routeId = String(params.routeId || "");
   const from = String(params.from || "");
   const to = String(params.to || "");
+  // The exact place within the destination city (optional, Personal Ride
+  // only) — informational for the driver, never used for matching.
+  const destinationDetails = String(params.destinationDetails || "");
+  // School only — the exact school/university name, required at trip
+  // creation (see RideForm.tsx).
+  const schoolName = String(params.schoolName || "");
   const date = String(params.date || params.tripDate || "");
   const day = String(params.day || params.tripDay || "");
   const time = String(params.time || "");
@@ -121,10 +128,12 @@ export default function RidePaymentScreen() {
   const [method, setMethod] = useState<Method>(null);
   const [processing, setProcessing] = useState(false);
 
-  const [holder, setHolder] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [expiry, setExpiry] = useState("");
-  const [cvv, setCvv] = useState("");
+  const amountDue = isWeekly ? weeklyTotal : price;
+
+  const handleSelectBit = () => {
+    setMethod("bit");
+    openBitPayment(driverPhone, amountDue);
+  };
 
   // Pickup GPS is optional — if the passenger never pressed "Use my current
   // location" on the booking form, there is no preset pickup, and none is
@@ -179,11 +188,17 @@ const createBookingAfterPayment = async (
           paymentStatus: "cash_selected",
           cardLast4: null,
         }
-      : {
-          paymentMethod: "card",
-          paymentStatus: "mock_paid",
-          cardLast4: payment.cardLast4.slice(-4),
-        };
+      : payment.method === "bit"
+        ? {
+            paymentMethod: "bit",
+            paymentStatus: "mock_paid",
+            cardLast4: null,
+          }
+        : {
+            paymentMethod: "card",
+            paymentStatus: "mock_paid",
+            cardLast4: payment.cardLast4.slice(-4),
+          };
 
   const cleanPickup =
     pickup &&
@@ -237,6 +252,8 @@ const createBookingAfterPayment = async (
       routeId,
       from,
       to,
+      schoolName: schoolName || null,
+      destinationDetails: destinationDetails || null,
       date,
       day,
       time,
@@ -332,39 +349,12 @@ const createBookingAfterPayment = async (
 
   const handleContinue = async () => {
     if (!method) {
-      Alert.alert("Choose payment", "Please select Cash or Card.");
+      Alert.alert("Choose payment", "Please select Cash or Pay with BIT.");
       return;
     }
 
-    let payment: RidePayment;
-
-    if (method === "cash") {
-      payment = { method: "cash" };
-    } else {
-      const digits = cardNumber.replace(/\D/g, "");
-
-      if (!holder.trim()) {
-        Alert.alert("Card details", "Enter the card holder name.");
-        return;
-      }
-
-      if (digits.length < 12 || digits.length > 19) {
-        Alert.alert("Card details", "Enter a valid card number.");
-        return;
-      }
-
-      if (!/^\d{2}\/\d{2}$/.test(expiry.trim())) {
-        Alert.alert("Card details", "Expiry must be in MM/YY format.");
-        return;
-      }
-
-      if (!/^\d{3,4}$/.test(cvv.trim())) {
-        Alert.alert("Card details", "Enter a valid CVV.");
-        return;
-      }
-
-      payment = { method: "card", cardLast4: digits.slice(-4) };
-    }
+    const payment: RidePayment =
+      method === "cash" ? { method: "cash" } : { method: "bit" };
 
     if (isWeekly) {
       try {
@@ -384,6 +374,8 @@ const createBookingAfterPayment = async (
           routeId,
           from,
           to,
+          schoolName,
+          destinationDetails,
           pickup: presetPickup,
 
           selectedDays: selectedWeeklyDays,
@@ -510,6 +502,20 @@ const createBookingAfterPayment = async (
               </Text>
             </View>
 
+            {schoolName ? (
+              <View style={styles.summaryRow}>
+                <Ionicons name="school-outline" size={15} color="#7C5F46" />
+                <Text style={styles.summaryText}>{schoolName}</Text>
+              </View>
+            ) : null}
+
+            {destinationDetails ? (
+              <View style={styles.summaryRow}>
+                <Ionicons name="flag-outline" size={15} color="#7C5F46" />
+                <Text style={styles.summaryText}>{destinationDetails}</Text>
+              </View>
+            ) : null}
+
             {!isWeekly && date ? (
               <View style={styles.summaryRow}>
                 <Ionicons name="calendar-outline" size={15} color="#7C5F46" />
@@ -601,22 +607,18 @@ const createBookingAfterPayment = async (
             <Pressable
               style={[
                 styles.methodCard,
-                method === "card" && styles.methodCardActive,
+                method === "bit" && styles.methodCardActive,
               ]}
-              onPress={() => setMethod("card")}
+              onPress={handleSelectBit}
             >
-              <Ionicons
-                name="card-outline"
-                size={26}
-                color={method === "card" ? "#F58220" : "#7C5F46"}
-              />
+              <BitBadge size={26} />
               <Text
                 style={[
                   styles.methodText,
-                  method === "card" && styles.methodTextActive,
+                  method === "bit" && styles.methodTextActive,
                 ]}
               >
-                Visa / Card
+                Pay with BIT
               </Text>
             </Pressable>
           </View>
@@ -634,66 +636,25 @@ const createBookingAfterPayment = async (
             </View>
           ) : null}
 
-          {method === "card" ? (
+          {method === "bit" ? (
             <View style={styles.cardForm}>
               <View style={styles.demoBanner}>
                 <Ionicons
-                  name="lock-closed-outline"
+                  name="information-circle-outline"
                   size={15}
                   color="#B86115"
                 />
                 <Text style={styles.demoText}>
-                  Demo only — card details are not charged or stored.
+                  BIT was opened with {driverPhone || "the driver's number"}{" "}
+                  copied to your clipboard — paste it into BIT&apos;s &quot;Send
+                  money to&quot; field, then press Continue below.
                 </Text>
               </View>
 
-              <Text style={styles.label}>Card Holder Name</Text>
-              <TextInput
-                style={styles.input}
-                value={holder}
-                onChangeText={setHolder}
-                placeholder="Name on card"
-                placeholderTextColor="#9B7A68"
-              />
-
-              <Text style={styles.label}>Card Number</Text>
-              <TextInput
-                style={styles.input}
-                value={cardNumber}
-                onChangeText={(t) =>
-                  setCardNumber(t.replace(/\D/g, "").slice(0, 19))
-                }
-                placeholder="1234 5678 9012 3456"
-                placeholderTextColor="#9B7A68"
-                keyboardType="number-pad"
-              />
-
-              <View style={styles.row}>
-                <View style={styles.halfField}>
-                  <Text style={styles.label}>Expiry (MM/YY)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={expiry}
-                    onChangeText={setExpiry}
-                    placeholder="MM/YY"
-                    placeholderTextColor="#9B7A68"
-                    maxLength={5}
-                  />
-                </View>
-
-                <View style={styles.halfField}>
-                  <Text style={styles.label}>CVV</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={cvv}
-                    onChangeText={(t) => setCvv(t.replace(/\D/g, "").slice(0, 4))}
-                    placeholder="123"
-                    placeholderTextColor="#9B7A68"
-                    keyboardType="number-pad"
-                    secureTextEntry
-                  />
-                </View>
-              </View>
+              <Pressable style={styles.reopenBitButton} onPress={handleSelectBit}>
+                <Ionicons name="open-outline" size={16} color="#F58220" />
+                <Text style={styles.reopenBitText}>Reopen BIT</Text>
+              </Pressable>
             </View>
           ) : null}
 
@@ -881,31 +842,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     flexShrink: 1,
   },
-  label: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#111827",
-    marginBottom: 8,
-    marginTop: 6,
-  },
-  input: {
-    minHeight: 46,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E4DDD7",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: "#111827",
-    marginBottom: 10,
-  },
-  row: {
+  reopenBitButton: {
     flexDirection: "row",
-    gap: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1.5,
+    borderColor: "#F58220",
+    borderRadius: 10,
+    paddingVertical: 10,
   },
-  halfField: {
-    flex: 1,
+  reopenBitText: {
+    color: "#F58220",
+    fontWeight: "900",
+    fontSize: 14,
   },
   continueButton: {
     backgroundColor: "#F58220",

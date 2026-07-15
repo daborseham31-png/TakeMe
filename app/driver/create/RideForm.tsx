@@ -14,6 +14,8 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../../firebase";
+import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
+import { IsraelLocation } from "../../booking/israelLocations";
 import {
   validateWeeklyRows,
   WeekDayRow,
@@ -26,6 +28,7 @@ import YesNoField from "./YesNoField";
 import {
   getDayFromDateText,
   getDigitsOnly,
+  isValidCarPlate,
   normalize,
   normalizeDateToYMD,
   styles,
@@ -57,6 +60,34 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [fromLocation, setFromLocation] = useState<IsraelLocation | null>(
+    null,
+  );
+  const [toLocation, setToLocation] = useState<IsraelLocation | null>(null);
+  const [fromError, setFromError] = useState("");
+  const [toError, setToError] = useState("");
+
+  const handleFromChange = (text: string) => {
+    setFrom(text);
+    setFromLocation(null);
+    if (fromError) setFromError("");
+  };
+
+  const handleToChange = (text: string) => {
+    setTo(text);
+    setToLocation(null);
+    if (toError) setToError("");
+  };
+
+  // School: the exact school/university name, so passengers don't need
+  // GPS/Waze just to know which school this route serves — required.
+  const [schoolName, setSchoolName] = useState("");
+
+  // Personal: the exact place within the destination city (a building,
+  // landmark, ...) — free text, optional, never used for driver matching
+  // (that's from/to above). Shown to passengers before they book, and on
+  // the booking itself.
+  const [destinationDetails, setDestinationDetails] = useState("");
 
   const [tripDate, setTripDate] = useState("");
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
@@ -117,9 +148,28 @@ export default function RideForm({ category, showPets, onBack }: Props) {
       !carPlate ||
       !from ||
       !to ||
+      (category === "school" && !schoolName.trim()) ||
       (!recurring && (!tripDate || !price || !time || !seats))
     ) {
       Alert.alert("Missing details", "Please fill in all fields.");
+      return;
+    }
+
+    if (!isValidCarPlate(carPlate)) {
+      Alert.alert(
+        "Invalid vehicle number",
+        "Vehicle number must contain between 7 and 9 digits.",
+      );
+      return;
+    }
+
+    if (!fromLocation) {
+      setFromError("Please select a location from the list.");
+      return;
+    }
+
+    if (!toLocation) {
+      setToError("Please select a location from the list.");
       return;
     }
 
@@ -226,8 +276,27 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
         from,
         to,
+        schoolName: category === "school" ? schoolName.trim() : null,
+        destinationDetails:
+          category === "personal" ? destinationDetails.trim() || null : null,
         fromNormalized: normalize(from),
         toNormalized: normalize(to),
+        // Stable IDs so a driver in Hebrew and a passenger in Arabic still
+        // match the same locality — see israelLocations.ts/locationSearch.ts.
+        // fromNormalized/toNormalized above remain as the fallback for old
+        // documents that predate this.
+        fromLocationId: fromLocation.id,
+        toLocationId: toLocation.id,
+        fromLocationNames: {
+          english: fromLocation.english,
+          arabic: fromLocation.arabic,
+          hebrew: fromLocation.hebrew,
+        },
+        toLocationNames: {
+          english: toLocation.english,
+          arabic: toLocation.arabic,
+          hebrew: toLocation.hebrew,
+        },
         ...routeCoords,
 
         tripDate: cleanTripDate,
@@ -265,7 +334,10 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable
           style={styles.backButton}
           onPress={() => (onBack ? onBack() : router.back())}
@@ -284,7 +356,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             <Ionicons name="car-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. Toyota Corolla 2022"
+              placeholder="Enter your car model"
               placeholderTextColor="#8B7B6B"
               value={car}
               onChangeText={setCar}
@@ -296,7 +368,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. White / Black / Silver"
+              placeholder="Enter your car color"
               placeholderTextColor="#8B7B6B"
               value={carColor}
               onChangeText={setCarColor}
@@ -308,10 +380,11 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="e.g. 1234567"
+              placeholder="Enter your car plate number"
               placeholderTextColor="#8B7B6B"
+              keyboardType="number-pad"
               value={carPlate}
-              onChangeText={setCarPlate}
+              onChangeText={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
             />
           </View>
 
@@ -323,29 +396,61 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             />
           )}
 
-          <Text style={styles.label}>From</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder="e.g. Nazareth"
-              placeholderTextColor="#8B7B6B"
-              value={from}
-              onChangeText={setFrom}
-            />
-          </View>
+          <IsraelLocationAutocomplete
+            label="From"
+            value={from}
+            onChangeText={handleFromChange}
+            onSelectLocation={(location) => {
+              setFromLocation(location);
+              setFromError("");
+            }}
+            placeholder="Enter departure city"
+            error={fromError}
+          />
 
-          <Text style={styles.label}>To</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder="e.g. Mashhad"
-              placeholderTextColor="#8B7B6B"
-              value={to}
-              onChangeText={setTo}
-            />
-          </View>
+          <IsraelLocationAutocomplete
+            label="To"
+            value={to}
+            onChangeText={handleToChange}
+            onSelectLocation={(location) => {
+              setToLocation(location);
+              setToError("");
+            }}
+            placeholder="Enter destination city"
+            error={toError}
+          />
+
+          {category === "school" ? (
+            <>
+              <Text style={styles.label}>School Name</Text>
+              <View style={styles.inputRow}>
+                <Ionicons name="school-outline" size={18} color="#8B7B6B" />
+                <TextInput
+                  style={styles.rowInput}
+                  placeholder="Enter the school or university name"
+                  placeholderTextColor="#8B7B6B"
+                  value={schoolName}
+                  onChangeText={setSchoolName}
+                />
+              </View>
+            </>
+          ) : null}
+
+          {category === "personal" ? (
+            <>
+              <Text style={styles.label}>Exact Destination (optional)</Text>
+              <View style={styles.inputRow}>
+                <Ionicons name="flag-outline" size={18} color="#8B7B6B" />
+                <TextInput
+                  style={styles.rowInput}
+                  placeholder="Enter the exact building, university, or landmark"
+                  placeholderTextColor="#8B7B6B"
+                  value={destinationDetails}
+                  onChangeText={setDestinationDetails}
+                />
+              </View>
+            </>
+          ) : null}
 
           {canRepeat && (
             <YesNoField
@@ -381,7 +486,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
                     <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
                     <TextInput
                       style={styles.rowInput}
-                      placeholder="₪"
+                      placeholder="Enter price"
                       placeholderTextColor="#8B7B6B"
                       keyboardType="numeric"
                       value={price}
@@ -396,7 +501,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
                     <Ionicons name="people-outline" size={18} color="#8B7B6B" />
                     <TextInput
                       style={styles.rowInput}
-                      placeholder="1"
+                      placeholder="Enter available seats"
                       placeholderTextColor="#8B7B6B"
                       keyboardType="numeric"
                       maxLength={1}

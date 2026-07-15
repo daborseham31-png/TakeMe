@@ -231,6 +231,10 @@ export type CustomerDetails = {
   neighborhood: string;
   notes: string;
   location: GeoPoint;
+  // Stable Israeli-locality id for `city` (see israelLocations.ts) — optional
+  // only because this type predates that dataset; new callers always set it.
+  cityLocationId?: string;
+  cityLocationNames?: { english: string; arabic: string; hebrew: string };
 };
 
 // The job / errand the customer is applying to (read from the listing).
@@ -296,6 +300,8 @@ export const createApplication = async (
   // Shared fields written to both collections.
   const base = {
     city: details.city,
+    cityLocationId: details.cityLocationId || null,
+    cityLocationNames: details.cityLocationNames || null,
     neighborhood: details.neighborhood,
     notes: details.notes || "",
 
@@ -565,7 +571,8 @@ export const rejectRequest = async (
 
 export type PaymentInput =
   | { method: "cash" }
-  | { method: "card"; cardLast4: string };
+  | { method: "card"; cardLast4: string }
+  | { method: "bit" };
 
 export const confirmPayment = async (
   kind: WorkErrandKind,
@@ -580,12 +587,18 @@ export const confirmPayment = async (
           paymentStatus: "cash_selected",
           cardLast4: null,
         }
-      : {
-          paymentMethod: "card",
-          paymentStatus: "mock_paid",
-          // Only the last 4 digits are ever stored.
-          cardLast4: payment.cardLast4.slice(-4),
-        };
+      : payment.method === "bit"
+        ? {
+            paymentMethod: "bit",
+            paymentStatus: "mock_paid",
+            cardLast4: null,
+          }
+        : {
+            paymentMethod: "card",
+            paymentStatus: "mock_paid",
+            // Only the last 4 digits are ever stored.
+            cardLast4: payment.cardLast4.slice(-4),
+          };
 
   await updateDoc(doc(db, COLLECTION[kind], id), {
     ...fields,
@@ -720,7 +733,8 @@ export const finishJob = async (
 
 export type WorkPaymentInput =
   | { method: "cash" }
-  | { method: "card"; cardLast4: string };
+  | { method: "card"; cardLast4: string }
+  | { method: "bit" };
 
 export const payCompletedWork = async (
   bookingId: string,
@@ -738,11 +752,13 @@ export const payCompletedWork = async (
   const paymentFields =
     payment.method === "cash"
       ? { paymentMethod: "cash", cardLast4: null }
-      : {
-          paymentMethod: "card",
-          // Only the last 4 digits are ever stored.
-          cardLast4: payment.cardLast4.slice(-4),
-        };
+      : payment.method === "bit"
+        ? { paymentMethod: "bit", cardLast4: null }
+        : {
+            paymentMethod: "card",
+            // Only the last 4 digits are ever stored.
+            cardLast4: payment.cardLast4.slice(-4),
+          };
 
   let applicantId = "";
   let jobTitle = "the job";
@@ -1011,6 +1027,7 @@ export type NormalizedApplication = {
   customerAge: number | null;
   customerPhone: string;
   city: string;
+  cityLocationId: string;
   neighborhood: string;
   notes: string;
   location: GeoPoint | null;
@@ -1089,6 +1106,7 @@ export const normalizeApplication = (
     customerAge: asNumber(data.applicantAge ?? data.passengerAge),
     customerPhone: data.applicantPhone || data.passengerPhone || "",
     city: data.city || "",
+    cityLocationId: data.cityLocationId || "",
     neighborhood: data.neighborhood || "",
     notes: data.notes || "",
     location: normalizeGeo(data.applicantLocation || data.passengerLocation),

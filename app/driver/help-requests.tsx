@@ -368,7 +368,7 @@ export default function DriverHelpRequestsScreen() {
                 <Text style={styles.fieldLabel}>Price (₪)</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="₪"
+                  placeholder="Enter price"
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   value={price}
@@ -379,7 +379,7 @@ export default function DriverHelpRequestsScreen() {
                 <Text style={styles.fieldLabel}>ETA (min)</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="min"
+                  placeholder="Enter ETA in minutes"
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   value={eta}
