@@ -67,6 +67,9 @@ export default function RidePaymentScreen() {
   // The exact place within the destination city (optional, Personal Ride
   // only) — informational for the driver, never used for matching.
   const destinationDetails = String(params.destinationDetails || "");
+  // School only — the exact school/university name, required at trip
+  // creation (see RideForm.tsx).
+  const schoolName = String(params.schoolName || "");
   const date = String(params.date || params.tripDate || "");
   const day = String(params.day || params.tripDay || "");
   const time = String(params.time || "");
@@ -249,6 +252,7 @@ const createBookingAfterPayment = async (
       routeId,
       from,
       to,
+      schoolName: schoolName || null,
       destinationDetails: destinationDetails || null,
       date,
       day,
@@ -370,6 +374,7 @@ const createBookingAfterPayment = async (
           routeId,
           from,
           to,
+          schoolName,
           destinationDetails,
           pickup: presetPickup,
 
@@ -496,6 +501,13 @@ const createBookingAfterPayment = async (
                 {from || "?"} → {to || "?"}
               </Text>
             </View>
+
+            {schoolName ? (
+              <View style={styles.summaryRow}>
+                <Ionicons name="school-outline" size={15} color="#7C5F46" />
+                <Text style={styles.summaryText}>{schoolName}</Text>
+              </View>
+            ) : null}
 
             {destinationDetails ? (
               <View style={styles.summaryRow}>

@@ -585,6 +585,8 @@ export type CreateWeeklyBookingsInput = {
   routeId: string;
   from: string;
   to: string;
+  // School only — the exact school/university name.
+  schoolName?: string;
   // The exact place within the destination city (optional, Personal Ride
   // only) — informational for the driver, never used for matching.
   destinationDetails?: string;
@@ -760,6 +762,7 @@ export const createWeeklyBookings = async (
         routeId: input.routeId,
         from: input.from || "",
         to: input.to || "",
+        schoolName: input.schoolName || null,
         destinationDetails: input.destinationDetails || null,
 
         // Same shape/fields as the quick-booking path (ride-payment.tsx).

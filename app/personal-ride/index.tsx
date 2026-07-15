@@ -345,7 +345,7 @@ export default function PersonalRideScreen() {
             </View>
           </View>
 
-          <Text style={styles.label}>Exact Destination (optional)</Text>
+          <Text style={styles.label}>Exact Destination </Text>
           <View style={styles.inputRow}>
             <Ionicons name="flag-outline" size={18} color="#8B7B6B" />
             <TextInput

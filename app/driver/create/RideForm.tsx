@@ -79,6 +79,16 @@ export default function RideForm({ category, showPets, onBack }: Props) {
     if (toError) setToError("");
   };
 
+  // School: the exact school/university name, so passengers don't need
+  // GPS/Waze just to know which school this route serves — required.
+  const [schoolName, setSchoolName] = useState("");
+
+  // Personal: the exact place within the destination city (a building,
+  // landmark, ...) — free text, optional, never used for driver matching
+  // (that's from/to above). Shown to passengers before they book, and on
+  // the booking itself.
+  const [destinationDetails, setDestinationDetails] = useState("");
+
   const [tripDate, setTripDate] = useState("");
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
 
@@ -138,6 +148,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
       !carPlate ||
       !from ||
       !to ||
+      (category === "school" && !schoolName.trim()) ||
       (!recurring && (!tripDate || !price || !time || !seats))
     ) {
       Alert.alert("Missing details", "Please fill in all fields.");
@@ -265,6 +276,9 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
         from,
         to,
+        schoolName: category === "school" ? schoolName.trim() : null,
+        destinationDetails:
+          category === "personal" ? destinationDetails.trim() || null : null,
         fromNormalized: normalize(from),
         toNormalized: normalize(to),
         // Stable IDs so a driver in Hebrew and a passenger in Arabic still
@@ -405,6 +419,38 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             placeholder="Enter destination city"
             error={toError}
           />
+
+          {category === "school" ? (
+            <>
+              <Text style={styles.label}>School Name</Text>
+              <View style={styles.inputRow}>
+                <Ionicons name="school-outline" size={18} color="#8B7B6B" />
+                <TextInput
+                  style={styles.rowInput}
+                  placeholder="Enter the school or university name"
+                  placeholderTextColor="#8B7B6B"
+                  value={schoolName}
+                  onChangeText={setSchoolName}
+                />
+              </View>
+            </>
+          ) : null}
+
+          {category === "personal" ? (
+            <>
+              <Text style={styles.label}>Exact Destination (optional)</Text>
+              <View style={styles.inputRow}>
+                <Ionicons name="flag-outline" size={18} color="#8B7B6B" />
+                <TextInput
+                  style={styles.rowInput}
+                  placeholder="Enter the exact building, university, or landmark"
+                  placeholderTextColor="#8B7B6B"
+                  value={destinationDetails}
+                  onChangeText={setDestinationDetails}
+                />
+              </View>
+            </>
+          ) : null}
 
           {canRepeat && (
             <YesNoField

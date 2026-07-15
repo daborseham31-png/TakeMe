@@ -87,6 +87,7 @@ export type CreateRideBookingInput = {
   routeId: string;
   from: string;
   to: string;
+  schoolName?: string;
   destinationDetails?: string;
   date: string;
   day: string;
@@ -452,6 +453,7 @@ export type RideBooking = {
 
   from: string;
   to: string;
+  schoolName: string;
   destinationDetails: string;
   date: string;
   day: string;
@@ -564,6 +566,7 @@ export const normalizeRideBooking = (id: string, data: any): RideBooking => {
 
     from: data.from || "",
     to: data.to || "",
+    schoolName: data.schoolName || "",
     destinationDetails: data.destinationDetails || "",
     date: data.date || "",
     day: data.day || "",

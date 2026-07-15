@@ -71,6 +71,11 @@ type DriverRoute = {
   toLocationId?: string;
   fromLocationNames?: LocationNames;
   toLocationNames?: LocationNames;
+  // School: the exact school/university name (required at creation, so
+  // absent only on documents created before this existed). Personal: the
+  // exact place within the destination city (optional either way).
+  schoolName?: string;
+  destinationDetails?: string;
   tripDate?: string;
   deliveryDate?: string;
   day?: string;
@@ -316,6 +321,11 @@ export default function DriverResultsScreen() {
   // only) — pure passthrough to ride-payment/the booking doc, never used
   // for matching.
   const destinationDetails = String(params.destinationDetails || "");
+  // Passenger's own typed school name from the search form — only ever a
+  // fallback for routes created before the driver's own School Name field
+  // existed; the driver's own driverRoutes.schoolName wins whenever set
+  // (see commonFiltered/handleBookDriver below).
+  const searchedSchoolName = String(params.schoolName || "");
   const category = String(params.category || "");
   const genderPref = String(params.genderPref || "any");
   const seats = Number(params.seats || 1);
@@ -531,7 +541,18 @@ const handleBookDriver = async (driver: DriverRoute) => {
 
         from: driver.from || from,
         to: driver.to || to,
-        ...(destinationDetails ? { destinationDetails } : {}),
+        // The driver's own route-level value wins (it's what actually
+        // describes this route); the passenger's own typed value is only a
+        // fallback for routes created before these fields existed.
+        ...(isSchool
+          ? { schoolName: driver.schoolName || searchedSchoolName }
+          : {}),
+        ...(isPersonal
+          ? {
+              destinationDetails:
+                driver.destinationDetails || destinationDetails || "",
+            }
+          : {}),
         ...pickupCoordsParams,
 
         date: selectedDate,
@@ -660,7 +681,11 @@ const confirmWeeklyDayPicker = () => {
 
       from: driver.from || from,
       to: driver.to || to,
-      ...(destinationDetails ? { destinationDetails } : {}),
+      // The driver's own route-level value wins; the passenger's own typed
+      // value is only a fallback for routes created before these existed.
+      ...(category === "school"
+        ? { schoolName: driver.schoolName || searchedSchoolName }
+        : { destinationDetails: driver.destinationDetails || destinationDetails || "" }),
       ...pickupCoordsParams,
 
       driverCar: driver.car || "",
@@ -672,7 +697,6 @@ const confirmWeeklyDayPicker = () => {
 
       // Passthrough so ride-payment can rebuild this results search if
       // some requested days still need a driver after this booking.
-      schoolName: String(params.schoolName || ""),
       genderPref,
       languages: String(params.languages || ""),
     },
@@ -787,6 +811,33 @@ const availableDrivers = drivers.filter((driver: any) => {
                             {driver.from || from} → {driver.to || to}
                           </Text>
                         </View>
+
+                        {driver.category === "school" && driver.schoolName ? (
+                          <View style={styles.driverMetaRow}>
+                            <Ionicons
+                              name="school-outline"
+                              size={15}
+                              color="#7C5F46"
+                            />
+                            <Text style={styles.driverMetaText}>
+                              {driver.schoolName}
+                            </Text>
+                          </View>
+                        ) : null}
+
+                        {driver.category !== "school" &&
+                        driver.destinationDetails ? (
+                          <View style={styles.driverMetaRow}>
+                            <Ionicons
+                              name="flag-outline"
+                              size={15}
+                              color="#7C5F46"
+                            />
+                            <Text style={styles.driverMetaText}>
+                              {driver.destinationDetails}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                     </View>
 
