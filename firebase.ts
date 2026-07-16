@@ -15,3 +15,8 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+// Reused wherever a Firebase Auth action link needs to point back at a real
+// page of this app's own web build (e.g. the password-reset continue URL) —
+// never hardcode the auth domain a second time elsewhere.
+export const firebaseAuthDomain = firebaseConfig.authDomain;

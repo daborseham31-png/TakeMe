@@ -560,6 +560,7 @@ const handleBookDriver = async (driver: DriverRoute) => {
         time: selectedTime,
 
         seats: String(seats),
+        maxSeats: String(driver.seats || seats || 1),
         price: String(totalPrice),
         unitPrice: String(driverPrice),
 
