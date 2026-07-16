@@ -130,8 +130,15 @@ export default function RidePaymentScreen() {
 
   const amountDue = isWeekly ? weeklyTotal : price;
 
+  // Selecting the BIT method card only reveals the receiver info + action
+  // buttons below — it never copies anything or opens BIT by itself. The
+  // actual clipboard copy / app launch only happens when the passenger
+  // presses one of the two explicit buttons in that section.
   const handleSelectBit = () => {
     setMethod("bit");
+  };
+
+  const handleOpenBitAndCopy = () => {
     openBitPayment(driverPhone, amountDue);
   };
 
@@ -638,22 +645,41 @@ const createBookingAfterPayment = async (
 
           {method === "bit" ? (
             <View style={styles.cardForm}>
-              <View style={styles.demoBanner}>
-                <Ionicons
-                  name="information-circle-outline"
-                  size={15}
-                  color="#B86115"
-                />
-                <Text style={styles.demoText}>
-                  BIT was opened with {driverPhone || "the driver's number"}{" "}
-                  copied to your clipboard — paste it into BIT&apos;s &quot;Send
-                  money to&quot; field, then press Continue below.
-                </Text>
+              {/* Receiver info — who you're paying, their number, and how
+                  much — shown above the action button. */}
+              <View style={styles.bitReceiverBox}>
+                <View style={styles.summaryRow}>
+                  <Ionicons name="person-outline" size={15} color="#7C5F46" />
+                  <Text style={styles.summaryText}>{driverName}</Text>
+                </View>
+
+                {driverPhone ? (
+                  <View style={styles.summaryRow}>
+                    <Ionicons name="call-outline" size={15} color="#7C5F46" />
+                    <Text style={styles.summaryText}>{driverPhone}</Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.summaryRow}>
+                  <Ionicons name="cash-outline" size={15} color="#7C5F46" />
+                  <Text style={styles.summaryText}>
+                    {isWeekly
+                      ? `${weeklyTotal} ₪`
+                      : price !== null
+                        ? `${price} ₪`
+                        : "—"}
+                  </Text>
+                </View>
               </View>
 
-              <Pressable style={styles.reopenBitButton} onPress={handleSelectBit}>
-                <Ionicons name="open-outline" size={16} color="#F58220" />
-                <Text style={styles.reopenBitText}>Reopen BIT</Text>
+              <Pressable
+                style={styles.openBitButton}
+                onPress={handleOpenBitAndCopy}
+              >
+                <Ionicons name="open-outline" size={16} color="#FFFFFF" />
+                <Text style={styles.openBitButtonText}>
+                  Open Bit & Copy Number
+                </Text>
               </Pressable>
             </View>
           ) : null}
@@ -827,35 +853,30 @@ const styles = StyleSheet.create({
   cardForm: {
     marginBottom: 8,
   },
-  demoBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#FFF2E8",
+  bitReceiverBox: {
+    backgroundColor: "#FFFDFC",
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
     borderRadius: 12,
-    padding: 12,
+    padding: 14,
     marginBottom: 12,
   },
-  demoText: {
-    color: "#B86115",
-    fontWeight: "700",
-    fontSize: 13,
-    flexShrink: 1,
-  },
-  reopenBitButton: {
+  openBitButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    borderWidth: 1.5,
-    borderColor: "#F58220",
+    gap: 8,
+    // BIT's own brand teal (matches BitBadge) — kept visually distinct from
+    // the orange Continue button below so the two actions aren't confused.
+    backgroundColor: "#00B2A9",
     borderRadius: 10,
-    paddingVertical: 10,
+    paddingVertical: 14,
+    marginBottom: 10,
   },
-  reopenBitText: {
-    color: "#F58220",
+  openBitButtonText: {
+    color: "#FFFFFF",
     fontWeight: "900",
-    fontSize: 14,
+    fontSize: 15,
   },
   continueButton: {
     backgroundColor: "#F58220",

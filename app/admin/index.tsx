@@ -16,10 +16,8 @@ import {
   getDashboardStats,
   getRecentReports,
   getRecentRides,
-  getRecentUsers,
   RecentReport,
   RecentRide,
-  RecentUser,
 } from "./adminDashboardLib";
 import { adminColors, adminRadius, adminSpacing } from "./adminTheme";
 import AdminScreen from "./components/AdminScreen";
@@ -29,7 +27,6 @@ import StatCard from "./components/StatCard";
 export default function AdminDashboardScreen() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentRides, setRecentRides] = useState<RecentRide[]>([]);
-  const [recentUsers, setRecentUsers] = useState<RecentUser[]>([]);
   const [recentReports, setRecentReports] = useState<RecentReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -41,16 +38,14 @@ export default function AdminDashboardScreen() {
     setError(null);
 
     try {
-      const [statsResult, ridesResult, usersResult, reportsResult] = await Promise.all([
+      const [statsResult, ridesResult, reportsResult] = await Promise.all([
         getDashboardStats(),
-        getRecentRides(5),
-        getRecentUsers(5),
-        getRecentReports(5),
+        getRecentRides(3),
+        getRecentReports(3),
       ]);
 
       setStats(statsResult);
       setRecentRides(ridesResult);
-      setRecentUsers(usersResult);
       setRecentReports(reportsResult);
     } catch (err: any) {
       setError(err?.message || "Could not load the dashboard. Please try again.");
@@ -146,7 +141,16 @@ export default function AdminDashboardScreen() {
             <StatCard icon="person-add-outline" label="New users this week" value={stats.newUsersThisWeek} />
           </View>
 
-          <Text style={styles.sectionTitle}>Recent rides</Text>
+          <View style={styles.headerRow}>
+            <Text style={styles.sectionTitle}>Recent rides</Text>
+            <Pressable
+              style={styles.viewAllButton}
+              onPress={() => router.push("/admin/rides" as any)}
+            >
+              <Text style={styles.viewAllText}>View all</Text>
+              <Ionicons name="chevron-forward" size={14} color={adminColors.primary} />
+            </Pressable>
+          </View>
           {recentRides.length === 0 ? (
             <Text style={styles.emptyText}>No rides yet.</Text>
           ) : (
@@ -164,25 +168,16 @@ export default function AdminDashboardScreen() {
             ))
           )}
 
-          <Text style={styles.sectionTitle}>Recent users</Text>
-          {recentUsers.length === 0 ? (
-            <Text style={styles.emptyText}>No users yet.</Text>
-          ) : (
-            recentUsers.map((user) => (
-              <Pressable
-                key={user.id}
-                style={styles.recentRow}
-                onPress={() => router.push(`/admin/users/${user.id}` as any)}
-              >
-                <Ionicons name="person-outline" size={16} color={adminColors.textMuted} />
-                <Text style={styles.recentText} numberOfLines={1}>
-                  {user.name} · {user.role || "unknown"}
-                </Text>
-              </Pressable>
-            ))
-          )}
-
-          <Text style={styles.sectionTitle}>Recent reports</Text>
+          <View style={styles.headerRow}>
+            <Text style={styles.sectionTitle}>Recent reports</Text>
+            <Pressable
+              style={styles.viewAllButton}
+              onPress={() => router.push("/admin/reports" as any)}
+            >
+              <Text style={styles.viewAllText}>View all</Text>
+              <Ionicons name="chevron-forward" size={14} color={adminColors.primary} />
+            </Pressable>
+          </View>
           {recentReports.length === 0 ? (
             <Text style={styles.emptyText}>No reports yet.</Text>
           ) : (
@@ -248,6 +243,16 @@ const styles = StyleSheet.create({
     borderRadius: adminRadius.pill,
   },
   refreshText: {
+    color: adminColors.primary,
+    fontWeight: "800",
+    fontSize: 12.5,
+  },
+  viewAllButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  viewAllText: {
     color: adminColors.primary,
     fontWeight: "800",
     fontSize: 12.5,
