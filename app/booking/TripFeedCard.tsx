@@ -59,10 +59,20 @@ const CATEGORY_META: Record<
 type Props = {
   item: FeedItem;
   onPressBook: () => void;
+  // Opens the driver's reviews (see DriverProfileReviewsModal) — omitted
+  // (never rendered as Pressable) when the item has no real providerId, e.g.
+  // Work/Errand listings keyed by employerId/ownerId are still valid here,
+  // only a genuinely missing id disables it.
+  onPressDriver?: () => void;
   distanceKm?: number | null;
 };
 
-export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
+export default function TripFeedCard({
+  item,
+  onPressBook,
+  onPressDriver,
+  distanceKm,
+}: Props) {
   const { t } = useTranslation();
   const meta = CATEGORY_META[item.category];
   const languageLabels = item.languages
@@ -252,8 +262,13 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
 
       <View style={styles.divider} />
 
-      {/* Provider row */}
-      <View style={styles.providerRow}>
+      {/* Provider row — pressable (opens the driver's reviews) without
+          overlapping the Book button below it. */}
+      <Pressable
+        style={styles.providerRow}
+        onPress={onPressDriver}
+        disabled={!onPressDriver}
+      >
         <View style={styles.avatar}>
           <Ionicons name="person" size={16} color="#F58220" />
         </View>
@@ -276,12 +291,13 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
           {item.ratingCount > 0 ? (
             <Text style={styles.ratingText}>
               {item.ratingAverage.toFixed(1)}
+              {item.ratingCount > 0 ? ` (${item.ratingCount})` : ""}
             </Text>
           ) : (
-            <Text style={styles.ratingText}>{t("rides.newProvider")}</Text>
+            <Text style={styles.ratingText}>{t("rides.noRatingsYet")}</Text>
           )}
         </View>
-      </View>
+      </Pressable>
 
       <Pressable onPress={onPressBook}>
         <LinearGradient

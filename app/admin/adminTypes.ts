@@ -27,6 +27,9 @@ export type AdminUserRow = {
   ratingCount: number;
   carPlate: string;
   licenseExpiryDate: string;
+  licenseDocumentType: string;
+  licenseDocumentTypeConfidence: number;
+  licenseNeedsManualDocumentReview: boolean;
   spokenLanguages: string[];
   gender: string;
   createdAtSeconds: number;

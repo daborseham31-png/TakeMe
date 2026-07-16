@@ -34,6 +34,7 @@ import {
   FeedCategory,
   FeedItem,
   filterNearbyItems,
+  isRideExpired,
   NEARBY_RIDE_RADIUS_KM,
   sortFeedItems,
   subscribeHomeFeed,
@@ -41,6 +42,12 @@ import {
 import { useCurrentLocation } from "../booking/useCurrentLocation";
 import { WeeklyDriverDay } from "../booking/weeklyBookingLib";
 import TripFeedCard from "../booking/TripFeedCard";
+import DriverProfileReviewsModal from "../booking/DriverProfileReviewsModal";
+
+// Re-checked once a minute while Home stays open (plus on pull-to-refresh /
+// focus) so a ride whose departure time has passed disappears from the list
+// even without a new Firestore snapshot arriving.
+const EXPIRY_RECHECK_INTERVAL_MS = 60000;
 
 type RideDisplayMode = "nearby" | "all";
 
@@ -83,6 +90,21 @@ export default function HomeScreen() {
     requestPermission: requestLocationPermission,
   } = useCurrentLocation();
   const [mode, setMode] = useState<RideDisplayMode>("nearby");
+
+  // Ticks once a minute (plus on refresh/focus) purely to force expired
+  // rides out of visibleFeedItems below — never re-fetches from Firestore.
+  const [expiryTick, setExpiryTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(
+      () => setExpiryTick(Date.now()),
+      EXPIRY_RECHECK_INTERVAL_MS,
+    );
+    return () => clearInterval(interval);
+  }, []);
+
+  const [reviewsDriverId, setReviewsDriverId] = useState<string | null>(null);
+  const [reviewsDriverName, setReviewsDriverName] = useState("");
 
   const [dayPickerItem, setDayPickerItem] = useState<FeedItem | null>(null);
   const [dayPickerSelected, setDayPickerSelected] = useState<Set<string>>(
@@ -242,11 +264,13 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       refreshLocation();
+      setExpiryTick(Date.now());
     }, [refreshLocation]),
   );
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
+    setExpiryTick(Date.now());
     refreshLocation().finally(() => setRefreshing(false));
   }, [refreshLocation]);
 
@@ -259,12 +283,20 @@ export default function HomeScreen() {
       ? "nearby"
       : "all";
 
+  // expiryTick is read only to force this memo to re-run on the periodic
+  // tick/refresh/focus above — isRideExpired always uses the real current
+  // time, never the tick value itself.
   const categoryFilteredItems = useMemo(
-    () =>
-      filter === "all"
-        ? feedItems
-        : feedItems.filter((item) => item.category === filter),
-    [feedItems, filter],
+    () => {
+      const base =
+        filter === "all"
+          ? feedItems
+          : feedItems.filter((item) => item.category === filter);
+
+      return base.filter((item) => !isRideExpired(item));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [feedItems, filter, expiryTick],
   );
 
   const itemsWithDistance = useMemo(
@@ -785,6 +817,11 @@ export default function HomeScreen() {
             <TripFeedCard
               item={item}
               onPressBook={() => handleBookPress(item)}
+              onPressDriver={() => {
+                if (!item.providerId) return;
+                setReviewsDriverId(item.providerId);
+                setReviewsDriverName(item.providerName);
+              }}
               distanceKm={item.distanceKm}
             />
           </View>
@@ -879,6 +916,16 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+
+      <DriverProfileReviewsModal
+        visible={!!reviewsDriverId}
+        driverId={reviewsDriverId}
+        driverName={reviewsDriverName}
+        onClose={() => {
+          setReviewsDriverId(null);
+          setReviewsDriverName("");
+        }}
+      />
     </SafeAreaView>
   );
 }

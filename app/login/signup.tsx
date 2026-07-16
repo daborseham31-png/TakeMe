@@ -21,6 +21,7 @@ import {
   analyzeIdImage,
   analyzeLicenseImage,
   calculateAgeFromBirthDate,
+  checkLicenseDocumentType,
   compressImageToBase64,
   getLicenseValidity,
   IdAnalysisResult,
@@ -52,9 +53,6 @@ export default function SignUpScreen() {
   // --- Driver: spoken languages -----------------------------------------------
   const [spokenLanguages, setSpokenLanguages] = useState<string[]>([]);
 
-  // --- Driver: vehicle number ---------------------------------------------------
-  const [carPlate, setCarPlate] = useState("");
-
   // --- Driver: license scan -----------------------------------------------------
   const [licenseImageUri, setLicenseImageUri] = useState<string | null>(null);
   const [licenseAnalyzing, setLicenseAnalyzing] = useState(false);
@@ -73,16 +71,11 @@ export default function SignUpScreen() {
       ? "Email must be a Gmail or Hotmail address."
       : "";
 
-  const isValidCarPlate = /^\d{7,9}$/.test(carPlate);
-  const carPlateError =
-    isDriver && carPlate.length > 0 && !isValidCarPlate
-      ? "Vehicle number must contain between 7 and 9 digits."
-      : "";
-
   const derivedAge =
     calculateAgeFromBirthDate(idResult?.birthDate ?? null) ?? idResult?.age ?? null;
 
   const licenseValidity = getLicenseValidity(licenseResult?.expiryDate ?? null);
+  const licenseDocCheck = checkLicenseDocumentType(licenseResult);
 
   // ---------------------------------------------------------------------
   // ID scan
@@ -130,6 +123,20 @@ export default function SignUpScreen() {
     try {
       const base64 = await compressImageToBase64(uri);
       const result = await analyzeLicenseImage(base64);
+
+      const docCheck = checkLicenseDocumentType(result);
+
+      if (docCheck === "wrong_document") {
+        // Confidently NOT a license (ID card / passport / other document /
+        // random photo) — never store fields extracted from the wrong
+        // document, and block here rather than only at submit time.
+        setLicenseResult(null);
+        setLicenseError(
+          "This doesn't look like a driving license. Please upload a clear photo of your actual driving license.",
+        );
+        return;
+      }
+
       setLicenseResult(result);
 
       if (!result.expiryDate) {
@@ -186,14 +193,6 @@ export default function SignUpScreen() {
     }
 
     if (isDriver) {
-      if (!isValidCarPlate) {
-        Alert.alert(
-          "Invalid vehicle number",
-          "Vehicle number must contain between 7 and 9 digits.",
-        );
-        return;
-      }
-
       if (spokenLanguages.length === 0) {
         Alert.alert(
           "Languages required",
@@ -206,6 +205,17 @@ export default function SignUpScreen() {
         Alert.alert(
           "License required",
           "Please upload a clear driving license image.",
+        );
+        return;
+      }
+
+      // Defense in depth — handlePickLicense already blocks/clears the
+      // result for a confidently-wrong document, so this only matters if
+      // that state somehow went stale.
+      if (licenseDocCheck === "wrong_document") {
+        Alert.alert(
+          "Wrong document",
+          "The uploaded image doesn't look like a driving license. Please upload your actual driving license.",
         );
         return;
       }
@@ -265,9 +275,14 @@ export default function SignUpScreen() {
           licenseExpiryDate: licenseResult.expiryDate,
           licenseIsValid: true,
           spokenLanguages,
-          // Kept as a string (not Number(...)) so a leading zero in the
-          // vehicle number is never silently dropped.
-          carPlate: carPlate,
+          // Real Gemini Vision document classification — never approved
+          // automatically either way; this only tells the admin whether the
+          // system was confident it's a real license (see
+          // checkLicenseDocumentType) or whether the document itself needs a
+          // closer manual look.
+          licenseDocumentType: licenseResult.documentType,
+          licenseDocumentTypeConfidence: licenseResult.documentTypeConfidence,
+          licenseNeedsManualDocumentReview: licenseDocCheck === "needs_manual_review",
           driverVerificationStatus: "pending_admin_review",
         });
       } else {
@@ -464,24 +479,6 @@ export default function SignUpScreen() {
           {isDriver ? (
             <>
               {/* ------------------------------------------------------ */}
-              {/* Vehicle number                                          */}
-              {/* ------------------------------------------------------ */}
-              <Text style={styles.label}>Vehicle Number</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Vehicle number (7-9 digits)"
-                placeholderTextColor="#8b7b6b"
-                keyboardType="number-pad"
-                value={carPlate}
-                onChangeText={(value) =>
-                  setCarPlate(value.replace(/\D/g, "").slice(0, 9))
-                }
-              />
-              {carPlateError ? (
-                <Text style={styles.fieldError}>{carPlateError}</Text>
-              ) : null}
-
-              {/* ------------------------------------------------------ */}
               {/* Spoken languages                                        */}
               {/* ------------------------------------------------------ */}
               <Text style={styles.label}>Languages you speak</Text>
@@ -565,6 +562,21 @@ export default function SignUpScreen() {
 
                 {!licenseAnalyzing && licenseResult ? (
                   <>
+                    {licenseDocCheck === "needs_manual_review" ? (
+                      <View style={styles.unknownBox}>
+                        <Ionicons
+                          name="information-circle-outline"
+                          size={18}
+                          color="#B86115"
+                        />
+                        <Text style={styles.unknownText}>
+                          We couldn&apos;t confidently confirm this is a
+                          driving license. You can still submit — an admin
+                          will review the document manually.
+                        </Text>
+                      </View>
+                    ) : null}
+
                     {licenseValidity === "valid" ? (
                       <View style={styles.validBox}>
                         <Ionicons
