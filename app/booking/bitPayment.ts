@@ -21,11 +21,16 @@
 // (BIT ignores unknown parameters and just opens its own home screen), so
 // this module intentionally does not pretend to support that.
 //
-// What we do instead, as the best real integration available: copy the
-// recipient's phone number to the clipboard (so the user never has to
-// type it) and open the official BIT app so they can paste it straight
-// into BIT's own "Send money to" field. If BIT isn't installed, we say so
-// plainly instead of failing silently.
+// What we do instead, as the best real integration available: clean and
+// copy the recipient's phone number to the clipboard (so the user never has
+// to type it), confirm the copy, then open the official BIT app so they can
+// paste it straight into BIT's own "Send money to" field. If BIT isn't
+// installed, we say so plainly instead of failing silently.
+//
+// This module never marks a payment as completed — opening BIT (or copying
+// the number) has no effect on any booking/payment status. The caller's own
+// existing verification flow (or an admin) is what moves a payment out of
+// "pending".
 // ---------------------------------------------------------------------------
 
 import * as Clipboard from "expo-clipboard";
@@ -34,11 +39,25 @@ import { Alert, Linking } from "react-native";
 const BIT_SCHEME = "bit://";
 const BIT_WEB_FALLBACK = "https://www.bitpay.co.il/app/bitcom-info";
 
-const tryOpen = async (url: string): Promise<boolean> => {
+// Strips spaces, dashes, brackets/parentheses, dots, and any other
+// formatting characters a phone number might have been typed/stored with —
+// keeping only digits and a leading "+" (international prefix) if present —
+// so the value pasted into BIT's "Send money to" field is always clean.
+export const cleanPhoneNumber = (value: string): string => {
+  const trimmed = value.trim();
+  const hasLeadingPlus = trimmed.startsWith("+");
+  const digitsOnly = trimmed.replace(/\D/g, "");
+
+  if (!digitsOnly) return "";
+
+  return hasLeadingPlus ? `+${digitsOnly}` : digitsOnly;
+};
+
+const tryOpenBit = async (): Promise<boolean> => {
   try {
-    const canOpen = await Linking.canOpenURL(url);
+    const canOpen = await Linking.canOpenURL(BIT_SCHEME);
     if (canOpen) {
-      await Linking.openURL(url);
+      await Linking.openURL(BIT_SCHEME);
       return true;
     }
   } catch {
@@ -47,50 +66,49 @@ const tryOpen = async (url: string): Promise<boolean> => {
   }
 
   try {
-    await Linking.openURL(url);
+    await Linking.openURL(BIT_SCHEME);
     return true;
   } catch {
     return false;
   }
 };
 
-// Opens BIT for the given recipient. Never throws — every failure path ends
-// in a user-facing Alert instead of a silent no-op.
-export const openBitPayment = async (
+// Cleans and copies the recipient's phone number to the clipboard, without
+// opening BIT. Never throws — clipboard failures are swallowed since
+// copying is a convenience, not a hard requirement. Returns the cleaned
+// number that was (attempted to be) copied, or "" if there was nothing
+// usable to copy.
+export const copyRecipientPhone = async (
   recipientPhone: string,
-  amount: number | null,
-): Promise<void> => {
-  const phone = recipientPhone.trim();
+): Promise<string> => {
+  const phone = cleanPhoneNumber(recipientPhone);
 
   if (!phone) {
     Alert.alert(
       "Phone number unavailable",
       "We don't have a phone number on file to pay through BIT. Please try Cash instead.",
     );
-    return;
+    return "";
   }
 
   try {
     await Clipboard.setStringAsync(phone);
   } catch {
-    // Clipboard is a convenience — never block opening BIT on it failing.
+    // Clipboard is a convenience — never block the rest of the flow on it
+    // failing.
   }
 
-  const opened = await tryOpen(BIT_SCHEME);
+  return phone;
+};
 
-  if (opened) {
-    Alert.alert(
-      "BIT opened",
-      `We copied ${phone} to your clipboard${
-        amount !== null ? ` for the ₪${amount} payment` : ""
-      } — paste it into BIT's "Send money to" field to finish.`,
-    );
-    return;
-  }
-
+// Shows BIT's "not installed" message. Only offers to open BIT's own public
+// info page as a fallback — that URL already existed in this module before
+// this change (BIT_WEB_FALLBACK above), so this isn't inventing a new
+// external destination, just reusing the one already considered safe here.
+const showBitNotInstalled = () => {
   Alert.alert(
-    "BIT is required",
-    "BIT is required to complete this payment, but it doesn't seem to be installed on this device. Install BIT to continue, or choose Cash instead.",
+    "Bit is not installed on this device.",
+    "Install BIT to complete this payment, or choose Cash instead.",
     [
       { text: "Not now", style: "cancel" },
       {
@@ -101,4 +119,34 @@ export const openBitPayment = async (
       },
     ],
   );
+};
+
+// Cleans + copies the recipient's phone number, shows a short confirmation,
+// then opens BIT so the passenger can paste it straight into BIT's own
+// "Send money to" field. `amount` is accepted for parity with every existing
+// call site (and so callers can keep passing the real payment amount through
+// without it being silently dropped), even though the confirmation text
+// itself intentionally stays generic per the simplified flow.
+//
+// Never marks anything as paid — see the module note above.
+export const openBitPayment = async (
+  recipientPhone: string,
+  amount: number | null,
+): Promise<void> => {
+  void amount;
+
+  const phone = await copyRecipientPhone(recipientPhone);
+  if (!phone) return;
+
+  Alert.alert("Phone number copied", "Phone number copied. Paste it in Bit.", [
+    {
+      text: "OK",
+      onPress: async () => {
+        const opened = await tryOpenBit();
+        if (!opened) {
+          showBitNotInstalled();
+        }
+      },
+    },
+  ]);
 };

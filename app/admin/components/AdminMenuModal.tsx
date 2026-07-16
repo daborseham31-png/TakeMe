@@ -24,10 +24,6 @@ type MenuItem = {
 
 const MENU_ITEMS: MenuItem[] = [
   { key: "dashboard", label: "Dashboard", icon: "grid-outline", path: "/admin" },
-  { key: "users", label: "Users", icon: "people-outline", path: "/admin/users" },
-  { key: "drivers", label: "Drivers", icon: "car-outline", path: "/admin/drivers" },
-  { key: "rides", label: "Rides", icon: "navigate-outline", path: "/admin/rides" },
-  { key: "bookings", label: "Bookings", icon: "book-outline", path: "/admin/bookings" },
   {
     key: "reports",
     label: "Reports & Support",
