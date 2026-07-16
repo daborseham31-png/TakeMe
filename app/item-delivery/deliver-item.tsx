@@ -11,6 +11,7 @@ import {
     TextInput,
     View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import IsraelLocationAutocomplete from "../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../booking/israelLocations";
@@ -60,6 +61,7 @@ const normalizeTime = (value: string) => {
 };
 
 export default function DeliverItemScreen() {
+  const { t } = useTranslation();
   const [fromLocation, setFromLocation] = useState("");
   const [toLocation, setToLocation] = useState("");
   const [fromPlace, setFromPlace] = useState<IsraelLocation | null>(null);
@@ -101,27 +103,24 @@ export default function DeliverItemScreen() {
 
   const handleSearch = () => {
     if (!fromLocation || !toLocation) {
-      Alert.alert("Missing details", "Please enter both From and To.");
+      Alert.alert(t("auth.missingDetails"), t("validation.enterFromAndTo"));
       return;
     }
 
     if (!fromPlace) {
-      setFromError("Please select a location from the list.");
+      setFromError(t("validation.selectLocationFromList"));
       return;
     }
 
     if (!toPlace) {
-      setToError("Please select a location from the list.");
+      setToError(t("validation.selectLocationFromList"));
       return;
     }
 
     const cleanTime = normalizeTime(tripTime);
 
     if (!cleanTime) {
-      Alert.alert(
-        "Invalid time",
-        "Please enter a valid time between 00:00 and 23:59.",
-      );
+      Alert.alert(t("validation.invalidTimeTitle"), t("validation.invalidTime"));
       return;
     }
 
@@ -129,14 +128,14 @@ export default function DeliverItemScreen() {
 
     if (cleanPhone.length !== 10) {
       Alert.alert(
-        "Invalid phone number",
-        "Recipient phone number must be exactly 10 digits.",
+        t("validation.invalidPhoneTitle"),
+        t("validation.recipientPhoneDigits"),
       );
       return;
     }
 
     if (!itemDescription.trim()) {
-      Alert.alert("Missing item", "Please describe the item you want to send.");
+      Alert.alert(t("validation.missingItemTitle"), t("validation.describeItemMessage"));
       return;
     }
 
@@ -205,46 +204,44 @@ export default function DeliverItemScreen() {
 
         <View style={styles.header}>
           <Text style={styles.headerEmoji}>📦</Text>
-          <Text style={styles.title}>Deliver Item</Text>
+          <Text style={styles.title}>{t("driverCreate.deliverItemTitle")}</Text>
         </View>
-        <Text style={styles.subtitle}>
-          Send an item from one person to another
-        </Text>
+        <Text style={styles.subtitle}>{t("driverCreate.deliverItemDesc")}</Text>
 
         {/* Trip details */}
         <View style={styles.card}>
           <View style={styles.twoColumns}>
             <View style={styles.column}>
               <IsraelLocationAutocomplete
-                label="From"
+                label={t("booking.from")}
                 value={fromLocation}
                 onChangeText={handleFromChange}
                 onSelectLocation={(location) => {
                   setFromPlace(location);
                   setFromError("");
                 }}
-                placeholder="Enter departure city"
+                placeholder={t("booking.enterDepartureCity")}
                 error={fromError}
               />
             </View>
 
             <View style={styles.column}>
               <IsraelLocationAutocomplete
-                label="To"
+                label={t("booking.to")}
                 value={toLocation}
                 onChangeText={handleToChange}
                 onSelectLocation={(location) => {
                   setToPlace(location);
                   setToError("");
                 }}
-                placeholder="Enter destination city"
+                placeholder={t("booking.enterDestinationCity")}
                 error={toError}
               />
             </View>
           </View>
 
           <Text style={styles.labelOrange}>
-            <Text>🕐 </Text>Delivery Time
+            <Text>🕐 </Text>{t("booking.deliveryTimeLabel")}
           </Text>
           <View style={styles.timeRowFull}>
             <TextInput
@@ -259,12 +256,12 @@ export default function DeliverItemScreen() {
             <Ionicons name="time-outline" size={18} color="#111827" />
           </View>
 
-          <Text style={styles.label}>📦 Recipient Phone Number</Text>
+          <Text style={styles.label}>📦 {t("driverCreate.recipientPhoneLabel")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="call-outline" size={18} color="#F58220" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter recipient's phone number"
+              placeholder={t("driverCreate.enterRecipientPhone")}
               placeholderTextColor="#8B7B6B"
               keyboardType="phone-pad"
               maxLength={10}
@@ -275,10 +272,10 @@ export default function DeliverItemScreen() {
             />
           </View>
 
-          <Text style={styles.label}>📦 Item Description</Text>
+          <Text style={styles.label}>📦 {t("driverCreate.itemDescriptionLabel")}</Text>
           <TextInput
             style={styles.textArea}
-            placeholder="Describe the item you want to send..."
+            placeholder={t("driverCreate.describeItemToDeliver")}
             placeholderTextColor="#8B7B6B"
             multiline
             numberOfLines={4}
@@ -298,7 +295,7 @@ export default function DeliverItemScreen() {
             />
             <Ionicons name="calendar-outline" size={16} color="#7C5F46" />
             <Text style={styles.weeklyText}>
-              Book for the whole week (optional)
+              {t("booking.bookWholeWeekOptional")}
             </Text>
           </Pressable>
         </View>
@@ -307,10 +304,10 @@ export default function DeliverItemScreen() {
         <View style={styles.card}>
           <View style={styles.prefTitleRow}>
             <Ionicons name="person-outline" size={18} color="#F58220" />
-            <Text style={styles.sectionTitle}>Driver Preferences</Text>
+            <Text style={styles.sectionTitle}>{t("booking.driverPreferences")}</Text>
           </View>
 
-          <Text style={styles.label}>Driver Gender</Text>
+          <Text style={styles.label}>{t("booking.driverGender")}</Text>
           <View style={styles.optionRow}>
             <Pressable
               style={[
@@ -325,7 +322,7 @@ export default function DeliverItemScreen() {
                   genderPref === "any" && styles.optionTextActive,
                 ]}
               >
-                Any
+                {t("common.any")}
               </Text>
             </Pressable>
 
@@ -342,7 +339,7 @@ export default function DeliverItemScreen() {
                   genderPref === "male" && styles.optionTextActive,
                 ]}
               >
-                Male
+                {t("common.male")}
               </Text>
             </Pressable>
 
@@ -359,12 +356,12 @@ export default function DeliverItemScreen() {
                   genderPref === "female" && styles.optionTextActive,
                 ]}
               >
-                Female
+                {t("common.female")}
               </Text>
             </Pressable>
           </View>
 
-          <Text style={styles.label}>Driver speaks</Text>
+          <Text style={styles.label}>{t("booking.driverSpeaks")}</Text>
           <View style={styles.languageRow}>
             {LANGUAGES_LIST.map((lang) => {
               const active = selectedLanguages.includes(lang.key);
@@ -394,7 +391,7 @@ export default function DeliverItemScreen() {
 
         <Pressable style={styles.searchButton} onPress={handleSearch}>
           <Ionicons name="search-outline" size={20} color="#FFFFFF" />
-          <Text style={styles.searchText}>Search Drivers</Text>
+          <Text style={styles.searchText}>{t("booking.searchDrivers")}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>

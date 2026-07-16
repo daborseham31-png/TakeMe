@@ -23,7 +23,10 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "react-i18next";
+
 import { auth, db } from "../firebase";
+import { useLanguage } from "./i18n/LanguageProvider";
 
 type BookingTab = "passenger" | "driver";
 
@@ -85,6 +88,8 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 export default function NotificationsScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -263,10 +268,10 @@ export default function NotificationsScreen() {
   const clearAll = () => {
     if (visible.length === 0 || clearingAll) return;
 
-    Alert.alert("Clear all", "Hide all notifications?", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("notifications.clearAllConfirmTitle"), t("notifications.clearAllConfirmMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Clear all",
+        text: t("notifications.clearAllConfirmTitle"),
         style: "destructive",
         onPress: async () => {
           const ids = visible.map((n) => n.id);
@@ -291,7 +296,7 @@ export default function NotificationsScreen() {
               await batch.commit();
             }
           } catch (error: any) {
-            Alert.alert("Error", error?.message || "Could not clear.");
+            Alert.alert(t("common.error"), error?.message || t("notifications.couldNotClear"));
           } finally {
             setClearingAll(false);
           }
@@ -304,26 +309,26 @@ export default function NotificationsScreen() {
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-          <Text style={styles.backText}>Back</Text>
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
+          <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
 
         <View style={styles.headerRow}>
           <View style={styles.header}>
             <Ionicons name="notifications" size={26} color="#F58220" />
-            <Text style={styles.title}>Notifications</Text>
+            <Text style={styles.title}>{t("notifications.tabTitle")}</Text>
           </View>
 
           {visible.length > 0 ? (
             <Pressable onPress={clearAll} disabled={clearingAll} hitSlop={8}>
               <Text style={styles.clearAll}>
-                {clearingAll ? "Clearing..." : "Clear all"}
+                {clearingAll ? t("roadsideHelp.clearingButton") : t("notifications.clearAllConfirmTitle")}
               </Text>
             </Pressable>
           ) : null}
         </View>
 
-        <Text style={styles.subtitle}>Requests & booking updates</Text>
+        <Text style={styles.subtitle}>{t("notifications.subtitle")}</Text>
 
         {loading ? (
           <View style={styles.loadingBox}>
@@ -339,9 +344,9 @@ export default function NotificationsScreen() {
               />
             </View>
 
-            <Text style={styles.emptyTitle}>No notifications yet</Text>
+            <Text style={styles.emptyTitle}>{t("notifications.empty")}</Text>
             <Text style={styles.emptyText}>
-              Requests, payments and booking updates will appear here.
+              {t("notifications.emptyHint")}
             </Text>
           </View>
         ) : (
@@ -364,7 +369,7 @@ export default function NotificationsScreen() {
                   </View>
 
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.cardTitle}>{n.title || "Update"}</Text>
+                    <Text style={styles.cardTitle}>{n.title || t("notifications.updateFallback")}</Text>
 
                     {n.message ? (
                       <Text style={styles.cardMessage}>{n.message}</Text>
@@ -378,7 +383,7 @@ export default function NotificationsScreen() {
                           color="#FFFFFF"
                         />
                         <Text style={styles.payPillText}>
-                          Continue to Payment
+                          {t("rides.continueToPayment")}
                         </Text>
                       </View>
                     ) : null}

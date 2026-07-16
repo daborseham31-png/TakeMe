@@ -6,6 +6,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 
@@ -43,14 +44,16 @@ export function ErrorState({
   message: string;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <View style={styles.center}>
       <Ionicons name="alert-circle-outline" size={40} color={adminColors.danger} />
-      <Text style={styles.emptyTitle}>Something went wrong</Text>
+      <Text style={styles.emptyTitle}>{t("admin.somethingWentWrong")}</Text>
       <Text style={styles.emptySubtitle}>{message}</Text>
       <Pressable style={styles.retryButton} onPress={onRetry}>
         <Ionicons name="refresh" size={16} color="#FFFFFF" />
-        <Text style={styles.retryText}>Retry</Text>
+        <Text style={styles.retryText}>{t("admin.retry")}</Text>
       </Pressable>
     </View>
   );

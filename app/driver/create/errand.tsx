@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
@@ -31,6 +32,7 @@ import {
 } from "./driverHelpers";
 
 export default function ErrandJobScreen() {
+  const { t } = useTranslation();
   const { driverName, phone, driverAge, languages } = useDriverAccount();
 
   const [loading, setLoading] = useState(false);
@@ -62,7 +64,7 @@ export default function ErrandJobScreen() {
     const user = auth.currentUser;
 
     if (!user) {
-      Alert.alert("Login required", "Please login first.");
+      Alert.alert(t("auth.loginRequiredTitle"), t("auth.pleaseLoginFirst"));
       router.replace("/");
       return;
     }
@@ -71,8 +73,8 @@ export default function ErrandJobScreen() {
 
     if (!eligibility.eligible) {
       Alert.alert(
-        "Verification required",
-        "You must verify a valid driving license before creating a driver trip.",
+        t("driver.verificationRequired"),
+        t("driver.mustVerifyLicense"),
       );
       return;
     }
@@ -83,8 +85,8 @@ export default function ErrandJobScreen() {
 
     if (languages.length === 0) {
       Alert.alert(
-        "Missing language",
-        "Your language is missing from your account profile.",
+        t("driver.missingLanguageTitle"),
+        t("driver.missingLanguageMessage"),
       );
       return;
     }
@@ -99,12 +101,12 @@ export default function ErrandJobScreen() {
       !errandPrice ||
       !errandSeats
     ) {
-      Alert.alert("Missing details", "Please fill in all errand details.");
+      Alert.alert(t("auth.missingDetails"), t("validation.fillAllFields"));
       return;
     }
 
     if (!errandLocationPlace) {
-      setErrandLocationError("Please select a location from the list.");
+      setErrandLocationError(t("validation.selectLocationFromList"));
       return;
     }
 
@@ -112,8 +114,8 @@ export default function ErrandJobScreen() {
       errandDate,
       errandStartTime,
       {
-        dateLabel: "errand date",
-        timeLabel: "start time",
+        dateLabelKey: "driverCreate.errandDate",
+        timeLabelKey: "driverCreate.startTime",
       },
     );
 
@@ -126,10 +128,7 @@ export default function ErrandJobScreen() {
     const cleanEndTime = normalizeTime(errandEndTime);
 
     if (!cleanEndTime) {
-      Alert.alert(
-        "Invalid time",
-        "Please choose a valid end time between 00:00 and 23:59.",
-      );
+      Alert.alert(t("validation.invalidTimeTitle"), t("validation.invalidTime"));
       return;
     }
 
@@ -141,7 +140,7 @@ export default function ErrandJobScreen() {
       endMinutes === null ||
       endMinutes <= startMinutes
     ) {
-      Alert.alert("Invalid time", "End time must be after start time.");
+      Alert.alert(t("validation.invalidTimeTitle"), t("validation.endTimeAfterStart"));
       return;
     }
 
@@ -149,12 +148,12 @@ export default function ErrandJobScreen() {
     const cleanSeats = Number(errandSeats);
 
     if (Number.isNaN(cleanPrice) || cleanPrice <= 0) {
-      Alert.alert("Invalid price", "Price must be more than 0.");
+      Alert.alert(t("validation.invalidPriceTitle"), t("validation.invalidPrice"));
       return;
     }
 
     if (Number.isNaN(cleanSeats) || cleanSeats < 1 || cleanSeats > 8) {
-      Alert.alert("Invalid seats", "Seats must be between 1 and 8.");
+      Alert.alert(t("validation.invalidSeatsTitle"), t("validation.invalidSeats"));
       return;
     }
 
@@ -212,11 +211,11 @@ export default function ErrandJobScreen() {
         createdAt: serverTimestamp(),
       });
 
-      Alert.alert("Success", "Your errand was created successfully.");
+      Alert.alert(t("common.success"), t("driver.errandCreated"));
       router.replace("/(tabs)/home" as any);
     } catch (error: any) {
       console.log("CREATE ERRAND ERROR:", error);
-      Alert.alert("Error", error.message || "Could not create errand.");
+      Alert.alert(t("common.error"), error.message || t("driver.couldNotCreateErrand"));
     } finally {
       setLoading(false);
     }
@@ -233,36 +232,36 @@ export default function ErrandJobScreen() {
         </Pressable>
 
         <View style={styles.card}>
-          <Text style={styles.title}>Create an Errand</Text>
+          <Text style={styles.title}>{t("driverCreate.newErrandTitle")}</Text>
           <Text style={styles.subtitle}>
-            Post your errand details for people to join
+            {t("driverCreate.newErrandSubtitle")}
           </Text>
 
           <YesNoField
-            label="Can take kids?"
+            label={t("driverCreate.canTakeKids")}
             value={canTakeKids}
             onValueChange={setCanTakeKids}
           />
 
           <YesNoField
-            label="Allows pets?"
+            label={t("driverCreate.allowsPets")}
             value={allowsPets}
             onValueChange={setAllowsPets}
           />
 
-          <Text style={styles.label}>Errand Title</Text>
+          <Text style={styles.label}>{t("driverCreate.errandTitleLabel")}</Text>
           <TextInput
             style={styles.input}
-            placeholder="Enter errand title"
+            placeholder={t("driverCreate.enterErrandTitle")}
             placeholderTextColor="#8B7B6B"
             value={errandTitle}
             onChangeText={setErrandTitle}
           />
 
-          <Text style={styles.label}>Errand Description</Text>
+          <Text style={styles.label}>{t("driverCreate.errandDescriptionLabel")}</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
-            placeholder="Describe the errand"
+            placeholder={t("driverCreate.describeErrand")}
             placeholderTextColor="#8B7B6B"
             value={errandDescription}
             onChangeText={setErrandDescription}
@@ -270,19 +269,19 @@ export default function ErrandJobScreen() {
           />
 
           <IsraelLocationAutocomplete
-            label="Errand Location"
+            label={t("driverCreate.errandLocationLabel")}
             value={errandLocation}
             onChangeText={handleErrandLocationChange}
             onSelectLocation={(location) => {
               setErrandLocationPlace(location);
               setErrandLocationError("");
             }}
-            placeholder="Enter errand location"
+            placeholder={t("driverCreate.enterErrandLocation")}
             error={errandLocationError}
           />
 
           <DateInput
-            label="Errand Date"
+            label={t("driverCreate.errandDate")}
             value={errandDate}
             onChange={setErrandDate}
             showPicker={showErrandDatePicker}
@@ -292,7 +291,7 @@ export default function ErrandJobScreen() {
           <View style={styles.twoColumns}>
             <View style={styles.column}>
               <TimeInput
-                label="Start Time"
+                label={t("driverCreate.startTime")}
                 value={errandStartTime}
                 onChange={setErrandStartTime}
                 showPicker={showStartTimePicker}
@@ -308,7 +307,7 @@ export default function ErrandJobScreen() {
 
             <View style={styles.column}>
               <TimeInput
-                label="End Time"
+                label={t("driverCreate.endTime")}
                 value={errandEndTime}
                 onChange={setErrandEndTime}
                 showPicker={showEndTimePicker}
@@ -325,12 +324,12 @@ export default function ErrandJobScreen() {
 
           <View style={styles.twoColumns}>
             <View style={styles.column}>
-              <Text style={styles.label}>Price (₪)</Text>
+              <Text style={styles.label}>{t("booking.price")}</Text>
               <View style={styles.inputRow}>
                 <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Enter price"
+                  placeholder={t("booking.enterPrice")}
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   value={errandPrice}
@@ -340,12 +339,12 @@ export default function ErrandJobScreen() {
             </View>
 
             <View style={styles.column}>
-              <Text style={styles.label}>Seats Available</Text>
+              <Text style={styles.label}>{t("driverCreate.availableSeats")}</Text>
               <View style={styles.inputRow}>
                 <Ionicons name="people-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Enter available seats"
+                  placeholder={t("driverCreate.enterAvailableSeats")}
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   maxLength={1}
@@ -367,7 +366,7 @@ export default function ErrandJobScreen() {
             disabled={loading}
           >
             <Text style={styles.submitText}>
-              {loading ? "Creating..." : "Create Errand"}
+              {loading ? t("driverCreate.creating") : t("driverCreate.createErrand")}
             </Text>
           </Pressable>
         </View>

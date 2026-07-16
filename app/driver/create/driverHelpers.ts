@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import { Alert, StyleSheet } from "react-native";
 
 import { auth, db } from "../../../firebase";
+// This file is a plain helper module (not a component), so it uses the
+// initialized global i18next instance directly rather than the
+// useTranslation() hook — see app/i18n/index.ts.
+import i18n from "../../i18n";
 
 // ---------------------------------------------------------------------------
 // Shared constants
@@ -281,20 +285,24 @@ export const isTimeAvailableForDate = (dateText: string, timeText: string) => {
 export const validateDateAndTimeNotPassed = (
   dateText: string,
   timeText: string,
+  // dateLabelKey/timeLabelKey are i18n translation keys (e.g.
+  // "driverCreate.travelDate"), not raw display text — this is what lets the
+  // interpolated messages below read naturally in the user's current
+  // language instead of mixing in an untranslated English word.
   labels?: {
-    dateLabel?: string;
-    timeLabel?: string;
+    dateLabelKey?: string;
+    timeLabelKey?: string;
   },
 ) => {
-  const dateLabel = labels?.dateLabel || "date";
-  const timeLabel = labels?.timeLabel || "time";
+  const dateLabel = i18n.t(labels?.dateLabelKey || "booking.date");
+  const timeLabel = i18n.t(labels?.timeLabelKey || "booking.time");
 
   const cleanDate = normalizeDateToYMD(dateText);
 
   if (!cleanDate) {
     Alert.alert(
-      "Invalid date",
-      `Please choose a valid ${dateLabel} today or in the future.`,
+      i18n.t("validation.invalidDateTitle"),
+      i18n.t("validation.invalidDateForLabel", { label: dateLabel }),
     );
     return null;
   }
@@ -303,16 +311,16 @@ export const validateDateAndTimeNotPassed = (
 
   if (!cleanTime) {
     Alert.alert(
-      "Invalid time",
-      `Please choose a valid ${timeLabel} between 00:00 and 23:59.`,
+      i18n.t("validation.invalidTimeTitle"),
+      i18n.t("validation.invalidTimeForLabel", { label: timeLabel }),
     );
     return null;
   }
 
   if (!isTimeAvailableForDate(cleanDate, cleanTime)) {
     Alert.alert(
-      "Invalid time",
-      `You cannot choose a ${timeLabel} that already passed today.`,
+      i18n.t("validation.invalidTimeTitle"),
+      i18n.t("validation.timeAlreadyPassed", { label: timeLabel }),
     );
     return null;
   }

@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import {
   formatDateToYMD,
@@ -20,16 +21,6 @@ import {
   parseDateInput,
   styles,
 } from "./driverHelpers";
-
-const DAY_FULL_NAME: Record<string, string> = {
-  Sun: "Sunday",
-  Mon: "Monday",
-  Tue: "Tuesday",
-  Wed: "Wednesday",
-  Thu: "Thursday",
-  Fri: "Friday",
-  Sat: "Saturday",
-};
 
 type Props = {
   label: string;
@@ -53,6 +44,7 @@ export default function DateInput({
   maximumDate,
   minimumDate,
 }: Props) {
+  const { t } = useTranslation();
   const cleanDate = normalizeDateToYMD(value);
   const dayName = getDayFromDateText(value);
   const pickerDate = cleanDate
@@ -73,7 +65,7 @@ export default function DateInput({
 
         <TextInput
           style={styles.rowInput}
-          placeholder={`Select ${label.toLowerCase()}`}
+          placeholder={`${t("common.select")} ${label}`}
           placeholderTextColor="#8B7B6B"
           keyboardType="numbers-and-punctuation"
           maxLength={10}
@@ -84,7 +76,7 @@ export default function DateInput({
 
       {cleanDate && dayName && (
         <Text style={styles.autoDayText}>
-          Day: {DAY_FULL_NAME[dayName] || dayName}
+          {t("booking.day")}: {t(`booking.days.${dayName}`, { defaultValue: dayName })}
         </Text>
       )}
 
@@ -151,6 +143,7 @@ export function TimeInput({
   setShowPicker,
   associatedDate,
 }: TimeInputProps) {
+  const { t } = useTranslation();
   const isToday = associatedDate
     ? normalizeDateToYMD(associatedDate) === getTodayYMD()
     : false;
@@ -355,7 +348,7 @@ export function TimeInput({
         <Ionicons name="time-outline" size={18} color="#8B7B6B" />
 
         <Text style={[styles.rowInput, !value && { color: "#8B7B6B" }]}>
-          {value || `Select ${label.toLowerCase()}`}
+          {value || `${t("common.select")} ${label}`}
         </Text>
       </Pressable>
 
@@ -372,7 +365,9 @@ export function TimeInput({
             <View style={timeStyles.headerBox}>
               <View style={timeStyles.handle} />
               <Text style={timeStyles.title}>{label}</Text>
-              <Text style={timeStyles.subtitle}>Choose hour and minutes</Text>
+              <Text style={timeStyles.subtitle}>
+                {t("booking.chooseHourAndMinutes")}
+              </Text>
             </View>
 
             <View style={timeStyles.pickerBox}>
@@ -461,11 +456,11 @@ export function TimeInput({
 
             <View style={timeStyles.buttonsRow}>
               <Pressable onPress={handleCancel} style={timeStyles.cancelButton}>
-                <Text style={timeStyles.cancelButtonText}>Cancel</Text>
+                <Text style={timeStyles.cancelButtonText}>{t("common.cancel")}</Text>
               </Pressable>
 
               <Pressable onPress={handleSave} style={timeStyles.saveButton}>
-                <Text style={timeStyles.saveButtonText}>Save</Text>
+                <Text style={timeStyles.saveButtonText}>{t("common.save")}</Text>
               </Pressable>
             </View>
           </View>

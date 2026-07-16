@@ -10,6 +10,7 @@ import { Stack, router } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import { View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth } from "../../firebase";
 import { isUserAdmin } from "./adminAuthLib";
@@ -17,6 +18,7 @@ import { adminColors } from "./adminTheme";
 import { LoadingState } from "./components/AdminStates";
 
 export default function AdminLayout() {
+  const { t } = useTranslation();
   const [checking, setChecking] = useState(true);
   const [allowed, setAllowed] = useState(false);
 
@@ -56,7 +58,7 @@ export default function AdminLayout() {
   if (checking) {
     return (
       <View style={{ flex: 1, backgroundColor: adminColors.page, justifyContent: "center" }}>
-        <LoadingState label="Checking admin access..." />
+        <LoadingState label={t("admin.checkingAdminAccess")} />
       </View>
     );
   }

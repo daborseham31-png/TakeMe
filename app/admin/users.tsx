@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { adminColors, adminRadius, adminSpacing } from "./adminTheme";
 import { subscribeAllUsers } from "./adminUsersLib";
@@ -19,22 +20,23 @@ import { EmptyState, ErrorState, LoadingState } from "./components/AdminStates";
 import FilterChips from "./components/FilterChips";
 import SearchBar from "./components/SearchBar";
 import { useAdminCollection } from "./useAdminCollection";
+import { translateAccountStatus, translateUserRole } from "../i18n/formatters";
 
 type RoleFilter = "all" | "passenger" | "driver" | "admin";
 type StatusFilter = "all" | "active" | "blocked" | "suspended";
 
-const ROLE_OPTIONS: { key: RoleFilter; label: string }[] = [
-  { key: "all", label: "All roles" },
-  { key: "passenger", label: "Passengers" },
-  { key: "driver", label: "Drivers" },
-  { key: "admin", label: "Admins" },
+const ROLE_OPTION_KEYS: { key: RoleFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "admin.allRoles" },
+  { key: "passenger", labelKey: "common.passenger" },
+  { key: "driver", labelKey: "common.driver" },
+  { key: "admin", labelKey: "admin.admins" },
 ];
 
-const STATUS_OPTIONS: { key: StatusFilter; label: string }[] = [
-  { key: "all", label: "All statuses" },
-  { key: "active", label: "Active" },
-  { key: "blocked", label: "Blocked" },
-  { key: "suspended", label: "Suspended" },
+const STATUS_OPTION_KEYS: { key: StatusFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "admin.allStatuses" },
+  { key: "active", labelKey: "admin.active" },
+  { key: "blocked", labelKey: "admin.blocked" },
+  { key: "suspended", labelKey: "admin.suspended" },
 ];
 
 const statusColor = (status: string) => {
@@ -44,10 +46,21 @@ const statusColor = (status: string) => {
 };
 
 export default function AdminUsersScreen() {
+  const { t } = useTranslation();
   const { data: users, loading, error, refresh } = useAdminCollection(subscribeAllUsers);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
+  const roleOptions = useMemo(
+    () => ROLE_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
+    [t],
+  );
+
+  const statusOptions = useMemo(
+    () => STATUS_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
+    [t],
+  );
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -84,11 +97,11 @@ export default function AdminUsersScreen() {
           {item.name}
         </Text>
         <Text style={styles.detail} numberOfLines={1}>
-          {item.email || item.phone || "No contact info"}
+          {item.email || item.phone || t("admin.noContactInfo")}
         </Text>
         <View style={styles.badgeRow}>
           <View style={styles.roleBadge}>
-            <Text style={styles.roleBadgeText}>{item.role || "unknown"}</Text>
+            <Text style={styles.roleBadgeText}>{translateUserRole(item.role, t)}</Text>
           </View>
           <View
             style={[
@@ -96,7 +109,7 @@ export default function AdminUsersScreen() {
               { backgroundColor: statusColor(item.accountStatus) },
             ]}
           />
-          <Text style={styles.statusText}>{item.accountStatus}</Text>
+          <Text style={styles.statusText}>{translateAccountStatus(item.accountStatus, t)}</Text>
         </View>
       </View>
 
@@ -105,15 +118,15 @@ export default function AdminUsersScreen() {
   );
 
   return (
-    <AdminScreen title="Users" activeKey="users">
+    <AdminScreen title={t("admin.users")} activeKey="users">
       <View style={styles.filtersWrap}>
-        <SearchBar value={search} onChangeText={setSearch} placeholder="Search by name, email, phone" />
-        <FilterChips options={ROLE_OPTIONS} value={roleFilter} onChange={setRoleFilter} />
-        <FilterChips options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} />
+        <SearchBar value={search} onChangeText={setSearch} placeholder={t("admin.searchByNameEmailPhone")} />
+        <FilterChips options={roleOptions} value={roleFilter} onChange={setRoleFilter} />
+        <FilterChips options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
       </View>
 
       {loading ? (
-        <LoadingState label="Loading users..." />
+        <LoadingState label={t("admin.loadingUsers")} />
       ) : error ? (
         <ErrorState message={error} onRetry={refresh} />
       ) : (
@@ -126,8 +139,8 @@ export default function AdminUsersScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="people-outline"
-              title="No users found"
-              subtitle="Try a different search or filter."
+              title={t("admin.noUsersFound")}
+              subtitle={t("admin.tryDifferentSearchFilter")}
             />
           }
         />

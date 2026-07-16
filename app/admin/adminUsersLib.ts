@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
+import i18n from "../i18n";
 import { writeAuditLog } from "./adminAuditLib";
 import { AccountStatus, AdminUserRow } from "./adminTypes";
 
@@ -23,7 +24,7 @@ const toSeconds = (value: unknown): number => {
 
 export const normalizeAdminUser = (id: string, data: Record<string, any>): AdminUserRow => ({
   id,
-  name: data.name || "Unnamed",
+  name: data.name || i18n.t("admin.unnamedFallback"),
   email: data.email || "",
   phone: data.phone || "",
   role: data.role === "admin" || data.role === "driver" || data.role === "passenger"
@@ -106,7 +107,7 @@ export const setUserRole = async (
 
 export const deleteUserAccount = async (userId: string, reason: string): Promise<void> => {
   if (auth.currentUser?.uid === userId) {
-    throw new Error("You cannot delete your own admin account.");
+    throw new Error(i18n.t("admin.cannotDeleteOwnAccount"));
   }
 
   // Deletes the Firestore profile only — deleting the actual Firebase Auth

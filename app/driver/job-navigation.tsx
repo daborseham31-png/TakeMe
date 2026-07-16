@@ -14,6 +14,8 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "react-i18next";
+
 import { db } from "../../firebase";
 import {
   arriveJob,
@@ -23,8 +25,11 @@ import {
   NormalizedApplication,
   WorkErrandKind,
 } from "../booking/work-errand/workErrandLib";
+import { useLanguage } from "../i18n/LanguageProvider";
 
 export default function JobNavigationScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
   const kind = (params.kind === "errand" ? "errand" : "work") as WorkErrandKind;
   const id = typeof params.id === "string" ? params.id : "";
@@ -67,24 +72,24 @@ export default function JobNavigationScreen() {
   const openMaps = (app_: NormalizedApplication) => {
     const c = coords(app_);
     if (!c) {
-      Alert.alert("Location", "Exact location is not available.");
+      Alert.alert(t("booking.locationLabel"), t("booking.exactLocationNotAvailable"));
       return;
     }
     const url = `https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}`;
     Linking.openURL(url).catch(() =>
-      Alert.alert("Error", "Could not open maps."),
+      Alert.alert(t("common.error"), t("booking.couldNotOpenMaps")),
     );
   };
 
   const openWaze = (app_: NormalizedApplication) => {
     const c = coords(app_);
     if (!c) {
-      Alert.alert("Location", "Exact location is not available.");
+      Alert.alert(t("booking.locationLabel"), t("booking.exactLocationNotAvailable"));
       return;
     }
     const url = `https://waze.com/ul?ll=${c.lat},${c.lng}&navigate=yes`;
     Linking.openURL(url).catch(() =>
-      Alert.alert("Error", "Could not open Waze."),
+      Alert.alert(t("common.error"), t("booking.couldNotOpenWaze")),
     );
   };
 
@@ -94,7 +99,7 @@ export default function JobNavigationScreen() {
       setBusy(true);
       await arriveJob(kind, app.id, app);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not update.");
+      Alert.alert(t("common.error"), error?.message || t("booking.couldNotUpdate"));
     } finally {
       setBusy(false);
     }
@@ -103,24 +108,24 @@ export default function JobNavigationScreen() {
   const handleFinish = () => {
     if (!app) return;
     Alert.alert(
-      kind === "work" ? "Finish Work" : "Finish Errand",
-      "Mark this as completed? It will move to My Bookings.",
+      kind === "work" ? t("booking.finishWork") : t("booking.finishErrand"),
+      t("booking.markCompletedConfirm"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "Yes, finish",
+          text: t("common.yesFinish"),
           onPress: async () => {
             try {
               setBusy(true);
               await finishJob(kind, app.id, app);
-              Alert.alert("Completed", "Great job! This is now completed.", [
+              Alert.alert(t("common.completed"), t("booking.greatJobCompletedMessage"), [
                 {
-                  text: "OK",
+                  text: t("common.ok"),
                   onPress: () => router.replace("/(tabs)/bookings" as any),
                 },
               ]);
             } catch (error: any) {
-              Alert.alert("Error", error?.message || "Could not complete.");
+              Alert.alert(t("common.error"), error?.message || t("booking.couldNotComplete"));
             } finally {
               setBusy(false);
             }
@@ -145,9 +150,9 @@ export default function JobNavigationScreen() {
       <SafeAreaView style={styles.safe}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={44} color="#8B7B6B" />
-          <Text style={styles.emptyTitle}>Booking not found</Text>
+          <Text style={styles.emptyTitle}>{t("rides.bookingNotFound")}</Text>
           <Pressable style={styles.backLink} onPress={() => router.back()}>
-            <Text style={styles.backLinkText}>Go back</Text>
+            <Text style={styles.backLinkText}>{t("common.goBack")}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -161,14 +166,14 @@ export default function JobNavigationScreen() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-          <Text style={styles.backText}>Back</Text>
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
+          <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
 
         <View style={styles.header}>
           <Ionicons name="navigate" size={26} color="#F58220" />
           <Text style={styles.title}>
-            {kind === "work" ? "Work Navigation" : "Errand Navigation"}
+            {kind === "work" ? t("booking.workNavigationTitle") : t("booking.errandNavigationTitle")}
           </Text>
         </View>
 
@@ -177,8 +182,8 @@ export default function JobNavigationScreen() {
           <Ionicons name="map-outline" size={40} color="#F58220" />
           <Text style={styles.mapText}>
             {arrived
-              ? "You have arrived at the destination"
-              : "Navigate to the customer's location"}
+              ? t("booking.arrivedAtDestination")
+              : t("booking.navigateToCustomerLocation")}
           </Text>
         </View>
 
@@ -206,13 +211,13 @@ export default function JobNavigationScreen() {
 
           <View style={styles.infoRow}>
             <Ionicons name="business-outline" size={16} color="#7C5F46" />
-            <Text style={styles.infoText}>City / Village: {app.city}</Text>
+            <Text style={styles.infoText}>{t("booking.cityVillageColon", { city: app.city })}</Text>
           </View>
 
           <View style={styles.infoRow}>
             <Ionicons name="location-outline" size={16} color="#7C5F46" />
             <Text style={styles.infoText}>
-              Neighborhood: {app.neighborhood}
+              {t("booking.neighborhoodColon", { neighborhood: app.neighborhood })}
             </Text>
           </View>
 
@@ -222,7 +227,7 @@ export default function JobNavigationScreen() {
               {app.location?.latitude != null && app.location?.longitude != null
                 ? app.location.address ||
                   `${app.location.latitude.toFixed(5)}, ${app.location.longitude.toFixed(5)}`
-                : "Exact location not available"}
+                : t("booking.exactLocationNotAvailableShort")}
             </Text>
           </View>
 
@@ -244,7 +249,7 @@ export default function JobNavigationScreen() {
 
           {app.notes ? (
             <View style={styles.notesBox}>
-              <Text style={styles.notesLabel}>Notes</Text>
+              <Text style={styles.notesLabel}>{t("common.notes")}</Text>
               <Text style={styles.notesText}>{app.notes}</Text>
             </View>
           ) : null}
@@ -253,21 +258,21 @@ export default function JobNavigationScreen() {
         <View style={styles.navRow}>
           <Pressable style={styles.navButton} onPress={() => openMaps(app)}>
             <Ionicons name="map" size={18} color="#FFFFFF" />
-            <Text style={styles.navButtonText}>Google Maps</Text>
+            <Text style={styles.navButtonText}>{t("booking.googleMaps")}</Text>
           </Pressable>
           <Pressable
             style={[styles.navButton, styles.wazeButton]}
             onPress={() => openWaze(app)}
           >
             <Ionicons name="navigate-circle" size={18} color="#FFFFFF" />
-            <Text style={styles.navButtonText}>Waze</Text>
+            <Text style={styles.navButtonText}>{t("booking.waze")}</Text>
           </Pressable>
         </View>
 
         {completed ? (
           <View style={styles.doneBanner}>
             <Ionicons name="checkmark-circle" size={20} color="#166534" />
-            <Text style={styles.doneText}>Completed</Text>
+            <Text style={styles.doneText}>{t("common.completed")}</Text>
           </View>
         ) : arrived ? (
           <Pressable
@@ -281,7 +286,7 @@ export default function JobNavigationScreen() {
               <>
                 <Ionicons name="checkmark-done" size={19} color="#FFFFFF" />
                 <Text style={styles.finishText}>
-                  {kind === "work" ? "Finish Work" : "Finish Errand"}
+                  {kind === "work" ? t("booking.finishWork") : t("booking.finishErrand")}
                 </Text>
               </>
             )}
@@ -297,7 +302,7 @@ export default function JobNavigationScreen() {
             ) : (
               <>
                 <Ionicons name="flag" size={19} color="#FFFFFF" />
-                <Text style={styles.arrivedText}>I arrived</Text>
+                <Text style={styles.arrivedText}>{t("booking.iArrivedButton")}</Text>
               </>
             )}
           </Pressable>

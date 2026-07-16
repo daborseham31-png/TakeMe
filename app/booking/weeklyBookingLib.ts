@@ -24,6 +24,8 @@ import {
 import { Alert } from "react-native";
 
 import { auth, db } from "../../firebase";
+import i18n from "../i18n";
+import { translateStoredDayName } from "../i18n/formatters";
 import {
   formatDateToYMD,
   getDayFromDateText,
@@ -317,7 +319,7 @@ export const validateWeeklyRows = (
   options: { requirePrice?: boolean } = {},
 ): WeeklyDriverDay[] | null => {
   if (rows.length === 0) {
-    Alert.alert("Missing days", "Please add at least one day for this week.");
+    Alert.alert(i18n.t("validation.missingDaysTitle"), i18n.t("validation.addAtLeastOneDayMessage"));
     return null;
   }
 
@@ -331,8 +333,8 @@ export const validateWeeklyRows = (
 
     if (!cleanDate) {
       Alert.alert(
-        "Invalid date",
-        "Please choose a valid date (today or later) for every day.",
+        i18n.t("validation.invalidDateTitle"),
+        i18n.t("validation.chooseValidDateEveryDay"),
       );
       return null;
     }
@@ -341,16 +343,16 @@ export const validateWeeklyRows = (
 
     if (!bucket) {
       Alert.alert(
-        "Booking unavailable",
-        "Booking for this week is not available yet.",
+        i18n.t("validation.bookingUnavailableTitle"),
+        i18n.t("validation.bookingUnavailableThisWeekMessage"),
       );
       return null;
     }
 
     if (lockedWeek && bucket !== lockedWeek) {
       Alert.alert(
-        "Different weeks",
-        "All selected days must belong to the same week.",
+        i18n.t("validation.differentWeeksTitle"),
+        i18n.t("validation.sameWeekRequiredMessage"),
       );
       return null;
     }
@@ -359,8 +361,8 @@ export const validateWeeklyRows = (
 
     if (seenDates.has(cleanDate)) {
       Alert.alert(
-        "Duplicate day",
-        "You already added this date. Please choose a different day.",
+        i18n.t("validation.duplicateDayTitle"),
+        i18n.t("validation.duplicateDayMessage"),
       );
       return null;
     }
@@ -371,16 +373,16 @@ export const validateWeeklyRows = (
 
     if (!cleanTime) {
       Alert.alert(
-        "Invalid time",
-        "Please choose a valid time between 00:00 and 23:59 for every day.",
+        i18n.t("validation.invalidTimeTitle"),
+        i18n.t("validation.chooseValidTimeEveryDay"),
       );
       return null;
     }
 
     if (!isWeeklyTimeAvailable(cleanDate, cleanTime, now)) {
       Alert.alert(
-        "Invalid time",
-        "You cannot choose a time that already passed today.",
+        i18n.t("validation.invalidTimeTitle"),
+        i18n.t("validation.timeAlreadyPassedTodayMessage"),
       );
       return null;
     }
@@ -388,7 +390,7 @@ export const validateWeeklyRows = (
     const seatsValue = Number(row.seats);
 
     if (!Number.isFinite(seatsValue) || seatsValue < 1 || seatsValue > 8) {
-      Alert.alert("Invalid seats", "Seats must be between 1 and 8 for every day.");
+      Alert.alert(i18n.t("validation.invalidSeatsTitle"), i18n.t("validation.seatsRangeEveryDay"));
       return null;
     }
 
@@ -399,8 +401,8 @@ export const validateWeeklyRows = (
 
       if (!Number.isFinite(priceValue) || priceValue <= 0) {
         Alert.alert(
-          "Invalid price",
-          "Please enter a price greater than 0 for every day.",
+          i18n.t("validation.invalidPriceTitle"),
+          i18n.t("validation.priceGreaterThanZeroEveryDay"),
         );
         return null;
       }
@@ -409,7 +411,7 @@ export const validateWeeklyRows = (
     const dayKey = dayKeyFromAnyYMD(cleanDate);
 
     if (!dayKey) {
-      Alert.alert("Invalid date", "Please choose a valid date for every day.");
+      Alert.alert(i18n.t("validation.invalidDateTitle"), i18n.t("validation.chooseValidDateEveryDayShort"));
       return null;
     }
 
@@ -605,19 +607,17 @@ export const createWeeklyBookings = async (
   input: CreateWeeklyBookingsInput,
 ): Promise<{ bookingGroupId: string; bookingIds: string[] }> => {
   const user = auth.currentUser;
-  if (!user) throw new Error("You must be logged in to book.");
+  if (!user) throw new Error(i18n.t("validation.mustBeLoggedInToBook"));
 
   if (!input.routeId) {
-    throw new Error(
-      "Missing trip id. Please go back and choose the driver again.",
-    );
+    throw new Error(i18n.t("rides.missingTripId"));
   }
 
   if (!input.selectedDays || input.selectedDays.length === 0) {
-    throw new Error("Please choose at least one day to book.");
+    throw new Error(i18n.t("validation.chooseAtLeastOneDayToBook"));
   }
 
-  let passengerName = user.displayName || "Passenger";
+  let passengerName = user.displayName || i18n.t("common.passenger");
   let passengerPhone = "";
 
   try {
@@ -662,7 +662,7 @@ export const createWeeklyBookings = async (
     const routeSnap = await transaction.get(routeRef);
 
     if (!routeSnap.exists()) {
-      throw new Error("This trip is no longer available.");
+      throw new Error(i18n.t("rides.tripNoLongerAvailable"));
     }
 
     const routeData: any = routeSnap.data();
@@ -677,7 +677,9 @@ export const createWeeklyBookings = async (
 
         if (index === -1) {
           throw new Error(
-            `This driver no longer has ${day.dayName} available.`,
+            i18n.t("booking.dayNoLongerAvailable", {
+              day: translateStoredDayName(day.dayName, i18n.t),
+            }),
           );
         }
 
@@ -688,7 +690,9 @@ export const createWeeklyBookings = async (
 
         if (currentRemaining < day.seats) {
           throw new Error(
-            `${day.dayName} no longer has enough seats. Please choose another driver.`,
+            i18n.t("booking.dayNotEnoughSeats", {
+              day: translateStoredDayName(day.dayName, i18n.t),
+            }),
           );
         }
 
@@ -717,16 +721,14 @@ export const createWeeklyBookings = async (
         !!routeData.bookedBy;
 
       if (alreadyBooked) {
-        throw new Error("This trip was already booked by someone else.");
+        throw new Error(i18n.t("rides.tripAlreadyBooked"));
       }
 
       const routeSeats = Number(routeData.seats || 0);
       const requestedSeats = input.selectedDays[0]?.seats || 0;
 
       if (routeSeats < requestedSeats) {
-        throw new Error(
-          "Not enough seats available. Please choose another driver.",
-        );
+        throw new Error(i18n.t("booking.notEnoughSeatsAvailable"));
       }
 
       transaction.update(routeRef, {

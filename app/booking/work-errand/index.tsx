@@ -9,8 +9,11 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 export default function WorkErrandScreen() {
+  const { t } = useTranslation();
+
   const openWork = () => {
     router.push("/booking/work-errand/work" as any);
   };
@@ -26,30 +29,28 @@ export default function WorkErrandScreen() {
           <Ionicons name="arrow-back" size={24} color="#7A665C" />
         </Pressable>
 
-        <Text style={styles.mainTitle}>What do you need?</Text>
+        <Text style={styles.mainTitle}>{t("rideCategory.title")}</Text>
 
-        <Text style={styles.mainSubtitle}>
-          Choose the type of ride or service
-        </Text>
+        <Text style={styles.mainSubtitle}>{t("rideCategory.subtitle")}</Text>
 
         <View style={styles.cardsRow}>
           <Pressable style={styles.card} onPress={openWork}>
             <Feather name="briefcase" size={34} color="#22C55E" />
 
-            <Text style={styles.cardTitle}>Work</Text>
+            <Text style={styles.cardTitle}>{t("workErrand.workTitle")}</Text>
 
             <Text style={styles.cardSubtitle}>
-              Find jobs and work opportunities
+              {t("workErrand.workSubtitle")}
             </Text>
           </Pressable>
 
           <Pressable style={styles.card} onPress={openErrands}>
             <Feather name="map-pin" size={34} color="#F97316" />
 
-            <Text style={styles.cardTitle}>Errands</Text>
+            <Text style={styles.cardTitle}>{t("workErrand.errandsTitle")}</Text>
 
             <Text style={styles.cardSubtitle}>
-              Shopping, appointments, etc.
+              {t("workErrand.errandsSubtitle")}
             </Text>
           </Pressable>
         </View>

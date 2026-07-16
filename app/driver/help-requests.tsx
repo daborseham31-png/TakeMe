@@ -24,7 +24,11 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "react-i18next";
+
 import { auth, db } from "../../firebase";
+import { translateProblemType } from "../i18n/formatters";
+import { useLanguage } from "../i18n/LanguageProvider";
 import RoadsideAcceptedCard from "../booking/roadside-help/RoadsideAcceptedCard";
 import {
   markNotificationRead,
@@ -68,6 +72,8 @@ const statusPriority = (status?: string) =>
   status === "accepted" ? 3 : status === "offered" ? 2 : 1;
 
 export default function DriverHelpRequestsScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -190,12 +196,12 @@ export default function DriverHelpRequestsScreen() {
     const etaValue = Number(eta);
 
     if (!priceValue || priceValue <= 0) {
-      Alert.alert("Invalid price", "Please enter a price in ₪.");
+      Alert.alert(t("validation.invalidPriceTitle"), t("validation.enterPriceInShekel"));
       return;
     }
 
     if (!etaValue || etaValue <= 0) {
-      Alert.alert("Invalid ETA", "Please enter your ETA in minutes.");
+      Alert.alert(t("validation.invalidEtaTitle"), t("validation.enterEtaMinutes"));
       return;
     }
 
@@ -212,9 +218,9 @@ export default function DriverHelpRequestsScreen() {
       });
 
       setOfferForId(null);
-      Alert.alert("Offer sent", "The passenger can now see your offer.");
+      Alert.alert(t("roadsideHelp.offerSentTitle"), t("roadsideHelp.offerSentMessage"));
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not send the offer.");
+      Alert.alert(t("common.error"), error?.message || t("roadsideHelp.couldNotSendOffer"));
     } finally {
       setBusyId(null);
     }
@@ -225,7 +231,7 @@ export default function DriverHelpRequestsScreen() {
       setBusyId(notification.id);
       await rejectNotification(notification.id);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not reject the request.");
+      Alert.alert(t("common.error"), error?.message || t("roadsideHelp.couldNotRejectRequest"));
     } finally {
       setBusyId(null);
     }
@@ -244,12 +250,12 @@ export default function DriverHelpRequestsScreen() {
 
   const confirmDeleteRequest = (notification: Notification) => {
     Alert.alert(
-      "Delete request",
-      "Delete this request from your list?",
+      t("roadsideHelp.deleteRequestTitle"),
+      t("roadsideHelp.deleteRequestConfirm"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "Delete",
+          text: t("common.delete"),
           style: "destructive",
           onPress: () => deleteRequest(notification).catch(() => {}),
         },
@@ -261,12 +267,12 @@ export default function DriverHelpRequestsScreen() {
     if (visible.length === 0 || clearingAll) return;
 
     Alert.alert(
-      "Clear all",
-      "Clear all help requests from your list?",
+      t("roadsideHelp.clearAllTitle"),
+      t("roadsideHelp.clearAllConfirm"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "Clear All",
+          text: t("roadsideHelp.clearAllButton"),
           style: "destructive",
           onPress: async () => {
             const ids = visible.map((n) => n.id);
@@ -290,7 +296,7 @@ export default function DriverHelpRequestsScreen() {
                 await batch.commit();
               }
             } catch (error: any) {
-              Alert.alert("Error", error?.message || "Could not clear all.");
+              Alert.alert(t("common.error"), error?.message || t("roadsideHelp.couldNotClearAll"));
             } finally {
               setClearingAll(false);
             }
@@ -309,7 +315,7 @@ export default function DriverHelpRequestsScreen() {
       loc?.address ||
       (loc?.latitude && loc?.longitude
         ? `${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`
-        : "Unknown location");
+        : t("roadsideHelp.unknownLocation"));
 
     return (
       <View key={n.id} style={styles.card}>
@@ -318,10 +324,10 @@ export default function DriverHelpRequestsScreen() {
             <Ionicons name="construct" size={20} color="#F58220" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>Roadside help nearby</Text>
+            <Text style={styles.cardTitle}>{t("roadsideHelp.roadsideHelpNearbyTitle")}</Text>
             {typeof n.distanceKm === "number" ? (
               <Text style={styles.cardSub}>
-                ≈ {n.distanceKm} km from your route
+                {t("roadsideHelp.distanceFromRoute", { km: n.distanceKm })}
               </Text>
             ) : null}
           </View>
@@ -338,7 +344,7 @@ export default function DriverHelpRequestsScreen() {
         <View style={styles.tagRow}>
           {(n.problemTypes || []).map((p) => (
             <View key={p} style={styles.tag}>
-              <Text style={styles.tagText}>{p}</Text>
+              <Text style={styles.tagText}>{translateProblemType(p, t)}</Text>
             </View>
           ))}
         </View>
@@ -358,32 +364,32 @@ export default function DriverHelpRequestsScreen() {
           <View style={styles.offeredBanner}>
             <Ionicons name="time-outline" size={18} color="#B86115" />
             <Text style={styles.offeredText}>
-              Waiting for passenger confirmation
+              {t("roadsideHelp.waitingForPassengerConfirmation")}
             </Text>
           </View>
         ) : isOffering ? (
           <View style={styles.offerForm}>
             <View style={styles.offerFields}>
               <View style={styles.offerField}>
-                <Text style={styles.fieldLabel}>Price (₪)</Text>
+                <Text style={styles.fieldLabel}>{t("roadsideHelp.priceLabel")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Enter price"
+                  placeholder={t("roadsideHelp.enterPricePlaceholder")}
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   value={price}
-                  onChangeText={(t) => setPrice(t.replace(/\D/g, ""))}
+                  onChangeText={(val) => setPrice(val.replace(/\D/g, ""))}
                 />
               </View>
               <View style={styles.offerField}>
-                <Text style={styles.fieldLabel}>ETA (min)</Text>
+                <Text style={styles.fieldLabel}>{t("roadsideHelp.etaLabel")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Enter ETA in minutes"
+                  placeholder={t("roadsideHelp.enterEtaPlaceholder")}
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   value={eta}
-                  onChangeText={(t) => setEta(t.replace(/\D/g, ""))}
+                  onChangeText={(val) => setEta(val.replace(/\D/g, ""))}
                 />
               </View>
             </View>
@@ -394,7 +400,7 @@ export default function DriverHelpRequestsScreen() {
                 onPress={() => setOfferForId(null)}
                 disabled={busy}
               >
-                <Text style={styles.secondaryText}>Cancel</Text>
+                <Text style={styles.secondaryText}>{t("common.cancel")}</Text>
               </Pressable>
               <Pressable
                 style={[styles.primaryButton, busy && styles.buttonDisabled]}
@@ -404,7 +410,7 @@ export default function DriverHelpRequestsScreen() {
                 {busy ? (
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.primaryText}>Send Offer</Text>
+                  <Text style={styles.primaryText}>{t("roadsideHelp.sendOfferButton")}</Text>
                 )}
               </Pressable>
             </View>
@@ -416,14 +422,14 @@ export default function DriverHelpRequestsScreen() {
               onPress={() => handleReject(n)}
               disabled={busy}
             >
-              <Text style={styles.secondaryText}>Reject</Text>
+              <Text style={styles.secondaryText}>{t("roadsideHelp.rejectButton")}</Text>
             </Pressable>
             <Pressable
               style={styles.primaryButton}
               onPress={() => openOfferForm(n)}
               disabled={busy}
             >
-              <Text style={styles.primaryText}>Accept / Send Offer</Text>
+              <Text style={styles.primaryText}>{t("roadsideHelp.acceptSendOfferButton")}</Text>
             </Pressable>
           </View>
         )}
@@ -435,26 +441,26 @@ export default function DriverHelpRequestsScreen() {
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-          <Text style={styles.backText}>Back</Text>
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
+          <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
 
         <View style={styles.headerRow}>
           <View style={styles.header}>
             <Ionicons name="help-buoy" size={26} color="#F58220" />
-            <Text style={styles.title}>Help Requests</Text>
+            <Text style={styles.title}>{t("roadsideHelp.helpRequestsTitle")}</Text>
           </View>
 
           {visible.length > 0 ? (
             <Pressable onPress={handleClearAll} disabled={clearingAll} hitSlop={8}>
               <Text style={styles.clearAllText}>
-                {clearingAll ? "Clearing..." : "Clear All"}
+                {clearingAll ? t("roadsideHelp.clearingButton") : t("roadsideHelp.clearAllButton")}
               </Text>
             </Pressable>
           ) : null}
         </View>
         <Text style={styles.subtitle}>
-          Roadside help requests from passengers near your routes
+          {t("roadsideHelp.helpRequestsSubtitle")}
         </Text>
 
         {loading ? (
@@ -464,10 +470,9 @@ export default function DriverHelpRequestsScreen() {
         ) : visible.length === 0 && acceptedRequests.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="mail-open-outline" size={40} color="#8B7B6B" />
-            <Text style={styles.emptyTitle}>No requests yet</Text>
+            <Text style={styles.emptyTitle}>{t("roadsideHelp.noRequestsYetTitle")}</Text>
             <Text style={styles.emptyText}>
-              When a passenger near one of your routes needs roadside help, it
-              will show up here.
+              {t("roadsideHelp.noRequestsYetMessage")}
             </Text>
           </View>
         ) : (

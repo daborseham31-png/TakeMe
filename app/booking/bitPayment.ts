@@ -36,6 +36,10 @@
 import * as Clipboard from "expo-clipboard";
 import { Alert, Linking } from "react-native";
 
+// Plain helper module (not a component) — uses the initialized global
+// i18next instance directly rather than the useTranslation() hook.
+import i18n from "../i18n";
+
 const BIT_SCHEME = "bit://";
 const BIT_WEB_FALLBACK = "https://www.bitpay.co.il/app/bitcom-info";
 
@@ -85,8 +89,8 @@ export const copyRecipientPhone = async (
 
   if (!phone) {
     Alert.alert(
-      "Phone number unavailable",
-      "We don't have a phone number on file to pay through BIT. Please try Cash instead.",
+      i18n.t("bitPayment.phoneNumberUnavailableTitle"),
+      i18n.t("bitPayment.phoneNumberUnavailableMessage"),
     );
     return "";
   }
@@ -107,12 +111,12 @@ export const copyRecipientPhone = async (
 // external destination, just reusing the one already considered safe here.
 const showBitNotInstalled = () => {
   Alert.alert(
-    "Bit is not installed on this device.",
-    "Install BIT to complete this payment, or choose Cash instead.",
+    i18n.t("bitPayment.notInstalledTitle"),
+    i18n.t("bitPayment.notInstalledMessage"),
     [
-      { text: "Not now", style: "cancel" },
+      { text: i18n.t("bitPayment.notNow"), style: "cancel" },
       {
-        text: "Get BIT",
+        text: i18n.t("bitPayment.getBit"),
         onPress: () => {
           Linking.openURL(BIT_WEB_FALLBACK).catch(() => {});
         },
@@ -138,15 +142,19 @@ export const openBitPayment = async (
   const phone = await copyRecipientPhone(recipientPhone);
   if (!phone) return;
 
-  Alert.alert("Phone number copied", "Phone number copied. Paste it in Bit.", [
-    {
-      text: "OK",
-      onPress: async () => {
-        const opened = await tryOpenBit();
-        if (!opened) {
-          showBitNotInstalled();
-        }
+  Alert.alert(
+    i18n.t("bitPayment.phoneCopiedTitle"),
+    i18n.t("bitPayment.phoneCopiedMessage"),
+    [
+      {
+        text: i18n.t("common.ok"),
+        onPress: async () => {
+          const opened = await tryOpenBit();
+          if (!opened) {
+            showBitNotInstalled();
+          }
+        },
       },
-    },
-  ]);
+    ],
+  );
 };

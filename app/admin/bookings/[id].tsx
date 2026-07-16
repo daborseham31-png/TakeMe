@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { doc, onSnapshot } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
 import { cancelBooking } from "../adminBookingsLib";
@@ -11,6 +12,7 @@ import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 import AdminScreen from "../components/AdminScreen";
 import { LoadingState } from "../components/AdminStates";
 import ConfirmModal from "../components/ConfirmModal";
+import { translateStatus } from "../../i18n/formatters";
 
 const toSeconds = (value: unknown): number => {
   const timestamp = value as { seconds?: number } | undefined;
@@ -18,6 +20,7 @@ const toSeconds = (value: unknown): number => {
 };
 
 export default function AdminBookingDetailScreen() {
+  const { t } = useTranslation();
   const params = useLocalSearchParams();
   const bookingId = String(params.id || "");
 
@@ -48,9 +51,9 @@ export default function AdminBookingDetailScreen() {
             id: snap.id,
             category: data.category || "",
             passengerId: data.passengerId || "",
-            passengerName: data.passengerName || "Passenger",
+            passengerName: data.passengerName || t("common.passenger"),
             driverId: data.driverId || "",
-            driverName: data.driverName || "Driver",
+            driverName: data.driverName || t("common.driver"),
             from: data.from || "",
             to: data.to || "",
             date: data.date || "",
@@ -73,6 +76,7 @@ export default function AdminBookingDetailScreen() {
     );
 
     return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
 
   const handleCancel = async (reason: string) => {
@@ -82,9 +86,9 @@ export default function AdminBookingDetailScreen() {
       setBusy(true);
       await cancelBooking(bookingId, reason);
       setConfirmVisible(false);
-      Alert.alert("Success", "The booking was cancelled.");
+      Alert.alert(t("admin.successTitle"), t("admin.bookingCancelledMessage"));
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not cancel this booking.");
+      Alert.alert(t("common.error"), error?.message || t("admin.couldNotCancelBooking"));
     } finally {
       setBusy(false);
     }
@@ -92,17 +96,17 @@ export default function AdminBookingDetailScreen() {
 
   if (loading) {
     return (
-      <AdminScreen title="Booking Details">
-        <LoadingState label="Loading booking..." />
+      <AdminScreen title={t("admin.bookingDetailsTitle")}>
+        <LoadingState label={t("admin.loadingBookingLabel")} />
       </AdminScreen>
     );
   }
 
   if (notFound || !booking) {
     return (
-      <AdminScreen title="Booking Details">
+      <AdminScreen title={t("admin.bookingDetailsTitle")}>
         <View style={styles.center}>
-          <Text style={styles.notFoundText}>This booking could not be found.</Text>
+          <Text style={styles.notFoundText}>{t("admin.bookingNotFoundText")}</Text>
         </View>
       </AdminScreen>
     );
@@ -111,32 +115,38 @@ export default function AdminBookingDetailScreen() {
   const canCancel = !["cancelled", "completed", "completed_paid"].includes(booking.status);
 
   return (
-    <AdminScreen title="Booking Details">
+    <AdminScreen title={t("admin.bookingDetailsTitle")}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.headerCard}>
           <Text style={styles.title}>
             {booking.from || "?"} {booking.to ? `→ ${booking.to}` : ""}
           </Text>
-          <Text style={styles.status}>Status: {booking.status || "—"}</Text>
+          <Text style={styles.status}>
+            {t("admin.statusColonValue", {
+              status: booking.status
+                ? translateStatus(t, "bookings", booking.status) || booking.status
+                : "—",
+            })}
+          </Text>
         </View>
 
         <View style={styles.section}>
-          <Row icon="calendar-outline" label="Date" value={booking.date || "—"} />
-          <Row icon="time-outline" label="Time" value={booking.time || "—"} />
+          <Row icon="calendar-outline" label={t("admin.dateLabel")} value={booking.date || "—"} />
+          <Row icon="time-outline" label={t("admin.timeLabel")} value={booking.time || "—"} />
           <Row
             icon="people-outline"
-            label="Seats"
+            label={t("admin.seatsLabel")}
             value={booking.seats !== null ? String(booking.seats) : "—"}
           />
           <Row
             icon="cash-outline"
-            label="Price"
+            label={t("admin.priceLabel")}
             value={booking.price !== null ? `₪${booking.price}` : "—"}
           />
           <Row
             icon="card-outline"
-            label="Payment"
-            value={`${booking.paymentStatus || "unpaid"}${
+            label={t("admin.paymentLabel")}
+            value={`${booking.paymentStatus === "paid" ? t("admin.paid") : t("admin.unpaid")}${
               booking.paymentMethod ? ` (${booking.paymentMethod})` : ""
             }`}
           />
@@ -150,7 +160,7 @@ export default function AdminBookingDetailScreen() {
             }
           >
             <Ionicons name="person-outline" size={16} color={adminColors.textMuted} />
-            <Text style={styles.linkLabel}>Passenger</Text>
+            <Text style={styles.linkLabel}>{t("admin.passengerLabel")}</Text>
             <Text style={styles.linkValue}>{booking.passengerName}</Text>
             <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
           </Pressable>
@@ -160,7 +170,7 @@ export default function AdminBookingDetailScreen() {
             onPress={() => booking.driverId && router.push(`/admin/users/${booking.driverId}` as any)}
           >
             <Ionicons name="car-outline" size={16} color={adminColors.textMuted} />
-            <Text style={styles.linkLabel}>Driver</Text>
+            <Text style={styles.linkLabel}>{t("common.driver")}</Text>
             <Text style={styles.linkValue}>{booking.driverName}</Text>
             <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
           </Pressable>
@@ -171,8 +181,8 @@ export default function AdminBookingDetailScreen() {
               onPress={() => router.push(`/admin/rides/driverRoutes/${booking.routeId}` as any)}
             >
               <Ionicons name="navigate-outline" size={16} color={adminColors.textMuted} />
-              <Text style={styles.linkLabel}>Ride listing</Text>
-              <Text style={styles.linkValue}>View</Text>
+              <Text style={styles.linkLabel}>{t("admin.rideListingLabel")}</Text>
+              <Text style={styles.linkValue}>{t("admin.viewLabel")}</Text>
               <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
             </Pressable>
           ) : null}
@@ -181,16 +191,16 @@ export default function AdminBookingDetailScreen() {
         {canCancel ? (
           <Pressable style={styles.cancelButton} onPress={() => setConfirmVisible(true)}>
             <Ionicons name="close-circle-outline" size={18} color={adminColors.danger} />
-            <Text style={styles.cancelText}>Cancel booking</Text>
+            <Text style={styles.cancelText}>{t("admin.cancelBookingButton")}</Text>
           </Pressable>
         ) : null}
       </ScrollView>
 
       <ConfirmModal
         visible={confirmVisible}
-        title="Cancel this booking?"
-        message="Seat availability will be restored and both the passenger and driver will be notified."
-        confirmLabel="Cancel booking"
+        title={t("admin.cancelThisBookingQ")}
+        message={t("admin.cancelBookingRestoreMessage")}
+        confirmLabel={t("admin.cancelBookingButton")}
         requireReason
         busy={busy}
         onCancel={() => setConfirmVisible(false)}

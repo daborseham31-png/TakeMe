@@ -16,10 +16,13 @@ import {
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 
+import { useTranslation } from "react-i18next";
+
 import { db } from "../../firebase";
 import { canStartTrip, getStartTripBlockedReason } from "../booking/bookingsLib";
 import { normalizeRideBooking, RideBooking } from "../booking/rideBookingLib";
 import { notify } from "../booking/work-errand/workErrandLib";
+import { useLanguage } from "../i18n/LanguageProvider";
 
 type TripStatus =
   | "booked"
@@ -51,6 +54,8 @@ const getDriverLocation = (booking: any) => {
 };
 
 export default function RideNavigationScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
   const id = typeof params.id === "string" ? params.id : "";
 
@@ -140,8 +145,8 @@ export default function RideNavigationScreen() {
 
     if (permission.status !== "granted") {
       Alert.alert(
-        "Location permission",
-        "Please allow location access so the passenger can track the ride.",
+        t("booking.locationPermissionTitle"),
+        t("booking.allowLocationForTracking"),
       );
       return;
     }
@@ -180,8 +185,8 @@ useEffect(() => {
 
     if (permission.status !== "granted") {
       Alert.alert(
-        "Location permission",
-        "Please allow location access so the passenger can track the ride.",
+        t("booking.locationPermissionTitle"),
+        t("booking.allowLocationForTracking"),
       );
       return;
     }
@@ -224,6 +229,7 @@ useEffect(() => {
       subscription.remove();
     }
   };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [id, booking]);
 
   const updateTripStatus = async (nextStatus: TripStatus) => {
@@ -235,9 +241,9 @@ useEffect(() => {
     // outside its own trip date even if this gets called some other way.
     if (nextStatus === "driver_on_way" && !canStartTrip(booking)) {
       Alert.alert(
-        "Not available yet",
+        t("booking.notAvailableYetTitle"),
         getStartTripBlockedReason(booking) ||
-          "You can start this trip only on the trip date.",
+          t("booking.startTripOnlyOnTripDate"),
       );
       return;
     }
@@ -342,7 +348,7 @@ useEffect(() => {
     const target = getNavTarget(b);
 
     if (!target) {
-      Alert.alert("Location", "Pickup location is not available.");
+      Alert.alert(t("booking.locationLabel"), t("booking.pickupLocationNotAvailable"));
       return;
     }
 
@@ -352,7 +358,7 @@ useEffect(() => {
         : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(target.text)}`;
 
     Linking.openURL(url).catch(() =>
-      Alert.alert("Error", "Could not open maps."),
+      Alert.alert(t("common.error"), t("booking.couldNotOpenMaps")),
     );
   };
 
@@ -360,7 +366,7 @@ useEffect(() => {
     const target = getNavTarget(b);
 
     if (!target) {
-      Alert.alert("Location", "Pickup location is not available.");
+      Alert.alert(t("booking.locationLabel"), t("booking.pickupLocationNotAvailable"));
       return;
     }
 
@@ -370,30 +376,30 @@ useEffect(() => {
         : `https://waze.com/ul?q=${encodeURIComponent(target.text)}&navigate=yes`;
 
     Linking.openURL(url).catch(() =>
-      Alert.alert("Error", "Could not open Waze."),
+      Alert.alert(t("common.error"), t("booking.couldNotOpenWaze")),
     );
   };
 
   const handleStartDriving = () => {
     if (!booking || !canStartTrip(booking)) {
       Alert.alert(
-        "Not available yet",
+        t("booking.notAvailableYetTitle"),
         getStartTripBlockedReason(booking) ||
-          "You can start this trip only on the trip date.",
+          t("booking.startTripOnlyOnTripDate"),
       );
       return;
     }
 
-    Alert.alert("Start driving", "Start driving to pickup?", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("booking.startDrivingTitle"), t("booking.startDrivingToPickupConfirm"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Start",
+        text: t("booking.startButton"),
         onPress: async () => {
           try {
             setBusy(true);
             await updateTripStatus("driver_on_way");
           } catch (error: any) {
-            Alert.alert("Error", error?.message || "Could not update.");
+            Alert.alert(t("common.error"), error?.message || t("booking.couldNotUpdate"));
           } finally {
             setBusy(false);
           }
@@ -403,16 +409,16 @@ useEffect(() => {
   };
 
   const handleArrived = () => {
-    Alert.alert("Confirm arrival", "Let the passenger know you have arrived?", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("booking.confirmArrivalTitle"), t("booking.confirmArrivalMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "I arrived",
+        text: t("booking.iArrivedButton"),
         onPress: async () => {
           try {
             setBusy(true);
             await updateTripStatus("arrived_pickup");
           } catch (error: any) {
-            Alert.alert("Error", error?.message || "Could not update.");
+            Alert.alert(t("common.error"), error?.message || t("booking.couldNotUpdate"));
           } finally {
             setBusy(false);
           }
@@ -423,19 +429,19 @@ useEffect(() => {
 
   const handleFinishTrip = () => {
     Alert.alert(
-      "Finish trip",
-      "Finish this trip and ask the passenger to rate you?",
+      t("booking.finishTripTitle"),
+      t("booking.finishTripConfirmMessage"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "Finish trip",
+          text: t("booking.finishTripTitle"),
           style: "destructive",
           onPress: async () => {
             try {
               setBusy(true);
               await updateTripStatus("completed");
             } catch (error: any) {
-              Alert.alert("Error", error?.message || "Could not update.");
+              Alert.alert(t("common.error"), error?.message || t("booking.couldNotUpdate"));
             } finally {
               setBusy(false);
             }
@@ -460,9 +466,9 @@ useEffect(() => {
       <SafeAreaView style={styles.safe}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={44} color="#8B7B6B" />
-          <Text style={styles.emptyTitle}>Booking not found</Text>
+          <Text style={styles.emptyTitle}>{t("rides.bookingNotFound")}</Text>
           <Pressable style={styles.backLink} onPress={() => router.back()}>
-            <Text style={styles.backLinkText}>Go back</Text>
+            <Text style={styles.backLinkText}>{t("common.goBack")}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -492,22 +498,22 @@ useEffect(() => {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-          <Text style={styles.backText}>Back</Text>
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
+          <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
 
         <View style={styles.header}>
           <Ionicons name="navigate" size={26} color="#F58220" />
-          <Text style={styles.title}>Ride Navigation</Text>
+          <Text style={styles.title}>{t("booking.rideNavigationTitle")}</Text>
         </View>
 
         <View style={styles.statusBox}>
           <Ionicons name="radio-outline" size={18} color="#F58220" />
           <Text style={styles.statusText}>
-            {tripStatus === "booked" && "Booked - not started yet"}
-            {tripStatus === "driver_on_way" && "Driver on the way to pickup"}
-            {tripStatus === "arrived_pickup" && "Arrived at pickup"}
-            {tripStatus === "completed" && "Trip completed"}
+            {tripStatus === "booked" && t("booking.statusBookedNotStarted")}
+            {tripStatus === "driver_on_way" && t("booking.statusDriverOnWayToPickup")}
+            {tripStatus === "arrived_pickup" && t("booking.statusArrivedAtPickup")}
+            {tripStatus === "completed" && t("booking.statusTripCompleted")}
           </Text>
         </View>
 
@@ -526,7 +532,7 @@ useEffect(() => {
                 <Marker
                   coordinate={{ latitude: c.lat, longitude: c.lng }}
                   title={(booking as any).passengerName}
-                  description="Pickup location"
+                  description={t("booking.pickupLocationLabel")}
                   pinColor="#F58220"
                 />
               ) : null}
@@ -534,8 +540,8 @@ useEffect(() => {
               {driverLocation ? (
                 <Marker
                   coordinate={driverLocation}
-                  title="Your location"
-                  description="Live driver location"
+                  title={t("booking.yourLocationLabel")}
+                  description={t("booking.liveDriverLocation")}
                 >
                   <View style={styles.driverMarker}>
                     <Ionicons name="car" size={18} color="#FFFFFF" />
@@ -548,7 +554,7 @@ useEffect(() => {
           <View style={styles.mapBox}>
             <Ionicons name="map-outline" size={40} color="#F58220" />
             <Text style={styles.mapText}>
-              Exact pickup location is not available for this ride.
+              {t("booking.exactPickupNotAvailableForRide")}
             </Text>
           </View>
         )}
@@ -588,7 +594,7 @@ useEffect(() => {
               {c
                 ? pickupAddressText(booking) ||
                   `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`
-                : pickupAddressText(booking) || "Exact pickup not available"}
+                : pickupAddressText(booking) || t("booking.exactPickupNotAvailable")}
             </Text>
           </View>
 
@@ -613,7 +619,7 @@ useEffect(() => {
         <View style={styles.navRow}>
           <Pressable style={styles.navButton} onPress={() => openMaps(booking)}>
             <Ionicons name="map" size={18} color="#FFFFFF" />
-            <Text style={styles.navButtonText}>Google Maps</Text>
+            <Text style={styles.navButtonText}>{t("booking.googleMaps")}</Text>
           </Pressable>
 
           <Pressable
@@ -621,14 +627,14 @@ useEffect(() => {
             onPress={() => openWaze(booking)}
           >
             <Ionicons name="navigate-circle" size={18} color="#FFFFFF" />
-            <Text style={styles.navButtonText}>Waze</Text>
+            <Text style={styles.navButtonText}>{t("booking.waze")}</Text>
           </Pressable>
         </View>
 
         {completed ? (
           <View style={styles.doneBanner}>
             <Ionicons name="checkmark-circle" size={20} color="#166534" />
-            <Text style={styles.doneText}>Ride completed</Text>
+            <Text style={styles.doneText}>{t("booking.rideCompleted")}</Text>
           </View>
         ) : (
           <View style={styles.actionsCard}>
@@ -648,7 +654,7 @@ useEffect(() => {
                     <>
                       <Ionicons name="car-outline" size={19} color="#FFFFFF" />
                       <Text style={styles.actionText}>
-                        Start Driving to Pickup
+                        {t("booking.startDrivingToPickup")}
                       </Text>
                     </>
                   )}
@@ -671,7 +677,7 @@ useEffect(() => {
                 ) : (
                   <>
                     <Ionicons name="flag" size={19} color="#FFFFFF" />
-                    <Text style={styles.actionText}>I arrived at pickup</Text>
+                    <Text style={styles.actionText}>{t("booking.iArrivedAtPickup")}</Text>
                   </>
                 )}
               </Pressable>
@@ -692,7 +698,7 @@ useEffect(() => {
                       size={20}
                       color="#FFFFFF"
                     />
-                    <Text style={styles.actionText}>Finish Trip</Text>
+                    <Text style={styles.actionText}>{t("booking.finishTripButton")}</Text>
                   </>
                 )}
               </Pressable>
@@ -700,7 +706,7 @@ useEffect(() => {
 
             {shouldTrackDriver(tripStatus) ? (
               <Text style={styles.trackingHint}>
-                Live tracking is active while this trip is running.
+                {t("booking.liveTrackingActiveHint")}
               </Text>
             ) : null}
           </View>

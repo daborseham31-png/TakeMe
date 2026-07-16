@@ -64,6 +64,132 @@ export function formatLocalizedDateFromYMD(
   return formatLocalizedDate(date, language);
 }
 
+// Weekly bookings store a resolved English day name ("Sunday", ...) on the
+// record itself (see DAY_KEY_LABEL in weeklyBookingLib.ts) — that stored
+// value is never touched (same "translate only at display" rule as status
+// values), this only maps it to the matching translated word for display.
+const FULL_DAY_NAME_TO_SHORT_KEY: Record<string, string> = {
+  Sunday: "Sun",
+  Monday: "Mon",
+  Tuesday: "Tue",
+  Wednesday: "Wed",
+  Thursday: "Thu",
+  Friday: "Fri",
+  Saturday: "Sat",
+};
+
+export function translateStoredDayName(
+  name: string | null | undefined,
+  t: TFunction,
+): string {
+  if (!name) return "";
+
+  const shortKey = FULL_DAY_NAME_TO_SHORT_KEY[name];
+  if (!shortKey) return name;
+
+  return t(`booking.days.${shortKey}`, { defaultValue: name });
+}
+
+// Roadside Help stores the passenger-picked problem titles as stable English
+// text (see PROBLEM_LABELS in roadside-help/roadsideLib.ts) — that stored
+// value is never touched, this only maps each title to its translated word
+// for display.
+const PROBLEM_TITLE_TO_KEY: Record<string, string> = {
+  "Flat Tire": "flat",
+  "Dead Battery": "battery",
+  "Out of Fuel": "fuel",
+  Towing: "towing",
+  Other: "other",
+};
+
+export function translateProblemType(
+  title: string | null | undefined,
+  t: TFunction,
+): string {
+  if (!title) return "";
+
+  const key = PROBLEM_TITLE_TO_KEY[title];
+  if (!key) return title;
+
+  return t(`roadsideHelp.problems.${key}`, { defaultValue: title });
+}
+
+export function translateProblemTypesList(
+  titles: string[] | null | undefined,
+  t: TFunction,
+): string {
+  if (!titles || titles.length === 0) return "";
+
+  return titles.map((title) => translateProblemType(title, t)).join(", ");
+}
+
+// Category metadata (CATEGORY_META in bookingsLib.ts) stores its English
+// label alongside icon/color — that object is a display-only constant, not
+// stored data, but is shared by several screens so the mapping lives here
+// once. Falls back to the fixed English label from CATEGORY_META for any
+// category without a dedicated translation key.
+const CATEGORY_LABEL_KEY: Record<string, string> = {
+  school: "rideCategory.categories.school.title",
+  personal: "rideCategory.categories.personal.title",
+  personal_ride: "rideCategory.categories.personal.title",
+  delivery: "booking.categoryLabels.delivery",
+  errands: "booking.categoryLabels.errands",
+  workErrands: "booking.categoryLabels.workErrands",
+  roadside: "booking.categoryLabels.roadside",
+};
+
+export function translateCategoryLabel(
+  category: string | null | undefined,
+  fallbackLabel: string,
+  t: TFunction,
+): string {
+  const key = CATEGORY_LABEL_KEY[category || ""];
+  if (!key) return fallbackLabel;
+
+  return t(key, { defaultValue: fallbackLabel });
+}
+
+// Admin reports store a stable English category ("user", "driver", "ride",
+// "booking", "payment", "other") — display-only translation, never saved back.
+export function translateReportCategory(
+  category: string | null | undefined,
+  t: TFunction,
+): string {
+  if (!category) return "";
+
+  return t(`admin.reportCategory.${category}`, { defaultValue: category });
+}
+
+// Admin-only display helpers — the underlying accountStatus/
+// driverVerificationStatus/role fields stored on users/{uid} are never
+// touched, only how they're shown in the Admin screens.
+export function translateAccountStatus(
+  status: string | null | undefined,
+  t: TFunction,
+): string {
+  if (!status) return "";
+
+  return t(`admin.accountStatus.${status}`, { defaultValue: status });
+}
+
+export function translateDriverVerificationStatus(
+  status: string | null | undefined,
+  t: TFunction,
+): string {
+  if (!status) return t("admin.driverVerificationStatus.unknown");
+
+  return t(`admin.driverVerificationStatus.${status}`, { defaultValue: status });
+}
+
+export function translateUserRole(
+  role: string | null | undefined,
+  t: TFunction,
+): string {
+  if (!role) return t("admin.userRole.unknown");
+
+  return t(`admin.userRole.${role}`, { defaultValue: role });
+}
+
 // Translates a stable database status ("pending", "cancelled", "approved",
 // ...) for DISPLAY only — the value saved to Firestore must always stay the
 // English status string. Falls back to the raw status if a key is somehow

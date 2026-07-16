@@ -27,6 +27,7 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
+import i18n from "../i18n";
 import {
   canStartTrip,
   DriverLiveLocation,
@@ -102,7 +103,7 @@ export const createRideBooking = async (
   input: CreateRideBookingInput,
 ): Promise<string> => {
   const user = auth.currentUser;
-  if (!user) throw new Error("You must be logged in to book.");
+  if (!user) throw new Error(i18n.t("validation.mustBeLoggedInToBook"));
 
   let passengerName = user.displayName || "Passenger";
   let passengerPhone = "";
@@ -253,7 +254,7 @@ export const startRide = async (bookingId: string, booking: RideBooking) => {
   if (!canStartTrip(booking)) {
     throw new Error(
       getStartTripBlockedReason(booking) ||
-        "You can start this trip only on the trip date.",
+        i18n.t("booking.startTripOnlyOnTripDate"),
     );
   }
 
@@ -370,7 +371,7 @@ export const submitRideRating = async (
     const bookingSnap = await transaction.get(bookingRef);
 
     if (!bookingSnap.exists()) {
-      throw new Error("Booking not found.");
+      throw new Error(i18n.t("rides.bookingNotFound"));
     }
 
     const bookingData: any = bookingSnap.data();

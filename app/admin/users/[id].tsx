@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { doc, onSnapshot } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
 import {
@@ -16,6 +17,11 @@ import AdminScreen from "../components/AdminScreen";
 import { LoadingState } from "../components/AdminStates";
 import ConfirmModal from "../components/ConfirmModal";
 import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
+import {
+  translateAccountStatus,
+  translateDriverVerificationStatus,
+  translateUserRole,
+} from "../../i18n/formatters";
 
 type PendingAction =
   | { type: "block" | "suspend" | "delete" }
@@ -23,6 +29,7 @@ type PendingAction =
   | null;
 
 export default function AdminUserDetailScreen() {
+  const { t } = useTranslation();
   const params = useLocalSearchParams();
   const userId = String(params.id || "");
 
@@ -76,15 +83,15 @@ export default function AdminUserDetailScreen() {
       } else if (pendingAction.type === "delete") {
         await deleteUserAccount(userId, reason);
         setPendingAction(null);
-        Alert.alert("User deleted", "The user's profile has been removed.");
+        Alert.alert(t("admin.userDeletedTitle"), t("admin.userDeletedMessage"));
         router.back();
         return;
       }
 
       setPendingAction(null);
-      Alert.alert("Success", "The user was updated.");
+      Alert.alert(t("admin.successTitle"), t("admin.userUpdatedMessage"));
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not update this user.");
+      Alert.alert(t("common.error"), error?.message || t("admin.couldNotUpdateUser"));
     } finally {
       setBusy(false);
     }
@@ -92,24 +99,24 @@ export default function AdminUserDetailScreen() {
 
   if (loading) {
     return (
-      <AdminScreen title="User Details">
-        <LoadingState label="Loading user..." />
+      <AdminScreen title={t("admin.userDetailsTitle")}>
+        <LoadingState label={t("admin.loadingUser")} />
       </AdminScreen>
     );
   }
 
   if (notFound || !user) {
     return (
-      <AdminScreen title="User Details">
+      <AdminScreen title={t("admin.userDetailsTitle")}>
         <View style={styles.center}>
-          <Text style={styles.notFoundText}>This user could not be found.</Text>
+          <Text style={styles.notFoundText}>{t("admin.userNotFound")}</Text>
         </View>
       </AdminScreen>
     );
   }
 
   return (
-    <AdminScreen title="User Details">
+    <AdminScreen title={t("admin.userDetailsTitle")}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.headerCard}>
           {user.photo ? (
@@ -122,7 +129,7 @@ export default function AdminUserDetailScreen() {
           <Text style={styles.name}>{user.name}</Text>
           <View style={styles.pillRow}>
             <View style={styles.pill}>
-              <Text style={styles.pillText}>{user.role || "unknown"}</Text>
+              <Text style={styles.pillText}>{translateUserRole(user.role, t)}</Text>
             </View>
             <View
               style={[
@@ -134,18 +141,18 @@ export default function AdminUserDetailScreen() {
                     : styles.pillWarning,
               ]}
             >
-              <Text style={styles.pillText}>{user.accountStatus}</Text>
+              <Text style={styles.pillText}>{translateAccountStatus(user.accountStatus, t)}</Text>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Row icon="mail-outline" label="Email" value={user.email || "—"} />
-          <Row icon="call-outline" label="Phone" value={user.phone || "—"} />
-          <Row icon="male-female-outline" label="Gender" value={user.gender || "—"} />
+          <Row icon="mail-outline" label={t("admin.emailLabel")} value={user.email || "—"} />
+          <Row icon="call-outline" label={t("admin.phoneLabel")} value={user.phone || "—"} />
+          <Row icon="male-female-outline" label={t("admin.genderLabel")} value={user.gender || "—"} />
           <Row
             icon="calendar-outline"
-            label="Registered"
+            label={t("admin.registeredLabel")}
             value={
               user.createdAtSeconds
                 ? new Date(user.createdAtSeconds * 1000).toLocaleDateString()
@@ -153,24 +160,24 @@ export default function AdminUserDetailScreen() {
             }
           />
           {user.statusReason ? (
-            <Row icon="alert-circle-outline" label="Status reason" value={user.statusReason} />
+            <Row icon="alert-circle-outline" label={t("admin.statusReasonLabel")} value={user.statusReason} />
           ) : null}
         </View>
 
         {user.isDriver ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Driver info</Text>
+            <Text style={styles.sectionTitle}>{t("admin.driverInfoTitle")}</Text>
             <Row
               icon="shield-checkmark-outline"
-              label="Verification"
-              value={user.driverVerificationStatus || "—"}
+              label={t("admin.verificationLabel")}
+              value={translateDriverVerificationStatus(user.driverVerificationStatus, t)}
             />
-            <Row icon="star-outline" label="Rating" value={`${user.ratingAverage.toFixed(1)} (${user.ratingCount})`} />
-            <Row icon="barcode-outline" label="Plate" value={user.carPlate || "—"} />
-            <Row icon="document-text-outline" label="License expiry" value={user.licenseExpiryDate || "—"} />
+            <Row icon="star-outline" label={t("admin.ratingLabel")} value={`${user.ratingAverage.toFixed(1)} (${user.ratingCount})`} />
+            <Row icon="barcode-outline" label={t("admin.plateLabel")} value={user.carPlate || "—"} />
+            <Row icon="document-text-outline" label={t("admin.licenseExpiryLabel")} value={user.licenseExpiryDate || "—"} />
             <Row
               icon="language-outline"
-              label="Languages"
+              label={t("admin.languagesLabel")}
               value={user.spokenLanguages.join(", ") || "—"}
             />
           </View>
@@ -181,13 +188,13 @@ export default function AdminUserDetailScreen() {
             <>
               <ActionButton
                 icon="lock-closed-outline"
-                label="Block user"
+                label={t("admin.blockUser")}
                 tone="danger"
                 onPress={() => setPendingAction({ type: "block" })}
               />
               <ActionButton
                 icon="pause-circle-outline"
-                label="Suspend user"
+                label={t("admin.suspendUser")}
                 tone="warning"
                 onPress={() => setPendingAction({ type: "suspend" })}
               />
@@ -195,7 +202,7 @@ export default function AdminUserDetailScreen() {
           ) : (
             <ActionButton
               icon="checkmark-circle-outline"
-              label={user.accountStatus === "blocked" ? "Unblock user" : "Reactivate user"}
+              label={user.accountStatus === "blocked" ? t("admin.unblockUser") : t("admin.reactivateUser")}
               tone="success"
               onPress={() =>
                 setPendingAction({
@@ -208,7 +215,7 @@ export default function AdminUserDetailScreen() {
           {user.role === "passenger" || user.role === "driver" ? (
             <ActionButton
               icon="swap-horizontal-outline"
-              label={user.role === "passenger" ? "Change role to Driver" : "Change role to Passenger"}
+              label={user.role === "passenger" ? t("admin.changeRoleToDriver") : t("admin.changeRoleToPassenger")}
               tone="neutral"
               onPress={() =>
                 setPendingAction({
@@ -221,7 +228,7 @@ export default function AdminUserDetailScreen() {
 
           <ActionButton
             icon="trash-outline"
-            label="Delete user"
+            label={t("admin.deleteUser")}
             tone="danger"
             onPress={() => setPendingAction({ type: "delete" })}
           />
@@ -232,23 +239,25 @@ export default function AdminUserDetailScreen() {
         visible={!!pendingAction}
         title={
           pendingAction?.type === "delete"
-            ? "Delete this user?"
+            ? t("admin.deleteThisUserQ")
             : pendingAction?.type === "block"
-              ? "Block this user?"
+              ? t("admin.blockThisUserQ")
               : pendingAction?.type === "suspend"
-                ? "Suspend this user?"
+                ? t("admin.suspendThisUserQ")
                 : pendingAction?.type === "role"
-                  ? "Change this user's role?"
-                  : "Confirm action"
+                  ? t("admin.changeRoleQ")
+                  : t("admin.confirmActionTitle")
         }
         message={
           pendingAction?.type === "delete"
-            ? "This permanently removes the user's profile from the app. This cannot be undone."
+            ? t("admin.deletePermanentMessage")
             : pendingAction?.type === "role"
-              ? `This user will become a ${pendingAction.role}.`
-              : "This will change what the user can access in the app."
+              ? t("admin.userWillBecome", {
+                  role: pendingAction.role === "driver" ? t("common.driver") : t("common.passenger"),
+                })
+              : t("admin.willChangeAccess")
         }
-        confirmLabel={pendingAction?.type === "delete" ? "Delete" : "Confirm"}
+        confirmLabel={pendingAction?.type === "delete" ? t("common.delete") : t("admin.confirmButton")}
         destructive={pendingAction?.type === "delete" || pendingAction?.type === "block"}
         requireReason={
           pendingAction?.type === "block" ||

@@ -21,7 +21,11 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "react-i18next";
+
 import { db } from "../../../firebase";
+import { translateProblemTypesList } from "../../i18n/formatters";
+import { useLanguage } from "../../i18n/LanguageProvider";
 import { normalizeLanguagesFromAccount } from "../../driver/create/driverHelpers";
 import DriverReviewsSection from "../DriverReviewsSection";
 import { getOfferDriverId } from "../driverReviewsLib";
@@ -47,26 +51,35 @@ type DriverProfileInfo = {
   ratingCount: number;
 };
 
+// Language names are always shown in their own script, regardless of the
+// app's current UI language — these are never translated.
 const LANGUAGE_LABELS: Record<string, string> = {
-  ar: "Arabic",
-  he: "Hebrew",
+  ar: "العربية",
+  he: "עברית",
   en: "English",
-  ru: "Russian",
-};
-
-const genderLabel = (value?: string) => {
-  const gender = String(value || "").toLowerCase();
-  if (gender === "female") return "Female ♀";
-  if (gender === "male") return "Male ♂";
-  return "";
+  ru: "Русский",
 };
 
 export default function RoadsideWaitingScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
+
+  const genderLabel = (value?: string) => {
+    const gender = String(value || "").toLowerCase();
+    if (gender === "female") return `${t("common.female")} ♀`;
+    if (gender === "male") return `${t("common.male")} ♂`;
+    return "";
+  };
+
   const params = useLocalSearchParams();
 
   const requestId = String(params.requestId || "");
   const matchedCount = Number(params.matchedCount || 0);
-  const problemLabel = String(params.problemLabel || "Roadside Help");
+  const rawProblemLabel = String(params.problemLabel || "Roadside Help");
+  const problemLabel = translateProblemTypesList(
+    rawProblemLabel.split(", "),
+    t,
+  ) || rawProblemLabel;
   const address = String(params.address || "");
   const lat = String(params.lat || "");
   const lng = String(params.lng || "");
@@ -257,12 +270,12 @@ export default function RoadsideWaitingScreen() {
           address,
           lat,
           lng,
-          helperName: offer.driverName || "Your helper",
+          helperName: offer.driverName || t("roadsideHelp.yourHelperFallback"),
           helperEta: String(offer.estimatedArrivalMinutes || ""),
         },
       } as any);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not accept the offer.");
+      Alert.alert(t("common.error"), error?.message || t("roadsideHelp.couldNotAcceptOffer"));
       setBusyOfferId(null);
     }
   };
@@ -274,7 +287,7 @@ export default function RoadsideWaitingScreen() {
       setBusyOfferId(offer.id);
       await rejectOffer(offer.id);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not reject the offer.");
+      Alert.alert(t("common.error"), error?.message || t("roadsideHelp.couldNotRejectOffer"));
     } finally {
       setBusyOfferId(null);
     }
@@ -283,7 +296,7 @@ export default function RoadsideWaitingScreen() {
   const callDriver = (phone?: string) => {
     if (!phone) return;
     Linking.openURL(`tel:${phone}`).catch(() =>
-      Alert.alert("Error", "Could not start the call."),
+      Alert.alert(t("common.error"), t("roadsideHelp.couldNotStartCall")),
     );
   };
 
@@ -291,13 +304,13 @@ export default function RoadsideWaitingScreen() {
     <SafeAreaView style={styles.page}>
       <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-          <Text style={styles.backText}>Back</Text>
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
+          <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
 
         <View style={styles.header}>
           <Text style={styles.headerEmoji}>🔧</Text>
-          <Text style={styles.title}>Finding Help</Text>
+          <Text style={styles.title}>{t("roadsideHelp.findingHelp")}</Text>
         </View>
 
         <Text style={styles.routeText}>
@@ -311,15 +324,13 @@ export default function RoadsideWaitingScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.statusTitle}>
               {visibleOffers.length > 0
-                ? "Offers are coming in"
-                : "Waiting for nearby drivers…"}
+                ? t("roadsideHelp.offersComingIn")
+                : t("roadsideHelp.waitingForNearbyDrivers")}
             </Text>
             <Text style={styles.statusSub}>
               {matchedCount > 0
-                ? `We notified ${matchedCount} nearby driver${
-                    matchedCount === 1 ? "" : "s"
-                  }.`
-                : "Your request was sent. Drivers near you will be notified."}
+                ? t("roadsideHelp.notifiedDrivers", { count: matchedCount })
+                : t("roadsideHelp.requestSentNoOffersYet")}
             </Text>
           </View>
         </View>
@@ -331,10 +342,9 @@ export default function RoadsideWaitingScreen() {
         ) : visibleOffers.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="time-outline" size={40} color="#8B7B6B" />
-            <Text style={styles.emptyTitle}>No offers yet</Text>
+            <Text style={styles.emptyTitle}>{t("roadsideHelp.noOffersYetTitle")}</Text>
             <Text style={styles.emptyText}>
-              Hang tight — offers from nearby drivers will appear here
-              automatically.
+              {t("roadsideHelp.noOffersYetMessage")}
             </Text>
           </View>
         ) : (
@@ -367,7 +377,7 @@ export default function RoadsideWaitingScreen() {
 
                       <View style={styles.driverTextBox}>
                         <Text style={styles.driverName}>
-                          {offer.driverName || "Driver"}
+                          {offer.driverName || t("rides.driverFallback")}
                         </Text>
                         {gender ? (
                           <Text style={styles.driverMeta}>{gender}</Text>
@@ -387,7 +397,7 @@ export default function RoadsideWaitingScreen() {
                           </Text>
                         </>
                       ) : (
-                        <Text style={styles.ratingCountText}>New driver</Text>
+                        <Text style={styles.ratingCountText}>{t("roadsideHelp.newDriverLabel")}</Text>
                       )}
                     </View>
                   </View>
@@ -409,7 +419,7 @@ export default function RoadsideWaitingScreen() {
                       ))
                     ) : (
                       <Text style={styles.languagesEmptyText}>
-                        Languages not available
+                        {t("roadsideHelp.languagesNotAvailable")}
                       </Text>
                     )}
                   </View>
@@ -450,7 +460,7 @@ export default function RoadsideWaitingScreen() {
                       onPress={() => handleReject(offer)}
                       disabled={busy}
                     >
-                      <Text style={styles.rejectText}>Reject</Text>
+                      <Text style={styles.rejectText}>{t("roadsideHelp.rejectButton")}</Text>
                     </Pressable>
 
                     <Pressable
@@ -461,7 +471,7 @@ export default function RoadsideWaitingScreen() {
                       {busy ? (
                         <ActivityIndicator color="#FFFFFF" />
                       ) : (
-                        <Text style={styles.acceptText}>Accept Help</Text>
+                        <Text style={styles.acceptText}>{t("roadsideHelp.acceptHelpButton")}</Text>
                       )}
                     </Pressable>
                   </View>

@@ -9,20 +9,23 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
+
 import { auth } from "../../firebase";
 
 export default function ForgotPasswordScreen() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
 
   const handleReset = async () => {
     if (!email) {
-      alert("Please enter your email.");
+      alert(t("auth.pleaseEnterYourEmail"));
       return;
     }
 
     try {
       await sendPasswordResetEmail(auth, email.trim());
-      alert("Reset email sent");
+      alert(t("auth.resetEmailSentMessage"));
     } catch (error: any) {
       alert(error.message);
     }
@@ -31,15 +34,15 @@ export default function ForgotPasswordScreen() {
   return (
     <SafeAreaView style={styles.page}>
       <View style={styles.card}>
-        <Text style={styles.title}>Reset Password</Text>
+        <Text style={styles.title}>{t("auth.resetPasswordTitle")}</Text>
         <Text style={styles.subtitle}>
-          Enter your email to receive a reset link.
+          {t("auth.enterEmailToReceiveLink")}
         </Text>
 
-        <Text style={styles.label}>Email</Text>
+        <Text style={styles.label}>{t("auth.email")}</Text>
         <TextInput
           style={styles.input}
-          placeholder="Enter your email"
+          placeholder={t("auth.emailPlaceholder")}
           placeholderTextColor="#8b7b6b"
           keyboardType="email-address"
           autoCapitalize="none"
@@ -48,11 +51,11 @@ export default function ForgotPasswordScreen() {
         />
 
         <Pressable style={styles.button} onPress={handleReset}>
-          <Text style={styles.buttonText}>Send Reset Link</Text>
+          <Text style={styles.buttonText}>{t("auth.sendResetLinkButton")}</Text>
         </Pressable>
 
         <Pressable onPress={() => router.replace("/")}>
-          <Text style={styles.backText}>Back to Login</Text>
+          <Text style={styles.backText}>{t("auth.backToLoginButton")}</Text>
         </Pressable>
       </View>
     </SafeAreaView>

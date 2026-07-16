@@ -9,11 +9,12 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 type Category = {
   key: string;
-  title: string;
-  desc: string;
+  titleKey: string;
+  descKey: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
 };
@@ -21,42 +22,43 @@ type Category = {
 const categories: Category[] = [
   {
     key: "school",
-    title: "School",
-    desc: "Rides to school or university",
+    titleKey: "rideCategory.categories.school.title",
+    descKey: "rideCategory.categories.school.desc",
     icon: "school-outline",
     color: "#3B82F6",
   },
   {
     key: "workErrands",
-    title: "Work & Errands",
-    desc: "Jobs, shopping, appointments",
+    titleKey: "rideCategory.categories.workErrands.title",
+    descKey: "rideCategory.categories.workErrands.desc",
     icon: "briefcase-outline",
     color: "#22C55E",
   },
   {
     key: "personal",
-    title: "Personal Ride",
-    desc: "Personal trips & visits",
+    titleKey: "rideCategory.categories.personal.title",
+    descKey: "rideCategory.categories.personal.desc",
     icon: "person-outline",
     color: "#EC4899",
   },
   {
     key: "delivery",
-    title: "Item Delivery",
-    desc: "Medicine, groceries, packages",
+    titleKey: "rideCategory.categories.delivery.title",
+    descKey: "rideCategory.categories.delivery.desc",
     icon: "cube-outline",
     color: "#A855F7",
   },
   {
     key: "help",
-    title: "Roadside Help",
-    desc: "Flat tire, jump start, towing",
+    titleKey: "rideCategory.categories.help.title",
+    descKey: "rideCategory.categories.help.desc",
     icon: "construct-outline",
     color: "#EF4444",
   },
 ];
 
 export default function RideCategoryScreen() {
+  const { t } = useTranslation();
   const handleSelect = (key: string) => {
     const routes: Record<string, string> = {
 school: "/booking/school",
@@ -72,9 +74,9 @@ workErrands: "/booking/work-errand",
   return (
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>What do you need?</Text>
+        <Text style={styles.title}>{t("rideCategory.title")}</Text>
 
-        <Text style={styles.subtitle}>Choose the type of ride or service</Text>
+        <Text style={styles.subtitle}>{t("rideCategory.subtitle")}</Text>
 
         <View style={styles.grid}>
           {categories.map((cat, index) => {
@@ -96,8 +98,8 @@ workErrands: "/booking/work-errand",
                   <Ionicons name={cat.icon} size={32} color={cat.color} />
                 </View>
 
-                <Text style={styles.cardTitle}>{cat.title}</Text>
-                <Text style={styles.cardDesc}>{cat.desc}</Text>
+                <Text style={styles.cardTitle}>{t(cat.titleKey)}</Text>
+                <Text style={styles.cardDesc}>{t(cat.descKey)}</Text>
               </Pressable>
             );
           })}

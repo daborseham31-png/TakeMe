@@ -13,7 +13,9 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
+import { useLanguage } from "../../../i18n/LanguageProvider";
 import IsraelLocationAutocomplete from "../../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../israelLocations";
 import {
@@ -84,6 +86,8 @@ const defaultDriver: Driver = {
 };
 
 export default function ErrandsBookScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
 
   const driver = useMemo(() => {
@@ -123,8 +127,8 @@ export default function ErrandsBookScreen() {
       setLocation(loc);
     } catch (error: any) {
       Alert.alert(
-        "Location",
-        error?.message || "Could not detect your location.",
+        t("workErrand.locationTitle"),
+        error?.message || t("workErrand.couldNotDetectLocation"),
       );
     } finally {
       setLocating(false);
@@ -136,19 +140,19 @@ export default function ErrandsBookScreen() {
     const cleanNeighborhood = neighborhood.trim();
 
     if (!cleanCity || !cleanNeighborhood) {
-      Alert.alert("Missing details", "Please fill City / Village and Neighborhood.");
+      Alert.alert(t("auth.missingDetails"), t("workErrand.fillCityNeighborhood"));
       return;
     }
 
     if (!cityPlace) {
-      setCityError("Please select a location from the list.");
+      setCityError(t("validation.selectLocationFromList"));
       return;
     }
 
     if (!location || location.latitude === null || location.longitude === null) {
       Alert.alert(
-        "Location needed",
-        "Please detect your current location so the driver can reach you.",
+        t("workErrand.locationNeededTitle"),
+        t("workErrand.detectLocationMessageDriver"),
       );
       return;
     }
@@ -185,7 +189,7 @@ export default function ErrandsBookScreen() {
 
       setSubmitted(true);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not send the request.");
+      Alert.alert(t("common.error"), error?.message || t("workErrand.couldNotSendRequest"));
     } finally {
       setSubmitting(false);
     }
@@ -197,12 +201,12 @@ export default function ErrandsBookScreen() {
         <View style={styles.successContainer}>
           <Ionicons name="checkmark-circle-outline" size={90} color="#F58220" />
 
-          <Text style={styles.successTitle}>Request Sent!</Text>
+          <Text style={styles.successTitle}>{t("workErrand.requestSentTitle")}</Text>
 
           <Text style={styles.successText}>
-            Your request has been sent to{" "}
-            <Text style={styles.boldText}>{driver.name}</Text>. Once accepted,
-            you&apos;ll continue to payment. Track it under My Bookings.
+            {t("workErrand.requestSentToPrefix")}{" "}
+            <Text style={styles.boldText}>{driver.name}</Text>.{" "}
+            {t("workErrand.requestSentToSuffix")}
           </Text>
 
           <View style={styles.successButtonsRow}>
@@ -212,14 +216,14 @@ export default function ErrandsBookScreen() {
                 router.replace("/booking/work-errand/errand/errand" as any)
               }
             >
-              <Text style={styles.outlineButtonText}>Browse More</Text>
+              <Text style={styles.outlineButtonText}>{t("workErrand.browseMore")}</Text>
             </Pressable>
 
             <Pressable
               style={styles.successButton}
               onPress={() => router.replace("/(tabs)/bookings" as any)}
             >
-              <Text style={styles.successButtonText}>My Bookings</Text>
+              <Text style={styles.successButtonText}>{t("workErrand.myBookingsShort")}</Text>
             </Pressable>
           </View>
         </View>
@@ -242,8 +246,12 @@ export default function ErrandsBookScreen() {
               router.push("/booking/work-errand/errand/errand" as any)
             }
           >
-            <Ionicons name="arrow-back" size={20} color="#7A665C" />
-            <Text style={styles.backText}>Back</Text>
+            <Ionicons
+              name={isRTL ? "arrow-forward" : "arrow-back"}
+              size={20}
+              color="#7A665C"
+            />
+            <Text style={styles.backText}>{t("common.back")}</Text>
           </Pressable>
 
           <View style={styles.driverCard}>
@@ -257,7 +265,8 @@ export default function ErrandsBookScreen() {
 
                 <View style={styles.smallInfoRow}>
                   <Text style={styles.smallText}>
-                    {driver.gender === "male" ? "♂" : "♀"} Age {driver.age}
+                    {driver.gender === "male" ? "♂" : "♀"}{" "}
+                    {t("workErrand.ageLabel", { age: driver.age })}
                   </Text>
 
                   <Text style={styles.smallText}>•</Text>
@@ -269,7 +278,7 @@ export default function ErrandsBookScreen() {
                       {driver.rating.toFixed(1)} ({driver.reviews})
                     </Text>
                   ) : (
-                    <Text style={styles.smallText}>New driver</Text>
+                    <Text style={styles.smallText}>{t("workErrand.newEmployer")}</Text>
                   )}
                 </View>
               </View>
@@ -320,14 +329,11 @@ export default function ErrandsBookScreen() {
           </View>
 
           <View style={styles.formCard}>
-            <Text style={styles.formTitle}>✈️ Your Details</Text>
+            <Text style={styles.formTitle}>✈️ {t("workErrand.yourDetails")}</Text>
 
-            <Text style={styles.hint}>
-              Your name, age and phone are taken from your profile
-              automatically.
-            </Text>
+            <Text style={styles.hint}>{t("workErrand.autoProfileHint")}</Text>
 
-            <Text style={styles.label}>Your Location</Text>
+            <Text style={styles.label}>{t("workErrand.yourLocation")}</Text>
             <Pressable
               style={styles.locationBox}
               onPress={detectLocation}
@@ -340,10 +346,10 @@ export default function ErrandsBookScreen() {
               />
               <Text style={styles.locationText} numberOfLines={2}>
                 {locating
-                  ? "Detecting your location..."
+                  ? t("booking.findingLocation")
                   : location
-                    ? location.address || "Current location detected"
-                    : "Tap to detect my current location"}
+                    ? location.address || t("workErrand.currentLocationDetected")
+                    : t("workErrand.tapToDetectLocation")}
               </Text>
               {location ? (
                 <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
@@ -353,37 +359,37 @@ export default function ErrandsBookScreen() {
             <View style={styles.row}>
               <View style={styles.halfField}>
                 <IsraelLocationAutocomplete
-                  label="City / Village"
+                  label={t("workErrand.cityVillageLabel")}
                   value={city}
                   onChangeText={handleCityChange}
                   onSelectLocation={(location) => {
                     setCityPlace(location);
                     setCityError("");
                   }}
-                  placeholder="Enter city or village"
+                  placeholder={t("workErrand.enterCityVillage")}
                   error={cityError}
                 />
               </View>
 
               <View style={styles.halfField}>
-                <Text style={styles.label}>Neighborhood</Text>
+                <Text style={styles.label}>{t("workErrand.neighborhoodLabel")}</Text>
                 <TextInput
                   style={styles.input}
                   value={neighborhood}
                   onChangeText={setNeighborhood}
-                  placeholder="Enter neighborhood"
+                  placeholder={t("workErrand.enterNeighborhood")}
                   placeholderTextColor="#9B7A68"
                   maxLength={100}
                 />
               </View>
             </View>
 
-            <Text style={styles.label}>Notes (optional)</Text>
+            <Text style={styles.label}>{t("workErrand.notesLabel")}</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
               value={notes}
               onChangeText={setNotes}
-              placeholder="Anything the driver should know"
+              placeholder={t("workErrand.notesPlaceholderDriver")}
               placeholderTextColor="#9B7A68"
               multiline
             />
@@ -395,7 +401,7 @@ export default function ErrandsBookScreen() {
             >
               <Ionicons name="paper-plane-outline" size={19} color="#FFFFFF" />
               <Text style={styles.sendButtonText}>
-                {submitting ? "Sending..." : "Send Request"}
+                {submitting ? t("workErrand.sending") : t("workErrand.sendRequest")}
               </Text>
             </Pressable>
           </View>

@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
 import {
@@ -27,10 +28,12 @@ import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 import AdminScreen from "../components/AdminScreen";
 import { LoadingState } from "../components/AdminStates";
 import ConfirmModal from "../components/ConfirmModal";
+import { translateDriverVerificationStatus } from "../../i18n/formatters";
 
 type PendingAction = { type: DriverVerificationStatus } | null;
 
 export default function AdminDriverDetailScreen() {
+  const { t } = useTranslation();
   const params = useLocalSearchParams();
   const driverId = String(params.id || "");
 
@@ -74,8 +77,8 @@ export default function AdminDriverDetailScreen() {
   const openAction = (type: DriverVerificationStatus) => {
     if (type === "approved" && missingRequirements.length > 0) {
       Alert.alert(
-        "Cannot approve yet",
-        `This driver is missing: ${missingRequirements.join(", ")}.`,
+        t("admin.cannotApproveYetTitle"),
+        t("admin.driverMissingMessage", { list: missingRequirements.join(", ") }),
       );
       return;
     }
@@ -90,9 +93,9 @@ export default function AdminDriverDetailScreen() {
       setBusy(true);
       await setDriverVerification(driverId, pendingAction.type, reason);
       setPendingAction(null);
-      Alert.alert("Success", "The driver's status was updated and they were notified.");
+      Alert.alert(t("admin.successTitle"), t("admin.driverUpdatedNotifiedMessage"));
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not update this driver.");
+      Alert.alert(t("common.error"), error?.message || t("admin.couldNotUpdateDriver"));
     } finally {
       setBusy(false);
     }
@@ -105,9 +108,9 @@ export default function AdminDriverDetailScreen() {
       setSavingNote(true);
       await addDriverAdminNote(driverId, note.trim());
       setNote("");
-      Alert.alert("Saved", "Internal note added.");
+      Alert.alert(t("admin.savedTitle"), t("admin.internalNoteAddedMessage"));
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not save the note.");
+      Alert.alert(t("common.error"), error?.message || t("admin.couldNotSaveNote"));
     } finally {
       setSavingNote(false);
     }
@@ -115,24 +118,24 @@ export default function AdminDriverDetailScreen() {
 
   if (loading) {
     return (
-      <AdminScreen title="Driver Details">
-        <LoadingState label="Loading driver..." />
+      <AdminScreen title={t("admin.driverDetailsTitle")}>
+        <LoadingState label={t("admin.loadingDriverLabel")} />
       </AdminScreen>
     );
   }
 
   if (notFound || !driver) {
     return (
-      <AdminScreen title="Driver Details">
+      <AdminScreen title={t("admin.driverDetailsTitle")}>
         <View style={styles.center}>
-          <Text style={styles.notFoundText}>This driver could not be found.</Text>
+          <Text style={styles.notFoundText}>{t("admin.driverNotFound")}</Text>
         </View>
       </AdminScreen>
     );
   }
 
   return (
-    <AdminScreen title="Driver Details">
+    <AdminScreen title={t("admin.driverDetailsTitle")}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -148,7 +151,7 @@ export default function AdminDriverDetailScreen() {
             )}
             <Text style={styles.name}>{driver.name}</Text>
             <View style={styles.pill}>
-              <Text style={styles.pillText}>{driver.driverVerificationStatus}</Text>
+              <Text style={styles.pillText}>{translateDriverVerificationStatus(driver.driverVerificationStatus, t)}</Text>
             </View>
           </View>
 
@@ -156,33 +159,33 @@ export default function AdminDriverDetailScreen() {
             <View style={styles.missingBox}>
               <Ionicons name="warning-outline" size={18} color={adminColors.warning} />
               <Text style={styles.missingText}>
-                Missing before approval: {missingRequirements.join(", ")}
+                {t("admin.missingBeforeApproval", { list: missingRequirements.join(", ") })}
               </Text>
             </View>
           ) : null}
 
           <View style={styles.section}>
-            <Row icon="call-outline" label="Phone" value={driver.phone || "—"} />
-            <Row icon="mail-outline" label="Email" value={driver.email || "—"} />
-            <Row icon="barcode-outline" label="Plate" value={driver.carPlate || "—"} />
+            <Row icon="call-outline" label={t("admin.phoneLabel")} value={driver.phone || "—"} />
+            <Row icon="mail-outline" label={t("admin.emailLabel")} value={driver.email || "—"} />
+            <Row icon="barcode-outline" label={t("admin.plateLabel")} value={driver.carPlate || "—"} />
             <Row
               icon="document-text-outline"
-              label="License expiry"
+              label={t("admin.licenseExpiryLabel")}
               value={driver.licenseExpiryDate || "—"}
             />
             <Row
               icon="language-outline"
-              label="Languages"
+              label={t("admin.languagesLabel")}
               value={driver.spokenLanguages.join(", ") || "—"}
             />
             <Row
               icon="star-outline"
-              label="Rating"
-              value={`${driver.ratingAverage.toFixed(1)} (${driver.ratingCount} reviews)`}
+              label={t("admin.ratingLabel")}
+              value={t("admin.ratingReviewsValue", { avg: driver.ratingAverage.toFixed(1), count: driver.ratingCount })}
             />
             <Row
               icon="calendar-outline"
-              label="Joined"
+              label={t("admin.joinedLabel")}
               value={
                 driver.createdAtSeconds
                   ? new Date(driver.createdAtSeconds * 1000).toLocaleDateString()
@@ -196,13 +199,13 @@ export default function AdminDriverDetailScreen() {
               <>
                 <ActionButton
                   icon="checkmark-circle-outline"
-                  label="Approve driver"
+                  label={t("admin.approveDriver")}
                   tone="success"
                   onPress={() => openAction("approved")}
                 />
                 <ActionButton
                   icon="close-circle-outline"
-                  label="Reject driver"
+                  label={t("admin.rejectDriver")}
                   tone="danger"
                   onPress={() => openAction("rejected")}
                 />
@@ -210,14 +213,14 @@ export default function AdminDriverDetailScreen() {
             ) : driver.driverVerificationStatus === "approved" ? (
               <ActionButton
                 icon="pause-circle-outline"
-                label="Suspend driver"
+                label={t("admin.suspendDriver")}
                 tone="warning"
                 onPress={() => openAction("suspended")}
               />
             ) : (
               <ActionButton
                 icon="refresh-circle-outline"
-                label="Reactivate / re-approve driver"
+                label={t("admin.reactivateReapproveDriver")}
                 tone="success"
                 onPress={() => openAction("approved")}
               />
@@ -225,10 +228,10 @@ export default function AdminDriverDetailScreen() {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Internal admin note</Text>
+            <Text style={styles.sectionTitle}>{t("admin.internalAdminNoteTitle")}</Text>
             <TextInput
               style={styles.noteInput}
-              placeholder="Add a private note (only admins see this)"
+              placeholder={t("admin.addPrivateNotePlaceholder")}
               placeholderTextColor={adminColors.placeholder}
               value={note}
               onChangeText={setNote}
@@ -239,7 +242,7 @@ export default function AdminDriverDetailScreen() {
               onPress={handleSaveNote}
               disabled={!note.trim() || savingNote}
             >
-              <Text style={styles.saveNoteText}>{savingNote ? "Saving..." : "Save note"}</Text>
+              <Text style={styles.saveNoteText}>{savingNote ? t("admin.savingButton") : t("admin.saveNoteButton")}</Text>
             </Pressable>
           </View>
         </ScrollView>
@@ -249,16 +252,16 @@ export default function AdminDriverDetailScreen() {
         visible={!!pendingAction}
         title={
           pendingAction?.type === "approved"
-            ? "Approve this driver?"
+            ? t("admin.approveThisDriverQ")
             : pendingAction?.type === "rejected"
-              ? "Reject this driver?"
-              : "Suspend this driver?"
+              ? t("admin.rejectThisDriverQ")
+              : t("admin.suspendThisDriverQ")
         }
-        message="The driver will be notified of this decision immediately."
-        confirmLabel="Confirm"
+        message={t("admin.driverNotifiedImmediately")}
+        confirmLabel={t("admin.confirmButton")}
         destructive={pendingAction?.type !== "approved"}
         requireReason={pendingAction?.type === "rejected" || pendingAction?.type === "suspended"}
-        reasonPlaceholder="Reason (shown to the driver)"
+        reasonPlaceholder={t("admin.reasonShownToDriverPlaceholder")}
         busy={busy}
         onCancel={() => setPendingAction(null)}
         onConfirm={runAction}

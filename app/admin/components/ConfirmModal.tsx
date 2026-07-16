@@ -15,6 +15,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 
@@ -35,14 +36,15 @@ export default function ConfirmModal({
   visible,
   title,
   message,
-  confirmLabel = "Confirm",
+  confirmLabel,
   destructive = true,
   requireReason = false,
-  reasonPlaceholder = "Enter a reason",
+  reasonPlaceholder,
   busy = false,
   onCancel,
   onConfirm,
 }: ConfirmModalProps) {
+  const { t } = useTranslation();
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState("");
 
@@ -55,7 +57,7 @@ export default function ConfirmModal({
 
   const handleConfirm = () => {
     if (requireReason && !reason.trim()) {
-      setReasonError("A reason is required.");
+      setReasonError(t("admin.reasonRequired"));
       return;
     }
 
@@ -78,7 +80,7 @@ export default function ConfirmModal({
             <>
               <TextInput
                 style={styles.input}
-                placeholder={reasonPlaceholder}
+                placeholder={reasonPlaceholder || t("admin.enterReasonPlaceholder")}
                 placeholderTextColor={adminColors.placeholder}
                 value={reason}
                 onChangeText={(text) => {
@@ -93,7 +95,7 @@ export default function ConfirmModal({
 
           <View style={styles.buttonsRow}>
             <Pressable style={styles.cancelButton} onPress={onCancel} disabled={busy}>
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Text style={styles.cancelText}>{t("common.cancel")}</Text>
             </Pressable>
 
             <Pressable
@@ -108,7 +110,7 @@ export default function ConfirmModal({
               {busy ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.confirmText}>{confirmLabel}</Text>
+                <Text style={styles.confirmText}>{confirmLabel || t("admin.confirmButton")}</Text>
               )}
             </Pressable>
           </View>

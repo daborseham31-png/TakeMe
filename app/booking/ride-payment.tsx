@@ -20,8 +20,11 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { translateStoredDayName } from "../i18n/formatters";
 import BitBadge from "./BitBadge";
 import { openBitPayment } from "./bitPayment";
 import { RIDE_CATEGORY, RidePayment } from "./rideBookingLib";
@@ -46,6 +49,8 @@ const getLast3 = (value: string) => {
 };
 
 export default function RidePaymentScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
 
   const category = String(params.category || "personal");
@@ -152,7 +157,7 @@ export default function RidePaymentScreen() {
     const user = auth.currentUser;
 
     if (!user) {
-      throw new Error("Please login first.");
+      throw new Error(t("auth.pleaseLoginFirst"));
     }
 
     let passengerName = user.displayName || "Passenger";
@@ -180,9 +185,7 @@ const createBookingAfterPayment = async (
   const { user, passengerName, passengerPhone } = await getPassengerProfile();
 
   if (!routeId) {
-    throw new Error(
-      "Missing trip id. Please go back and choose the driver again.",
-    );
+    throw new Error(t("rides.missingTripId"));
   }
 
   const bookingRef = doc(collection(db, "bookings"));
@@ -222,7 +225,7 @@ const createBookingAfterPayment = async (
     const routeSnap = await transaction.get(routeRef);
 
     if (!routeSnap.exists()) {
-      throw new Error("This trip is no longer available.");
+      throw new Error(t("rides.tripNoLongerAvailable"));
     }
 
     const routeData = routeSnap.data();
@@ -237,7 +240,7 @@ const createBookingAfterPayment = async (
       !!routeData.bookedBy;
 
     if (alreadyBooked) {
-      throw new Error("This trip was already booked by someone else.");
+      throw new Error(t("rides.tripAlreadyBooked"));
     }
 
     transaction.set(bookingRef, {
@@ -356,7 +359,7 @@ const createBookingAfterPayment = async (
 
   const handleContinue = async () => {
     if (!method) {
-      Alert.alert("Choose payment", "Please select Cash or Pay with BIT.");
+      Alert.alert(t("rides.choosePaymentTitle"), t("rides.choosePaymentMessage"));
       return;
     }
 
@@ -391,11 +394,11 @@ const createBookingAfterPayment = async (
 
         if (remainingWeeklyDays.length > 0) {
           Alert.alert(
-            "Some days still need a driver",
-            "Please choose another driver for the remaining days.",
+            t("rides.someDaysNeedDriverTitle"),
+            t("rides.someDaysNeedDriverMessage"),
             [
               {
-                text: "OK",
+                text: t("common.ok"),
                 onPress: () =>
                   router.replace({
                     pathname: "/booking/driverresults",
@@ -417,8 +420,8 @@ const createBookingAfterPayment = async (
         } as any);
       } catch (error: any) {
         Alert.alert(
-          "Error",
-          error?.message || "Could not confirm the booking.",
+          t("common.error"),
+          error?.message || t("rides.couldNotConfirmBooking"),
         );
       } finally {
         setProcessing(false);
@@ -437,7 +440,7 @@ const createBookingAfterPayment = async (
         params: { tab: "passenger" },
       } as any);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not confirm the booking.");
+      Alert.alert(t("common.error"), error?.message || t("rides.couldNotConfirmBooking"));
     } finally {
       setProcessing(false);
     }
@@ -451,21 +454,27 @@ const createBookingAfterPayment = async (
       >
         <ScrollView contentContainerStyle={styles.container}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-            <Text style={styles.backText}>Back</Text>
+            <Ionicons
+              name={isRTL ? "arrow-forward" : "arrow-back"}
+              size={22}
+              color="#7C5F46"
+            />
+            <Text style={styles.backText}>{t("common.back")}</Text>
           </Pressable>
 
-          <Text style={styles.title}>Payment</Text>
-          <Text style={styles.subtitle}>Confirm and pay for your ride</Text>
+          <Text style={styles.title}>{t("rides.paymentTitle")}</Text>
+          <Text style={styles.subtitle}>{t("rides.paymentSubtitle")}</Text>
 
           <View style={styles.summaryCard}>
             <Text style={styles.summaryTitle}>
-              {isSchool ? "School Ride" : "Personal Ride"}
+              {isSchool ? t("rides.schoolRide") : t("rides.personalRide")}
             </Text>
 
             <View style={styles.summaryRow}>
               <Ionicons name="person-outline" size={15} color="#7C5F46" />
-              <Text style={styles.summaryText}>Driver: {driverName}</Text>
+              <Text style={styles.summaryText}>
+                {t("rides.driverLabel", { name: driverName })}
+              </Text>
             </View>
 
             {driverPhone ? (
@@ -478,7 +487,9 @@ const createBookingAfterPayment = async (
             {driverCar ? (
               <View style={styles.summaryRow}>
                 <Ionicons name="car-outline" size={15} color="#7C5F46" />
-                <Text style={styles.summaryText}>Car: {driverCar}</Text>
+                <Text style={styles.summaryText}>
+                  {t("rides.carLabel", { car: driverCar })}
+                </Text>
               </View>
             ) : null}
 
@@ -489,7 +500,9 @@ const createBookingAfterPayment = async (
                   size={15}
                   color="#7C5F46"
                 />
-                <Text style={styles.summaryText}>Color: {driverCarColor}</Text>
+                <Text style={styles.summaryText}>
+                  {t("rides.colorLabel", { color: driverCarColor })}
+                </Text>
               </View>
             ) : null}
 
@@ -497,7 +510,7 @@ const createBookingAfterPayment = async (
               <View style={styles.summaryRow}>
                 <Ionicons name="barcode-outline" size={15} color="#7C5F46" />
                 <Text style={styles.summaryText}>
-                  Plate: ***{driverCarPlateLast3}
+                  {t("rides.plateLabel", { last3: driverCarPlateLast3 })}
                 </Text>
               </View>
             ) : null}
@@ -543,13 +556,15 @@ const createBookingAfterPayment = async (
             {!isWeekly && seats !== null ? (
               <View style={styles.summaryRow}>
                 <Ionicons name="people-outline" size={15} color="#7C5F46" />
-                <Text style={styles.summaryText}>{seats} seats</Text>
+                <Text style={styles.summaryText}>
+                  {t("booking.seatsCount", { count: seats })}
+                </Text>
               </View>
             ) : null}
 
             {isWeekly ? (
               <View style={styles.weeklyDaysBox}>
-                <Text style={styles.weeklyDaysTitle}>Selected days</Text>
+                <Text style={styles.weeklyDaysTitle}>{t("rides.selectedDays")}</Text>
 
                 {selectedWeeklyDays.map((dayItem) => (
                   <View key={dayItem.date} style={styles.weeklyDayRow}>
@@ -559,8 +574,10 @@ const createBookingAfterPayment = async (
                       color="#7C5F46"
                     />
                     <Text style={styles.summaryText}>
-                      {dayItem.dayName} — {dayItem.date} · {dayItem.time} ·{" "}
-                      {dayItem.seats} seats · {dayItem.price} ₪
+                      {translateStoredDayName(dayItem.dayName, t)} —{" "}
+                      {dayItem.date} · {dayItem.time} ·{" "}
+                      {t("booking.seatsCount", { count: dayItem.seats })} ·{" "}
+                      {dayItem.price} ₪
                     </Text>
                   </View>
                 ))}
@@ -568,7 +585,7 @@ const createBookingAfterPayment = async (
             ) : null}
 
             <View style={styles.amountRow}>
-              <Text style={styles.amountLabel}>Amount</Text>
+              <Text style={styles.amountLabel}>{t("rides.amount")}</Text>
               <Text style={styles.amountValue}>
                 {isWeekly
                   ? `${weeklyTotal} ₪`
@@ -579,14 +596,11 @@ const createBookingAfterPayment = async (
             </View>
 
             {isWeekly ? (
-              <Text style={styles.weeklyHint}>
-                Card total = price × seats, summed across selected days. For
-                cash, pay each day directly to the driver.
-              </Text>
+              <Text style={styles.weeklyHint}>{t("rides.weeklyCardHint")}</Text>
             ) : null}
           </View>
 
-          <Text style={styles.sectionTitle}>Payment Method</Text>
+          <Text style={styles.sectionTitle}>{t("rides.paymentMethod")}</Text>
 
           <View style={styles.methodRow}>
             <Pressable
@@ -607,7 +621,7 @@ const createBookingAfterPayment = async (
                   method === "cash" && styles.methodTextActive,
                 ]}
               >
-                Cash
+                {t("common.cash")}
               </Text>
             </Pressable>
 
@@ -625,7 +639,7 @@ const createBookingAfterPayment = async (
                   method === "bit" && styles.methodTextActive,
                 ]}
               >
-                Pay with BIT
+                {t("rides.payWithBit")}
               </Text>
             </Pressable>
           </View>
@@ -637,9 +651,7 @@ const createBookingAfterPayment = async (
                 size={18}
                 color="#B86115"
               />
-              <Text style={styles.infoText}>
-                You&apos;ll pay the driver in cash. Press Continue to confirm.
-              </Text>
+              <Text style={styles.infoText}>{t("rides.cashInfoText")}</Text>
             </View>
           ) : null}
 
@@ -678,7 +690,7 @@ const createBookingAfterPayment = async (
               >
                 <Ionicons name="open-outline" size={16} color="#FFFFFF" />
                 <Text style={styles.openBitButtonText}>
-                  Open Bit & Copy Number
+                  {t("bitPayment.openBitAndCopy")}
                 </Text>
               </Pressable>
             </View>
@@ -695,7 +707,7 @@ const createBookingAfterPayment = async (
             {processing ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.continueText}>Continue</Text>
+              <Text style={styles.continueText}>{t("common.continue")}</Text>
             )}
           </Pressable>
         </ScrollView>

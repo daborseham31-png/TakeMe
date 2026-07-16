@@ -12,6 +12,8 @@ import {
     View,
 } from "react-native";
 import MapView, { Marker, Region } from "react-native-maps";
+import { useTranslation } from "react-i18next";
+import { useLanguage } from "../i18n/LanguageProvider";
 
 // Default map region (Nazareth area) used until the user moves the pin.
 const DEFAULT_REGION: Region = {
@@ -56,6 +58,8 @@ const makeStore = (): StoreEntry => {
 };
 
 export default function StoreDeliveryScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [region, setRegion] = useState<Region>(DEFAULT_REGION);
   const [marker, setMarker] = useState({
     latitude: DEFAULT_REGION.latitude,
@@ -98,8 +102,8 @@ export default function StoreDeliveryScreen() {
 
     if (filledStores.length === 0) {
       Alert.alert(
-        "Missing store details",
-        "Please add at least one store name and what you need.",
+        t("validation.missingStoreDetailsTitle"),
+        t("validation.addAtLeastOneStore"),
       );
       return;
     }
@@ -109,8 +113,8 @@ export default function StoreDeliveryScreen() {
 
     if (!cleanFrom || !cleanTo) {
       Alert.alert(
-        "Invalid time window",
-        "Please enter valid From and To times (00:00 - 23:59).",
+        t("validation.invalidTimeWindowTitle"),
+        t("validation.enterValidFromToTimes"),
       );
       return;
     }
@@ -146,23 +150,21 @@ export default function StoreDeliveryScreen() {
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#7C5F46" />
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
         </Pressable>
 
         <View style={styles.header}>
           <Text style={styles.headerEmoji}>📦</Text>
-          <Text style={styles.title}>Store Delivery</Text>
+          <Text style={styles.title}>{t("driverCreate.storeDeliveryTitle")}</Text>
         </View>
-        <Text style={styles.subtitle}>
-          Get items delivered from any store near you
-        </Text>
+        <Text style={styles.subtitle}>{t("driverCreate.storeDeliveryDesc")}</Text>
 
         {/* Delivery location + map */}
         <View style={styles.card}>
           <View style={styles.locationTitleRow}>
             <Ionicons name="location-outline" size={18} color="#F58220" />
             <Text style={styles.sectionTitle}>
-              Your Location (delivery address)
+              {t("booking.yourLocationDeliveryAddress")}
             </Text>
           </View>
 
@@ -172,7 +174,7 @@ export default function StoreDeliveryScreen() {
           </View>
 
           <Text style={styles.hintText}>
-            Drag the pin or tap on the map to set your exact location
+            {t("booking.dragPinHint")}
           </Text>
 
           <View style={styles.mapWrapper}>
@@ -210,7 +212,7 @@ export default function StoreDeliveryScreen() {
               <View style={styles.labelRow}>
                 <Ionicons name="storefront-outline" size={18} color="#F58220" />
                 <Text style={styles.label}>
-                  Store Name{stores.length > 1 ? ` ${index + 1}` : ""}
+                  {t("booking.storeName")}{stores.length > 1 ? ` ${index + 1}` : ""}
                 </Text>
               </View>
 
@@ -223,7 +225,7 @@ export default function StoreDeliveryScreen() {
 
             <TextInput
               style={styles.input}
-              placeholder="Enter the store name"
+              placeholder={t("booking.enterStoreName")}
               placeholderTextColor="#8B7B6B"
               value={store.name}
               onChangeText={(text) => updateStore(store.id, "name", text)}
@@ -231,12 +233,12 @@ export default function StoreDeliveryScreen() {
 
             <View style={styles.labelRow}>
               <Ionicons name="bag-handle-outline" size={18} color="#F58220" />
-              <Text style={styles.label}>What do you need?</Text>
+              <Text style={styles.label}>{t("booking.whatDoYouNeed")}</Text>
             </View>
 
             <TextInput
               style={styles.textArea}
-              placeholder="List the items you need"
+              placeholder={t("booking.listItemsNeeded")}
               placeholderTextColor="#8B7B6B"
               multiline
               numberOfLines={4}
@@ -249,19 +251,19 @@ export default function StoreDeliveryScreen() {
 
         <Pressable style={styles.addStoreButton} onPress={addStore}>
           <Ionicons name="add" size={20} color="#111827" />
-          <Text style={styles.addStoreText}>Add Store</Text>
+          <Text style={styles.addStoreText}>{t("booking.addStore")}</Text>
         </Pressable>
 
         {/* Delivery time window */}
         <View style={styles.card}>
           <View style={styles.locationTitleRow}>
             <Ionicons name="time-outline" size={18} color="#F58220" />
-            <Text style={styles.sectionTitle}>Delivery Time Window</Text>
+            <Text style={styles.sectionTitle}>{t("booking.deliveryTimeWindow")}</Text>
           </View>
 
           <View style={styles.twoColumns}>
             <View style={styles.column}>
-              <Text style={styles.label}>From</Text>
+              <Text style={styles.label}>{t("booking.from")}</Text>
               <View style={styles.timeRow}>
                 <TextInput
                   style={styles.timeInput}
@@ -277,7 +279,7 @@ export default function StoreDeliveryScreen() {
             </View>
 
             <View style={styles.column}>
-              <Text style={styles.label}>To</Text>
+              <Text style={styles.label}>{t("booking.to")}</Text>
               <View style={styles.timeRow}>
                 <TextInput
                   style={styles.timeInput}
@@ -296,7 +298,7 @@ export default function StoreDeliveryScreen() {
 
         <Pressable style={styles.searchButton} onPress={handleFindDrivers}>
           <Ionicons name="search-outline" size={20} color="#FFFFFF" />
-          <Text style={styles.searchText}>Find Drivers</Text>
+          <Text style={styles.searchText}>{t("booking.findDrivers")}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>

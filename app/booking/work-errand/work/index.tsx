@@ -12,8 +12,10 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
+import { useLanguage } from "../../../i18n/LanguageProvider";
 import DriverReviewsSection from "../../DriverReviewsSection";
 import { getDisplayedDriverId } from "../../driverReviewsLib";
 
@@ -64,11 +66,14 @@ const isTodayOrFuture = (dateText: string) => {
 };
 
 export default function FindWorkScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [listings, setListings] = useState<JobListing[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadWorkJobs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadWorkJobs = async () => {
@@ -167,7 +172,7 @@ export default function FindWorkScreen() {
       setListings(filteredJobs);
     } catch (error: any) {
       console.log("Load work jobs error:", error.message);
-      Alert.alert("Error", "Could not load work jobs.");
+      Alert.alert(t("common.error"), t("workErrand.couldNotLoadWorkJobs"));
     } finally {
       setLoading(false);
     }
@@ -187,7 +192,7 @@ export default function FindWorkScreen() {
       <SafeAreaView style={styles.safe}>
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#F58220" />
-          <Text style={styles.loadingText}>Loading work jobs...</Text>
+          <Text style={styles.loadingText}>{t("workErrand.loadingWorkJobs")}</Text>
         </View>
       </SafeAreaView>
     );
@@ -197,22 +202,22 @@ export default function FindWorkScreen() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#7A665C" />
+          <Ionicons
+            name={isRTL ? "arrow-forward" : "arrow-back"}
+            size={24}
+            color="#7A665C"
+          />
         </Pressable>
 
-        <Text style={styles.title}>Find Work</Text>
+        <Text style={styles.title}>{t("workErrand.findWorkTitle")}</Text>
 
-        <Text style={styles.subtitle}>
-          Employers looking for workers — apply now!
-        </Text>
+        <Text style={styles.subtitle}>{t("workErrand.findWorkSubtitle")}</Text>
 
         {listings.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="briefcase-outline" size={44} color="#7A665C" />
-            <Text style={styles.emptyTitle}>No work jobs found</Text>
-            <Text style={styles.emptyText}>
-              When someone posts a Work Helpers job, it will appear here.
-            </Text>
+            <Text style={styles.emptyTitle}>{t("workErrand.noWorkJobsFound")}</Text>
+            <Text style={styles.emptyText}>{t("workErrand.noWorkJobsHint")}</Text>
           </View>
         ) : (
           <View style={styles.list}>
@@ -244,7 +249,7 @@ export default function FindWorkScreen() {
                         </Text>
                       </>
                     ) : (
-                      <Text style={styles.ratingCount}>New driver</Text>
+                      <Text style={styles.ratingCount}>{t("workErrand.newEmployer")}</Text>
                     )}
                   </View>
                 </View>
@@ -266,7 +271,8 @@ export default function FindWorkScreen() {
                       color="#7A665C"
                     />
                     <Text style={styles.detailText}>
-                      {listing.dayEn} · {listing.date}
+                      {t(`booking.days.${listing.dayEn}`, { defaultValue: listing.dayEn })} ·{" "}
+                      {listing.date}
                     </Text>
                   </View>
 
@@ -282,7 +288,7 @@ export default function FindWorkScreen() {
                   <View style={styles.detail}>
                     <Ionicons name="people-outline" size={16} color="#7A665C" />
                     <Text style={styles.detailText}>
-                      Workers needed: {listing.workersNeeded}
+                      {t("workErrand.workersNeededCount", { count: listing.workersNeeded })}
                     </Text>
                   </View>
 
@@ -293,7 +299,7 @@ export default function FindWorkScreen() {
                       color="#7A665C"
                     />
                     <Text style={styles.detailText}>
-                      Places remaining: {listing.remainingSeats}
+                      {t("workErrand.placesRemainingCount", { count: listing.remainingSeats })}
                     </Text>
                   </View>
 
@@ -303,7 +309,9 @@ export default function FindWorkScreen() {
                   </View>
 
                   <View style={styles.detail}>
-                    <Text style={styles.price}>₪{listing.hourlyRate}/hr</Text>
+                    <Text style={styles.price}>
+                      ₪{listing.hourlyRate}{t("booking.perHourShort")}
+                    </Text>
                   </View>
                 </View>
 
@@ -330,7 +338,7 @@ export default function FindWorkScreen() {
                   style={styles.applyButton}
                   onPress={() => handleApply(listing)}
                 >
-                  <Text style={styles.applyText}>Apply for This Job</Text>
+                  <Text style={styles.applyText}>{t("workErrand.applyForThisJob")}</Text>
                 </Pressable>
               </View>
             ))}

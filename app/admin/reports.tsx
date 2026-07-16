@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { subscribeAllReports } from "./adminReportsLib";
 import { AdminReportRow, ReportStatus } from "./adminTypes";
@@ -9,15 +10,16 @@ import AdminScreen from "./components/AdminScreen";
 import { EmptyState, ErrorState, LoadingState } from "./components/AdminStates";
 import FilterChips from "./components/FilterChips";
 import { useAdminCollection } from "./useAdminCollection";
+import { translateReportCategory } from "../i18n/formatters";
 
 type StatusFilter = "all" | ReportStatus;
 
-const STATUS_OPTIONS: { key: StatusFilter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "open", label: "Open" },
-  { key: "under_review", label: "Under review" },
-  { key: "resolved", label: "Resolved" },
-  { key: "rejected", label: "Rejected" },
+const STATUS_OPTION_KEYS: { key: StatusFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "admin.allFilter" },
+  { key: "open", labelKey: "admin.reportStatusLabel.open" },
+  { key: "under_review", labelKey: "admin.reportStatusLabel.under_review" },
+  { key: "resolved", labelKey: "admin.reportStatusLabel.resolved" },
+  { key: "rejected", labelKey: "admin.reportStatusLabel.rejected" },
 ];
 
 const statusColor = (status: ReportStatus) => {
@@ -28,8 +30,14 @@ const statusColor = (status: ReportStatus) => {
 };
 
 export default function AdminReportsScreen() {
+  const { t } = useTranslation();
   const { data: reports, loading, error, refresh } = useAdminCollection(subscribeAllReports);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
+  const statusOptions = useMemo(
+    () => STATUS_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
+    [t],
+  );
 
   const filtered = useMemo(() => {
     const list =
@@ -41,27 +49,29 @@ export default function AdminReportsScreen() {
   const renderReport = ({ item }: { item: AdminReportRow }) => (
     <Pressable style={styles.card} onPress={() => router.push(`/admin/reports/${item.id}` as any)}>
       <View style={styles.cardTop}>
-        <Text style={styles.category}>{item.category}</Text>
+        <Text style={styles.category}>{translateReportCategory(item.category, t)}</Text>
         <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
-        <Text style={styles.statusText}>{item.status}</Text>
+        <Text style={styles.statusText}>
+          {t(`admin.reportStatusLabel.${item.status}`, { defaultValue: item.status })}
+        </Text>
       </View>
 
       <Text style={styles.description} numberOfLines={2}>
         {item.description}
       </Text>
 
-      <Text style={styles.reporter}>By {item.reporterName}</Text>
+      <Text style={styles.reporter}>{t("admin.byReporter", { name: item.reporterName })}</Text>
     </Pressable>
   );
 
   return (
-    <AdminScreen title="Reports & Support" activeKey="reports">
+    <AdminScreen title={t("admin.reportsAndSupport")} activeKey="reports">
       <View style={styles.filtersWrap}>
-        <FilterChips options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} />
+        <FilterChips options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
       </View>
 
       {loading ? (
-        <LoadingState label="Loading reports..." />
+        <LoadingState label={t("admin.loadingReports")} />
       ) : error ? (
         <ErrorState message={error} onRetry={refresh} />
       ) : (
@@ -74,8 +84,8 @@ export default function AdminReportsScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="flag-outline"
-              title="No reports"
-              subtitle="Reports submitted by users will show up here."
+              title={t("admin.noReportsTitle")}
+              subtitle={t("admin.noReportsHint")}
             />
           }
         />

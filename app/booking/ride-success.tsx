@@ -8,8 +8,11 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 export default function RideSuccessScreen() {
+  const { t } = useTranslation();
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
@@ -17,12 +20,9 @@ export default function RideSuccessScreen() {
           <Ionicons name="checkmark-circle" size={72} color="#F58220" />
         </View>
 
-        <Text style={styles.title}>Your ride has been booked successfully</Text>
+        <Text style={styles.title}>{t("rides.rideBookedSuccess")}</Text>
 
-        <Text style={styles.subtitle}>
-          The driver has been notified. You can track the ride status any time
-          in My Bookings.
-        </Text>
+        <Text style={styles.subtitle}>{t("rides.rideBookedHint")}</Text>
 
         <View style={styles.buttons}>
           <Pressable
@@ -30,7 +30,7 @@ export default function RideSuccessScreen() {
             onPress={() => router.replace("/(tabs)/bookings" as any)}
           >
             <Ionicons name="bag-handle-outline" size={18} color="#FFFFFF" />
-            <Text style={styles.primaryButtonText}>Open My Bookings</Text>
+            <Text style={styles.primaryButtonText}>{t("rides.openMyBookings")}</Text>
           </Pressable>
 
           <Pressable
@@ -38,7 +38,7 @@ export default function RideSuccessScreen() {
             onPress={() => router.replace("/(tabs)/home" as any)}
           >
             <Ionicons name="home-outline" size={18} color="#2B2118" />
-            <Text style={styles.outlineButtonText}>Back to Home</Text>
+            <Text style={styles.outlineButtonText}>{t("rides.backToHome")}</Text>
           </Pressable>
         </View>
       </View>

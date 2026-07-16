@@ -15,7 +15,10 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "react-i18next";
+
 import { auth, db } from "../../firebase";
+import { useLanguage } from "../i18n/LanguageProvider";
 import {
   analyzeLicenseImage,
   compressImageToBase64,
@@ -25,7 +28,18 @@ import {
   SPOKEN_LANGUAGE_OPTIONS,
 } from "../login/idVerificationLib";
 
+// Native-script display only — the value saved to Firestore (spokenLanguages)
+// always stays one of SPOKEN_LANGUAGE_OPTIONS' English words.
+const SPOKEN_LANGUAGE_DISPLAY: Record<string, string> = {
+  Arabic: "العربية",
+  Hebrew: "עברית",
+  English: "English",
+  Russian: "Русский",
+};
+
 export default function VerifyLicenseScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -47,7 +61,7 @@ export default function VerifyLicenseScreen() {
     const user = auth.currentUser;
 
     if (!user) {
-      Alert.alert("Login required", "Please login first.");
+      Alert.alert(t("validation.loginRequiredTitle"), t("auth.pleaseLoginFirst"));
       router.replace("/");
       return;
     }
@@ -67,6 +81,7 @@ export default function VerifyLicenseScreen() {
         setCheckingAuth(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handlePickLicense = async () => {
@@ -84,13 +99,11 @@ export default function VerifyLicenseScreen() {
       setLicenseResult(result);
 
       if (!result.expiryDate) {
-        setLicenseError(
-          "Could not read license expiry date. Please upload a clearer photo.",
-        );
+        setLicenseError(t("validation.couldNotReadLicenseExpiry"));
       }
     } catch (error: any) {
       setLicenseError(
-        error?.message || "Could not read your license. Please try again.",
+        error?.message || t("validation.couldNotReadLicenseTryAgain"),
       );
     } finally {
       setLicenseAnalyzing(false);
@@ -107,39 +120,39 @@ export default function VerifyLicenseScreen() {
     const user = auth.currentUser;
 
     if (!user) {
-      Alert.alert("Login required", "Please login first.");
+      Alert.alert(t("validation.loginRequiredTitle"), t("auth.pleaseLoginFirst"));
       router.replace("/");
       return;
     }
 
     if (!licenseImageUri || !licenseResult) {
       Alert.alert(
-        "License required",
-        "Please upload a clear driving license image.",
+        t("validation.licenseRequiredTitle"),
+        t("validation.uploadClearLicenseMessage"),
       );
       return;
     }
 
     if (licenseValidity === "unknown") {
       Alert.alert(
-        "License required",
-        "Please upload a clear driving license image.",
+        t("validation.licenseRequiredTitle"),
+        t("validation.uploadClearLicenseMessage"),
       );
       return;
     }
 
     if (licenseValidity === "expired") {
       Alert.alert(
-        "License expired",
-        "Your driving license is expired. Please upload a valid license before becoming a driver.",
+        t("validation.licenseExpiredTitle"),
+        t("validation.licenseExpiredMessage"),
       );
       return;
     }
 
     if (spokenLanguages.length === 0) {
       Alert.alert(
-        "Languages required",
-        "Please select at least one language you speak.",
+        t("validation.languagesRequiredTitle"),
+        t("validation.selectAtLeastOneLanguage"),
       );
       return;
     }
@@ -164,7 +177,7 @@ export default function VerifyLicenseScreen() {
 
       router.replace("/driver/add-route" as any);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not save your license.");
+      Alert.alert(t("common.error"), error?.message || t("validation.couldNotSaveLicense"));
     } finally {
       setSubmitting(false);
     }
@@ -177,7 +190,7 @@ export default function VerifyLicenseScreen() {
 
     return (
       <Text style={styles.qualityNote}>
-        Image quality: {quality}. For best results use a clear, well-lit photo.
+        {t("driverCreate.imageQualityNote", { quality })}
       </Text>
     );
   };
@@ -196,23 +209,23 @@ export default function VerifyLicenseScreen() {
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#7C5F46" />
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
         </Pressable>
 
         <View style={styles.card}>
-          <Text style={styles.title}>Become a Driver</Text>
+          <Text style={styles.title}>{t("driverCreate.becomeDriverTitle")}</Text>
           <Text style={styles.subtitle}>
-            Verify your driving license to start offering rides
+            {t("driverCreate.becomeDriverSubtitle")}
           </Text>
 
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeaderRow}>
               <Ionicons name="car-outline" size={20} color="#F58220" />
-              <Text style={styles.sectionTitle}>Scan your driving license</Text>
+              <Text style={styles.sectionTitle}>{t("driverCreate.scanLicenseTitle")}</Text>
             </View>
 
             <Text style={styles.consentText}>
-              Your document photo is used only to verify your account details.
+              {t("driverCreate.licenseConsentText")}
             </Text>
 
             {licenseImageUri ? (
@@ -226,14 +239,14 @@ export default function VerifyLicenseScreen() {
             >
               <Ionicons name="camera-outline" size={18} color="#FFFFFF" />
               <Text style={styles.scanButtonText}>
-                {licenseImageUri ? "Retake / Upload Again" : "Scan your license"}
+                {licenseImageUri ? t("driverCreate.retakeUploadAgain") : t("driverCreate.scanYourLicense")}
               </Text>
             </Pressable>
 
             {licenseAnalyzing ? (
               <View style={styles.analyzingRow}>
                 <ActivityIndicator color="#F58220" />
-                <Text style={styles.analyzingText}>Reading your license…</Text>
+                <Text style={styles.analyzingText}>{t("driverCreate.readingLicense")}</Text>
               </View>
             ) : null}
 
@@ -249,39 +262,38 @@ export default function VerifyLicenseScreen() {
                 {licenseValidity === "valid" ? (
                   <View style={styles.validBox}>
                     <Ionicons name="checkmark-circle" size={18} color="#166534" />
-                    <Text style={styles.validText}>License is valid</Text>
+                    <Text style={styles.validText}>{t("driverCreate.licenseIsValid")}</Text>
                   </View>
                 ) : licenseValidity === "expired" ? (
                   <View style={styles.expiredBox}>
                     <Ionicons name="close-circle" size={18} color="#B91C1C" />
-                    <Text style={styles.expiredText}>License is expired</Text>
+                    <Text style={styles.expiredText}>{t("driverCreate.licenseIsExpired")}</Text>
                   </View>
                 ) : (
                   <View style={styles.unknownBox}>
                     <Ionicons name="warning-outline" size={18} color="#B86115" />
                     <Text style={styles.unknownText}>
-                      Could not read license expiry date. Please upload a
-                      clearer photo.
+                      {t("driverCreate.couldNotReadExpiryShort")}
                     </Text>
                   </View>
                 )}
 
                 <View style={styles.readOnlyBox}>
-                  <Text style={styles.readOnlyLabel}>License Number</Text>
+                  <Text style={styles.readOnlyLabel}>{t("driverCreate.licenseNumberLabel")}</Text>
                   <TextInput
                     style={styles.readOnlyInput}
                     value={licenseResult.licenseNumber || ""}
                     editable={false}
                   />
 
-                  <Text style={styles.readOnlyLabel}>Expiry Date</Text>
+                  <Text style={styles.readOnlyLabel}>{t("driverCreate.expiryDateLabel")}</Text>
                   <TextInput
                     style={styles.readOnlyInput}
                     value={licenseResult.expiryDate || ""}
                     editable={false}
                   />
 
-                  <Text style={styles.readOnlyLabel}>Categories</Text>
+                  <Text style={styles.readOnlyLabel}>{t("driverCreate.categoriesLabel")}</Text>
                   <TextInput
                     style={styles.readOnlyInput}
                     value={licenseResult.licenseCategories.join(", ")}
@@ -294,7 +306,7 @@ export default function VerifyLicenseScreen() {
             ) : null}
           </View>
 
-          <Text style={styles.label}>Languages you speak</Text>
+          <Text style={styles.label}>{t("driverCreate.languagesYouSpeak")}</Text>
           <View style={styles.languageRow}>
             {SPOKEN_LANGUAGE_OPTIONS.map((lang) => {
               const active = spokenLanguages.includes(lang);
@@ -314,7 +326,7 @@ export default function VerifyLicenseScreen() {
                       active && styles.languageTextActive,
                     ]}
                   >
-                    {lang}
+                    {SPOKEN_LANGUAGE_DISPLAY[lang] || lang}
                   </Text>
                 </Pressable>
               );
@@ -332,7 +344,7 @@ export default function VerifyLicenseScreen() {
             {submitting ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.verifyText}>Verify & Continue</Text>
+              <Text style={styles.verifyText}>{t("driverCreate.verifyAndContinue")}</Text>
             )}
           </Pressable>
         </View>

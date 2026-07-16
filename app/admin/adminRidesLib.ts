@@ -17,6 +17,7 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../../firebase";
+import i18n from "../i18n";
 import { collectionFor, notify } from "../booking/work-errand/workErrandLib";
 import { writeAuditLog } from "./adminAuditLib";
 import { AdminRideRow, RideStatus } from "./adminTypes";
@@ -47,7 +48,7 @@ const normalizeDriverRoute = (id: string, data: Record<string, any>): AdminRideR
     source: "driverRoutes",
     category,
     driverId: data.driverId || "",
-    driverName: data.driverName || "Driver",
+    driverName: data.driverName || i18n.t("common.driver"),
     from: data.from || "",
     to: data.to || "",
     title: data.schoolName || "",
@@ -73,10 +74,10 @@ const normalizeWorkJob = (id: string, data: Record<string, any>): AdminRideRow =
     source: "workJobs",
     category: "work",
     driverId: data.employerId || "",
-    driverName: data.employerName || "Employer",
+    driverName: data.employerName || i18n.t("common.employer"),
     from: data.location || "",
     to: "",
-    title: data.jobTitle || "Work Job",
+    title: data.jobTitle || i18n.t("admin.workJobFallbackTitle"),
     date,
     time: data.startTime || "",
     price: typeof data.hourlyPay === "number" ? data.hourlyPay : null,
@@ -97,10 +98,10 @@ const normalizeErrandJob = (id: string, data: Record<string, any>): AdminRideRow
     source: "errandJobs",
     category: "errand",
     driverId: data.ownerId || "",
-    driverName: data.ownerName || "Person",
+    driverName: data.ownerName || i18n.t("common.person"),
     from: data.location || "",
     to: "",
-    title: data.errandTitle || "Errand",
+    title: data.errandTitle || i18n.t("admin.errandFallbackTitle"),
     date,
     time: data.startTime || "",
     price: typeof data.price === "number" ? data.price : null,
@@ -316,7 +317,7 @@ export const getConnectedBookings = async (
       const data = d.data();
       return {
         id: d.id,
-        personName: data.passengerName || "Passenger",
+        personName: data.passengerName || i18n.t("common.passenger"),
         status: data.status || "",
         createdAtSeconds: toSeconds(data.createdAt),
       };
@@ -334,7 +335,7 @@ export const getConnectedBookings = async (
     const data = d.data();
     return {
       id: d.id,
-      personName: data.applicantName || data.passengerName || "Applicant",
+      personName: data.applicantName || data.passengerName || i18n.t("common.applicant"),
       status: data.status || "",
       createdAtSeconds: toSeconds(data.createdAt),
     };

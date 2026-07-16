@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
@@ -46,6 +47,7 @@ type Props = {
 };
 
 export default function RideForm({ category, showPets, onBack }: Props) {
+  const { t } = useTranslation();
   const { driverName, phone, driverAge, languages } = useDriverAccount();
 
   const canRepeat = category === "school" || category === "personal";
@@ -113,7 +115,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
     const user = auth.currentUser;
 
     if (!user) {
-      Alert.alert("Login required", "Please login first.");
+      Alert.alert(t("auth.loginRequiredTitle"), t("auth.pleaseLoginFirst"));
       router.replace("/");
       return;
     }
@@ -122,8 +124,8 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
     if (!eligibility.eligible) {
       Alert.alert(
-        "Verification required",
-        "You must verify a valid driving license before creating a driver trip.",
+        t("driver.verificationRequired"),
+        t("driver.mustVerifyLicense"),
       );
       return;
     }
@@ -134,8 +136,8 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
     if (languages.length === 0) {
       Alert.alert(
-        "Missing language",
-        "Your language is missing from your account profile.",
+        t("driver.missingLanguageTitle"),
+        t("driver.missingLanguageMessage"),
       );
       return;
     }
@@ -151,25 +153,25 @@ export default function RideForm({ category, showPets, onBack }: Props) {
       (category === "school" && !schoolName.trim()) ||
       (!recurring && (!tripDate || !price || !time || !seats))
     ) {
-      Alert.alert("Missing details", "Please fill in all fields.");
+      Alert.alert(t("auth.missingDetails"), t("validation.fillAllFields"));
       return;
     }
 
     if (!isValidCarPlate(carPlate)) {
       Alert.alert(
-        "Invalid vehicle number",
-        "Vehicle number must contain between 7 and 9 digits.",
+        t("validation.invalidVehicleNumberTitle"),
+        t("validation.invalidVehicleNumber"),
       );
       return;
     }
 
     if (!fromLocation) {
-      setFromError("Please select a location from the list.");
+      setFromError(t("validation.selectLocationFromList"));
       return;
     }
 
     if (!toLocation) {
-      setToError("Please select a location from the list.");
+      setToError(t("validation.selectLocationFromList"));
       return;
     }
 
@@ -198,8 +200,8 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
       if (!cleanedDate) {
         Alert.alert(
-          "Invalid date",
-          "Travel date must be today or a future date.",
+          t("validation.invalidDateTitle"),
+          t("validation.invalidDateFuture"),
         );
         return;
       }
@@ -208,8 +210,8 @@ export default function RideForm({ category, showPets, onBack }: Props) {
       tripDay = getDayFromDateText(cleanTripDate);
 
       const validation = validateDateAndTimeNotPassed(tripDate, time, {
-        dateLabel: "travel date",
-        timeLabel: "departure time",
+        dateLabelKey: "driverCreate.travelDate",
+        timeLabelKey: "driverCreate.departureTime",
       });
 
       if (!validation) return;
@@ -218,14 +220,14 @@ export default function RideForm({ category, showPets, onBack }: Props) {
       cleanSeats = Number(seats);
 
       if (Number.isNaN(cleanSeats) || cleanSeats < 1 || cleanSeats > 8) {
-        Alert.alert("Invalid seats", "Seats must be between 1 and 8.");
+        Alert.alert(t("validation.invalidSeatsTitle"), t("validation.invalidSeats"));
         return;
       }
 
       cleanPrice = Number(price);
 
       if (Number.isNaN(cleanPrice) || cleanPrice <= 0) {
-        Alert.alert("Invalid price", "Price must be more than 0.");
+        Alert.alert(t("validation.invalidPriceTitle"), t("validation.invalidPrice"));
         return;
       }
     }
@@ -320,11 +322,11 @@ export default function RideForm({ category, showPets, onBack }: Props) {
         createdAt: serverTimestamp(),
       });
 
-      Alert.alert("Success", "Your trip was created successfully.");
+      Alert.alert(t("common.success"), t("driver.tripCreated"));
       router.replace("/(tabs)/home" as any);
     } catch (error: any) {
       console.log("CREATE RIDE ERROR:", error);
-      Alert.alert("Error", error.message || "Could not create trip.");
+      Alert.alert(t("common.error"), error.message || t("driver.couldNotCreateTrip"));
     } finally {
       setLoading(false);
     }
@@ -344,41 +346,39 @@ export default function RideForm({ category, showPets, onBack }: Props) {
         </Pressable>
 
         <View style={styles.card}>
-          <Text style={styles.title}>Create a New Trip</Text>
-          <Text style={styles.subtitle}>
-            Set your car, destination, date, time, price, and available seats
-          </Text>
+          <Text style={styles.title}>{t("driverCreate.newTripTitle")}</Text>
+          <Text style={styles.subtitle}>{t("driverCreate.newTripSubtitle")}</Text>
 
-          <Text style={styles.label}>Car Model</Text>
+          <Text style={styles.label}>{t("driverCreate.carModel")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="car-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter your car model"
+              placeholder={t("driverCreate.enterCarModel")}
               placeholderTextColor="#8B7B6B"
               value={car}
               onChangeText={setCar}
             />
           </View>
 
-          <Text style={styles.label}>Car Color</Text>
+          <Text style={styles.label}>{t("driverCreate.carColor")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter your car color"
+              placeholder={t("driverCreate.enterCarColor")}
               placeholderTextColor="#8B7B6B"
               value={carColor}
               onChangeText={setCarColor}
             />
           </View>
 
-          <Text style={styles.label}>Car Plate Number</Text>
+          <Text style={styles.label}>{t("driverCreate.carPlateNumber")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter your car plate number"
+              placeholder={t("driverCreate.enterCarPlateNumber")}
               placeholderTextColor="#8B7B6B"
               keyboardType="number-pad"
               value={carPlate}
@@ -388,44 +388,44 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
           {showPets && (
             <YesNoField
-              label="Allows pets?"
+              label={t("driverCreate.allowsPets")}
               value={allowsPets}
               onValueChange={setAllowsPets}
             />
           )}
 
           <IsraelLocationAutocomplete
-            label="From"
+            label={t("booking.from")}
             value={from}
             onChangeText={handleFromChange}
             onSelectLocation={(location) => {
               setFromLocation(location);
               setFromError("");
             }}
-            placeholder="Enter departure city"
+            placeholder={t("booking.enterDepartureCity")}
             error={fromError}
           />
 
           <IsraelLocationAutocomplete
-            label="To"
+            label={t("booking.to")}
             value={to}
             onChangeText={handleToChange}
             onSelectLocation={(location) => {
               setToLocation(location);
               setToError("");
             }}
-            placeholder="Enter destination city"
+            placeholder={t("booking.enterDestinationCity")}
             error={toError}
           />
 
           {category === "school" ? (
             <>
-              <Text style={styles.label}>School Name</Text>
+              <Text style={styles.label}>{t("driverCreate.schoolName")}</Text>
               <View style={styles.inputRow}>
                 <Ionicons name="school-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Enter the school or university name"
+                  placeholder={t("driverCreate.enterSchoolName")}
                   placeholderTextColor="#8B7B6B"
                   value={schoolName}
                   onChangeText={setSchoolName}
@@ -436,12 +436,14 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
           {category === "personal" ? (
             <>
-              <Text style={styles.label}>Exact Destination (optional)</Text>
+              <Text style={styles.label}>
+                {t("driverCreate.exactDestinationOptional")}
+              </Text>
               <View style={styles.inputRow}>
                 <Ionicons name="flag-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Enter the exact building, university, or landmark"
+                  placeholder={t("driverCreate.enterExactDestination")}
                   placeholderTextColor="#8B7B6B"
                   value={destinationDetails}
                   onChangeText={setDestinationDetails}
@@ -452,7 +454,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
           {canRepeat && (
             <YesNoField
-              label="Repeat on multiple days?"
+              label={t("driverCreate.repeatMultipleDays")}
               value={isRecurring}
               onValueChange={toggleRecurring}
             />
@@ -461,7 +463,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
           {!(canRepeat && isRecurring) ? (
             <>
               <DateInput
-                label="Travel Date"
+                label={t("driverCreate.travelDate")}
                 value={tripDate}
                 onChange={setTripDate}
                 showPicker={showTripDatePicker}
@@ -469,7 +471,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
               />
 
               <TimeInput
-                label="Departure Time"
+                label={t("driverCreate.departureTime")}
                 value={time}
                 onChange={setTime}
                 showPicker={showTimePicker}
@@ -479,12 +481,12 @@ export default function RideForm({ category, showPets, onBack }: Props) {
 
               <View style={styles.twoColumns}>
                 <View style={styles.column}>
-                  <Text style={styles.label}>Price (₪)</Text>
+                  <Text style={styles.label}>{t("booking.price")}</Text>
                   <View style={styles.inputRow}>
                     <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
                     <TextInput
                       style={styles.rowInput}
-                      placeholder="Enter price"
+                      placeholder={t("booking.enterPrice")}
                       placeholderTextColor="#8B7B6B"
                       keyboardType="numeric"
                       value={price}
@@ -494,12 +496,12 @@ export default function RideForm({ category, showPets, onBack }: Props) {
                 </View>
 
                 <View style={styles.column}>
-                  <Text style={styles.label}>Available Seats</Text>
+                  <Text style={styles.label}>{t("driverCreate.availableSeats")}</Text>
                   <View style={styles.inputRow}>
                     <Ionicons name="people-outline" size={18} color="#8B7B6B" />
                     <TextInput
                       style={styles.rowInput}
-                      placeholder="Enter available seats"
+                      placeholder={t("driverCreate.enterAvailableSeats")}
                       placeholderTextColor="#8B7B6B"
                       keyboardType="numeric"
                       maxLength={1}
@@ -530,7 +532,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             disabled={loading}
           >
             <Text style={styles.submitText}>
-              {loading ? "Creating..." : "Create Trip"}
+              {loading ? t("driverCreate.creating") : t("driverCreate.createTrip")}
             </Text>
           </Pressable>
         </View>

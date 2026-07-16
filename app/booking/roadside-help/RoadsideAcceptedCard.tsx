@@ -23,7 +23,9 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
+import { translateProblemTypesList } from "../../i18n/formatters";
 import {
   buildDirectionsUrl,
   finishRoadsideHelp,
@@ -41,6 +43,7 @@ type Props = {
 };
 
 export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
 
   const isOnTheWay = request.status === "driver_on_the_way";
@@ -51,12 +54,17 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
   const showActionButtons = !isCompletedUnpaid && !isPaid;
 
   const badgeLabel = isPaid
-    ? "Completed"
+    ? t("roadsideHelp.badgeCompleted")
     : isCompletedUnpaid
-      ? "Completed"
+      ? t("roadsideHelp.badgeCompleted")
       : isOnTheWay
-        ? "On the way"
-        : "Accepted";
+        ? t("roadsideHelp.badgeOnTheWay")
+        : t("roadsideHelp.badgeAccepted");
+
+  const displayServiceType =
+    request.problemTypes.length > 0
+      ? translateProblemTypesList(request.problemTypes, t)
+      : request.serviceType || t("rideCategory.categories.help.title");
 
   const badgeStyle =
     isPaid || isCompletedUnpaid
@@ -67,7 +75,7 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
 
   const handleGoHelp = async () => {
     if (typeof request.latitude !== "number" || typeof request.longitude !== "number") {
-      Alert.alert("No location", "This request has no saved location.");
+      Alert.alert(t("roadsideHelp.noLocationTitle"), t("roadsideHelp.noLocationMessage"));
       return;
     }
 
@@ -78,7 +86,7 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
     );
 
     Linking.openURL(url).catch(() =>
-      Alert.alert("Error", "Could not open maps."),
+      Alert.alert(t("common.error"), t("roadsideHelp.couldNotOpenMaps")),
     );
 
     if (request.status === "accepted") {
@@ -91,25 +99,25 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
 
   const handleFinish = () => {
     if (!request.bookingId) {
-      Alert.alert("Error", "This request has no linked booking yet.");
+      Alert.alert(t("common.error"), t("roadsideHelp.noLinkedBookingMessage"));
       return;
     }
 
     Alert.alert(
-      "Finished Help",
-      "Are you sure the Roadside Help service is finished?",
+      t("roadsideHelp.finishedHelpTitle"),
+      t("roadsideHelp.finishedHelpConfirm"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "Yes, finished",
+          text: t("roadsideHelp.yesFinished"),
           onPress: async () => {
             try {
               setBusy(true);
               await finishRoadsideHelp(request.bookingId);
             } catch (error: any) {
               Alert.alert(
-                "Error",
-                error?.message || "Could not finish this help.",
+                t("common.error"),
+                error?.message || t("roadsideHelp.couldNotFinishHelp"),
               );
             } finally {
               setBusy(false);
@@ -123,7 +131,7 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
   const callPassenger = () => {
     if (!request.passengerPhone) return;
     Linking.openURL(`tel:${request.passengerPhone}`).catch(() =>
-      Alert.alert("Error", "Could not start the call."),
+      Alert.alert(t("common.error"), t("roadsideHelp.couldNotStartCall")),
     );
   };
 
@@ -141,8 +149,8 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
         </View>
 
         <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Passenger accepted your offer</Text>
-          <Text style={styles.subtitle}>{request.serviceType}</Text>
+          <Text style={styles.title}>{t("roadsideHelp.passengerAcceptedOffer")}</Text>
+          <Text style={styles.subtitle}>{displayServiceType}</Text>
         </View>
 
         <View style={styles.headerActions}>
@@ -201,14 +209,16 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
         <View style={[styles.statusBanner, styles.statusBannerGreen]}>
           <Ionicons name="checkmark-done-circle" size={18} color="#16A34A" />
           <Text style={[styles.statusBannerText, styles.statusBannerTextGreen]}>
-            Payment received — {request.paidAmount ?? request.agreedPrice ?? 0} ₪
+            {t("roadsideHelp.paymentReceivedAmount", {
+              amount: request.paidAmount ?? request.agreedPrice ?? 0,
+            })}
           </Text>
         </View>
       ) : isCompletedUnpaid ? (
         <View style={styles.statusBanner}>
           <Ionicons name="time-outline" size={18} color="#B86115" />
           <Text style={styles.statusBannerText}>
-            Waiting for passenger payment
+            {t("roadsideHelp.waitingForPassengerPayment")}
           </Text>
         </View>
       ) : (
@@ -216,7 +226,7 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
           <Pressable style={styles.primaryButtonFull} onPress={handleGoHelp}>
             <Ionicons name="navigate" size={18} color="#FFFFFF" />
             <Text style={styles.primaryText}>
-              {isOnTheWay ? "Open Navigation" : "Go help passenger"}
+              {isOnTheWay ? t("roadsideHelp.openNavigation") : t("roadsideHelp.goHelpPassenger")}
             </Text>
           </Pressable>
 
@@ -230,7 +240,7 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
             ) : (
               <>
                 <Ionicons name="checkmark-done" size={18} color="#166534" />
-                <Text style={styles.finishButtonText}>Finished Help</Text>
+                <Text style={styles.finishButtonText}>{t("roadsideHelp.finishedHelpButton")}</Text>
               </>
             )}
           </Pressable>

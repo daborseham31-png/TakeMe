@@ -1,7 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
+import { translateStoredDayName } from "../../i18n/formatters";
 import {
   DAY_KEY_LABEL,
   getAllowedWeeklyDateRange,
@@ -39,6 +41,7 @@ export default function WeeklyDaysCard({
   defaultTime,
   mode,
 }: Props) {
+  const { t } = useTranslation();
   const [openDatePickerId, setOpenDatePickerId] = useState<string | null>(null);
   const [openTimePickerId, setOpenTimePickerId] = useState<string | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<WeekChoice>("current");
@@ -101,16 +104,16 @@ export default function WeeklyDaysCard({
 
     if (duplicate) {
       Alert.alert(
-        "Already added",
-        "You already added this day. Please choose a different date.",
+        t("rides.alreadyAddedTitle"),
+        t("rides.alreadyAddedMessage"),
       );
       return;
     }
 
     if (value && !isDateInAllowedWeek(value, selectedWeek)) {
       Alert.alert(
-        "Booking unavailable",
-        "Booking for this week is not available yet.",
+        t("rides.bookingUnavailableTitle"),
+        t("rides.bookingUnavailableMessage"),
       );
       return;
     }
@@ -127,16 +130,13 @@ export default function WeeklyDaysCard({
   return (
     <View style={styles.container}>
       <Text style={sharedStyles.label}>
-        {mode === "driver" ? "Weekly Trip Days" : "Choose Days"}
+        {mode === "driver" ? t("rides.weeklyTripDays") : t("rides.chooseDaysLabel")}
       </Text>
-      <Text style={styles.hint}>
-        Weekly booking covers one Sunday-to-Saturday week at a time. Past days
-        can&apos;t be selected.
-      </Text>
+      <Text style={styles.hint}>{t("rides.weeklyHintRange")}</Text>
       <Text style={styles.hint}>
         {nextWeekOpen
-          ? "Next week booking is now available."
-          : "Next week booking opens Saturday at 07:00."}
+          ? t("rides.nextWeekAvailable")
+          : t("rides.nextWeekOpensSaturday")}
       </Text>
 
       {nextWeekOpen ? (
@@ -154,7 +154,7 @@ export default function WeeklyDaysCard({
                 selectedWeek === "current" && styles.weekToggleTextActive,
               ]}
             >
-              This week
+              {t("rides.thisWeek")}
             </Text>
           </Pressable>
 
@@ -171,7 +171,7 @@ export default function WeeklyDaysCard({
                 selectedWeek === "next" && styles.weekToggleTextActive,
               ]}
             >
-              Next week
+              {t("rides.nextWeek")}
             </Text>
           </Pressable>
         </View>
@@ -181,21 +181,24 @@ export default function WeeklyDaysCard({
         <View style={styles.emptyBox}>
           <Ionicons name="calendar-outline" size={22} color="#8B7B6B" />
           <Text style={styles.emptyText}>
-            Add the days you want{mode === "driver" ? " to offer" : ""} this
-            week.
+            {mode === "driver"
+              ? t("rides.addDaysHintDriver")
+              : t("rides.addDaysHintPassenger")}
           </Text>
         </View>
       ) : null}
 
       {rows.map((row, index) => {
         const dayKey = row.date ? getDayKeyFromDate(row.date) : "";
-        const dayLabel = dayKey ? DAY_KEY_LABEL[dayKey] : "";
+        const dayLabel = dayKey
+          ? translateStoredDayName(DAY_KEY_LABEL[dayKey], t)
+          : "";
 
         return (
           <View key={row.id} style={styles.rowCard}>
             <View style={styles.rowHeader}>
               <Text style={styles.rowTitle}>
-                Day {index + 1}
+                {t("rides.dayNumber", { number: index + 1 })}
                 {dayLabel ? ` — ${dayLabel}` : ""}
               </Text>
 
@@ -209,7 +212,7 @@ export default function WeeklyDaysCard({
             </View>
 
             <DateInput
-              label="Date"
+              label={t("booking.date")}
               value={row.date}
               onChange={(value) => handleDateChange(row.id, value)}
               showPicker={openDatePickerId === row.id}
@@ -223,7 +226,7 @@ export default function WeeklyDaysCard({
             <View style={sharedStyles.twoColumns}>
               <View style={sharedStyles.column}>
                 <TimeInput
-                  label="Time"
+                  label={t("booking.time")}
                   value={row.time}
                   onChange={(value) => updateRow(row.id, { time: value })}
                   showPicker={openTimePickerId === row.id}
@@ -235,7 +238,7 @@ export default function WeeklyDaysCard({
               </View>
 
               <View style={sharedStyles.column}>
-                <Text style={sharedStyles.label}>Seats</Text>
+                <Text style={sharedStyles.label}>{t("booking.seats")}</Text>
 
                 <View style={sharedStyles.weeklySeatsRow}>
                   <Pressable
@@ -261,12 +264,12 @@ export default function WeeklyDaysCard({
 
             {mode === "driver" ? (
               <>
-                <Text style={sharedStyles.label}>Price (₪)</Text>
+                <Text style={sharedStyles.label}>{t("booking.price")}</Text>
                 <View style={sharedStyles.inputRow}>
                   <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
                   <TextInput
                     style={sharedStyles.rowInput}
-                    placeholder="Enter price"
+                    placeholder={t("booking.enterPrice")}
                     placeholderTextColor="#8B7B6B"
                     keyboardType="numeric"
                     value={row.price}
@@ -287,7 +290,7 @@ export default function WeeklyDaysCard({
         disabled={rows.length >= 7}
       >
         <Ionicons name="add-circle-outline" size={18} color="#F58220" />
-        <Text style={styles.addButtonText}>Add another day</Text>
+        <Text style={styles.addButtonText}>{t("rides.addAnotherDay")}</Text>
       </Pressable>
     </View>
   );

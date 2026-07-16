@@ -20,6 +20,8 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "react-i18next";
+
 import { auth, db } from "../firebase";
 import {
   ChatUser,
@@ -28,6 +30,7 @@ import {
   openConversation,
   searchUsers,
 } from "./chat/chatLib";
+import { useLanguage } from "./i18n/LanguageProvider";
 
 type Conversation = {
   id: string;
@@ -60,6 +63,8 @@ const formatTime = (seconds: number) => {
 };
 
 export default function MessagesScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,7 +107,7 @@ export default function MessagesScreen() {
               lastMessageAtSeconds: data.lastMessageAt?.seconds || 0,
               unread: data.unreadCount?.[uid] || 0,
               otherId,
-              otherName: names[otherId] || "User",
+              otherName: names[otherId] || t("common.user"),
               hidden: hiddenFor.includes(uid),
             };
           })
@@ -116,6 +121,7 @@ export default function MessagesScreen() {
     );
 
     return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
   // Debounced-ish user search on every change.
@@ -152,7 +158,7 @@ export default function MessagesScreen() {
         params: { id, otherId: other.id, otherName: other.name },
       } as any);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not open chat.");
+      Alert.alert(t("common.error"), error?.message || t("messages.couldNotOpenChat"));
     }
   };
 
@@ -163,10 +169,10 @@ export default function MessagesScreen() {
     } as any);
 
   const onHide = (c: Conversation) =>
-    Alert.alert("Delete chat", "Delete this conversation from your list?", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("messages.deleteChatTitle"), t("messages.deleteChatConfirm"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Delete",
+        text: t("common.delete"),
         style: "destructive",
         onPress: () => {
           setConversations((prev) => prev.filter((item) => item.id !== c.id));
@@ -179,12 +185,12 @@ export default function MessagesScreen() {
     if (conversations.length === 0 || clearingAll) return;
 
     Alert.alert(
-      "Clear all",
-      "Clear all messages from your list?",
+      t("roadsideHelp.clearAllTitle"),
+      t("messages.clearAllMessagesConfirm"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "Clear All",
+          text: t("roadsideHelp.clearAllButton"),
           style: "destructive",
           onPress: async () => {
             const ids = conversations.map((c) => c.id);
@@ -197,7 +203,7 @@ export default function MessagesScreen() {
             try {
               await clearAllConversations(ids);
             } catch (error: any) {
-              Alert.alert("Error", error?.message || "Could not clear all.");
+              Alert.alert(t("common.error"), error?.message || t("messages.couldNotClearAll"));
             } finally {
               setClearingAll(false);
             }
@@ -217,32 +223,32 @@ export default function MessagesScreen() {
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-          <Text style={styles.backText}>Back</Text>
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
+          <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
 
         <View style={styles.headerRow}>
           <View style={styles.header}>
             <Ionicons name="chatbubbles" size={26} color="#F58220" />
-            <Text style={styles.title}>Messages</Text>
+            <Text style={styles.title}>{t("messages.title")}</Text>
           </View>
 
           {conversations.length > 0 ? (
             <Pressable onPress={handleClearAll} disabled={clearingAll} hitSlop={8}>
               <Text style={styles.clearAllText}>
-                {clearingAll ? "Clearing..." : "Clear All"}
+                {clearingAll ? t("roadsideHelp.clearingButton") : t("roadsideHelp.clearAllButton")}
               </Text>
             </Pressable>
           ) : null}
         </View>
-        <Text style={styles.subtitle}>Chat with drivers and passengers</Text>
+        <Text style={styles.subtitle}>{t("messages.subtitle")}</Text>
 
         {/* Search users by name */}
         <View style={styles.searchRow}>
           <Ionicons name="search-outline" size={18} color="#8B7B6B" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search a person by name…"
+            placeholder={t("messages.searchPersonPlaceholder")}
             placeholderTextColor="#8B7B6B"
             value={search}
             onChangeText={setSearch}
@@ -261,7 +267,7 @@ export default function MessagesScreen() {
                 <ActivityIndicator color="#F58220" />
               </View>
             ) : results.length === 0 ? (
-              <Text style={styles.noResults}>No users found.</Text>
+              <Text style={styles.noResults}>{t("messages.noUsersFound")}</Text>
             ) : (
               results.map((u) => (
                 <Pressable
@@ -274,7 +280,13 @@ export default function MessagesScreen() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rowName}>{u.name}</Text>
-                    <Text style={styles.rowSub}>{u.role}</Text>
+                    <Text style={styles.rowSub}>
+                      {u.role === "driver"
+                        ? t("common.driver")
+                        : u.role === "passenger"
+                          ? t("common.passenger")
+                          : t("common.user")}
+                    </Text>
                   </View>
                   <Ionicons name="chatbubble-outline" size={20} color="#F58220" />
                 </Pressable>
@@ -290,9 +302,9 @@ export default function MessagesScreen() {
             <View style={styles.emptyIcon}>
               <Ionicons name="chatbubble-ellipses-outline" size={38} color="#8B7B6B" />
             </View>
-            <Text style={styles.emptyTitle}>No messages yet</Text>
+            <Text style={styles.emptyTitle}>{t("messages.noMessagesYet")}</Text>
             <Text style={styles.emptyText}>
-              Search a driver or passenger above to start a conversation.
+              {t("messages.noMessagesHint")}
             </Text>
           </View>
         ) : (
@@ -318,12 +330,12 @@ export default function MessagesScreen() {
                     </View>
                     <View style={styles.rowBottom}>
                       <Text style={styles.rowLast} numberOfLines={1}>
-                        {c.lastMessage || "Say hi 👋"}
+                        {c.lastMessage || t("messages.sayHiDefault")}
                       </Text>
                       {c.unread > 0 ? (
                         <View style={styles.unreadBadge}>
                           <Text style={styles.unreadText}>
-                            {c.unread > 99 ? "99+" : c.unread}
+                            {c.unread > 99 ? t("messages.unreadOverflow") : c.unread}
                           </Text>
                         </View>
                       ) : null}

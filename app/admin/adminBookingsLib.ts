@@ -18,6 +18,8 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../../firebase";
+import i18n from "../i18n";
+import { translateStatus } from "../i18n/formatters";
 import { notify } from "../booking/work-errand/workErrandLib";
 import { writeAuditLog } from "./adminAuditLib";
 import { AdminBookingRow } from "./adminTypes";
@@ -31,9 +33,9 @@ const normalizeBooking = (id: string, data: Record<string, any>): AdminBookingRo
   id,
   category: data.category || "",
   passengerId: data.passengerId || "",
-  passengerName: data.passengerName || "Passenger",
+  passengerName: data.passengerName || i18n.t("common.passenger"),
   driverId: data.driverId || "",
-  driverName: data.driverName || "Driver",
+  driverName: data.driverName || i18n.t("common.driver"),
   from: data.from || "",
   to: data.to || "",
   date: data.date || "",
@@ -67,13 +69,17 @@ export const cancelBooking = async (bookingId: string, reason: string): Promise<
   const bookingSnap = await getDoc(bookingRef);
 
   if (!bookingSnap.exists()) {
-    throw new Error("This booking no longer exists.");
+    throw new Error(i18n.t("admin.bookingNoLongerExists"));
   }
 
   const data = bookingSnap.data();
 
   if (NON_CANCELLABLE_STATUSES.includes(data.status)) {
-    throw new Error(`A ${data.status} booking cannot be cancelled.`);
+    throw new Error(
+      i18n.t("admin.bookingStatusCannotBeCancelled", {
+        status: translateStatus(i18n.t, "bookings", data.status),
+      }),
+    );
   }
 
   await updateDoc(bookingRef, {

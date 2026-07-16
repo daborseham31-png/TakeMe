@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import {
   cancelRide,
@@ -16,10 +17,12 @@ import { adminColors, adminRadius, adminSpacing } from "../../adminTheme";
 import AdminScreen from "../../components/AdminScreen";
 import { LoadingState } from "../../components/AdminStates";
 import ConfirmModal from "../../components/ConfirmModal";
+import { translateCategoryLabel, translateStatus } from "../../../i18n/formatters";
 
 type PendingAction = "cancel" | "remove" | "restore" | null;
 
 export default function AdminRideDetailScreen() {
+  const { t } = useTranslation();
   const params = useLocalSearchParams();
   const source = String(params.source || "driverRoutes") as AdminRideRow["source"];
   const id = String(params.id || "");
@@ -66,9 +69,9 @@ export default function AdminRideDetailScreen() {
 
       setPendingAction(null);
       await load();
-      Alert.alert("Success", "The ride was updated.");
+      Alert.alert(t("admin.successTitle"), t("admin.rideUpdatedMessage"));
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not update this ride.");
+      Alert.alert(t("common.error"), error?.message || t("admin.couldNotUpdateRide"));
     } finally {
       setBusy(false);
     }
@@ -76,49 +79,53 @@ export default function AdminRideDetailScreen() {
 
   if (loading) {
     return (
-      <AdminScreen title="Ride Details">
-        <LoadingState label="Loading ride..." />
+      <AdminScreen title={t("admin.rideDetailsTitle")}>
+        <LoadingState label={t("admin.loadingRideLabel")} />
       </AdminScreen>
     );
   }
 
   if (!ride) {
     return (
-      <AdminScreen title="Ride Details">
+      <AdminScreen title={t("admin.rideDetailsTitle")}>
         <View style={styles.center}>
-          <Text style={styles.notFoundText}>This ride could not be found.</Text>
+          <Text style={styles.notFoundText}>{t("admin.rideNotFound")}</Text>
         </View>
       </AdminScreen>
     );
   }
 
   return (
-    <AdminScreen title="Ride Details">
+    <AdminScreen title={t("admin.rideDetailsTitle")}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.headerCard}>
           <View style={styles.pill}>
-            <Text style={styles.pillText}>{ride.category}</Text>
+            <Text style={styles.pillText}>{translateCategoryLabel(ride.category, ride.category, t)}</Text>
           </View>
           <Text style={styles.title}>
             {ride.title || `${ride.from} → ${ride.to}`}
           </Text>
-          <Text style={styles.status}>Status: {ride.status}</Text>
+          <Text style={styles.status}>
+            {t("admin.statusColonValue", {
+              status: t(`admin.rideStatusLabel.${ride.status}`, { defaultValue: ride.status }),
+            })}
+          </Text>
         </View>
 
         <View style={styles.section}>
-          <Row icon="person-outline" label="Driver" value={ride.driverName} />
-          {ride.from ? <Row icon="navigate-outline" label="From" value={ride.from} /> : null}
-          {ride.to ? <Row icon="flag-outline" label="To" value={ride.to} /> : null}
-          <Row icon="calendar-outline" label="Date" value={ride.date || "—"} />
-          <Row icon="time-outline" label="Time" value={ride.time || "—"} />
+          <Row icon="person-outline" label={t("admin.driverLabel")} value={ride.driverName} />
+          {ride.from ? <Row icon="navigate-outline" label={t("admin.fromLabel")} value={ride.from} /> : null}
+          {ride.to ? <Row icon="flag-outline" label={t("admin.toLabel")} value={ride.to} /> : null}
+          <Row icon="calendar-outline" label={t("admin.dateLabel")} value={ride.date || "—"} />
+          <Row icon="time-outline" label={t("admin.timeLabel")} value={ride.time || "—"} />
           <Row
             icon="cash-outline"
-            label="Price"
+            label={t("admin.priceLabel")}
             value={ride.price !== null ? `₪${ride.price}` : "—"}
           />
           <Row
             icon="people-outline"
-            label="Seats"
+            label={t("admin.seatsLabel")}
             value={
               ride.seats !== null
                 ? `${ride.seats}${ride.totalSeats !== null ? ` / ${ride.totalSeats}` : ""}`
@@ -129,17 +136,17 @@ export default function AdminRideDetailScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            Connected bookings ({bookings.length})
+            {t("admin.connectedBookingsCount", { count: bookings.length })}
           </Text>
 
           {bookings.length === 0 ? (
-            <Text style={styles.emptyConnected}>No one has booked this yet.</Text>
+            <Text style={styles.emptyConnected}>{t("admin.noOneBookedYet")}</Text>
           ) : (
             bookings.map((booking) => (
               <View key={booking.id} style={styles.bookingRow}>
                 <Ionicons name="person-circle-outline" size={18} color={adminColors.textMuted} />
                 <Text style={styles.bookingName}>{booking.personName}</Text>
-                <Text style={styles.bookingStatus}>{booking.status}</Text>
+                <Text style={styles.bookingStatus}>{translateStatus(t, "bookings", booking.status) || booking.status}</Text>
               </View>
             ))
           )}
@@ -149,7 +156,7 @@ export default function AdminRideDetailScreen() {
           {ride.status !== "cancelled" ? (
             <ActionButton
               icon="close-circle-outline"
-              label="Cancel ride"
+              label={t("admin.cancelRide")}
               tone="danger"
               onPress={() => setPendingAction("cancel")}
             />
@@ -158,14 +165,14 @@ export default function AdminRideDetailScreen() {
           {!ride.removed ? (
             <ActionButton
               icon="trash-outline"
-              label="Remove inappropriate ride"
+              label={t("admin.removeInappropriateRide")}
               tone="danger"
               onPress={() => setPendingAction("remove")}
             />
           ) : (
             <ActionButton
               icon="refresh-outline"
-              label="Restore ride"
+              label={t("admin.restoreRide")}
               tone="success"
               onPress={() => setPendingAction("restore")}
             />
@@ -177,19 +184,19 @@ export default function AdminRideDetailScreen() {
         visible={!!pendingAction}
         title={
           pendingAction === "cancel"
-            ? "Cancel this ride?"
+            ? t("admin.cancelThisRideQ")
             : pendingAction === "remove"
-              ? "Remove this ride?"
-              : "Restore this ride?"
+              ? t("admin.removeThisRideQ")
+              : t("admin.restoreThisRideQ")
         }
         message={
           pendingAction === "cancel"
-            ? "The driver and every affected passenger/applicant will be notified."
+            ? t("admin.cancelRideNotifyMessage")
             : pendingAction === "remove"
-              ? "This hides the listing from everyone. You can restore it later."
-              : "This makes the listing visible and bookable again."
+              ? t("admin.removeRideHidesMessage")
+              : t("admin.restoreRideVisibleMessage")
         }
-        confirmLabel={pendingAction === "restore" ? "Restore" : "Confirm"}
+        confirmLabel={pendingAction === "restore" ? t("admin.restoreButton") : t("admin.confirmButton")}
         destructive={pendingAction !== "restore"}
         requireReason={pendingAction === "cancel" || pendingAction === "remove"}
         busy={busy}

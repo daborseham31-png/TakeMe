@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { styles } from "./driverHelpers";
 
@@ -10,6 +11,8 @@ type Props = {
 };
 
 export default function YesNoField({ label, value, onValueChange }: Props) {
+  const { t } = useTranslation();
+
   return (
     <>
       <Text style={styles.label}>{label}</Text>
@@ -20,7 +23,7 @@ export default function YesNoField({ label, value, onValueChange }: Props) {
           onPress={() => onValueChange(true)}
         >
           <Text style={[styles.optionText, value && styles.optionTextActive]}>
-            Yes
+            {t("common.yes")}
           </Text>
         </Pressable>
 
@@ -29,7 +32,7 @@ export default function YesNoField({ label, value, onValueChange }: Props) {
           onPress={() => onValueChange(false)}
         >
           <Text style={[styles.optionText, !value && styles.optionTextActive]}>
-            No
+            {t("common.no")}
           </Text>
         </Pressable>
       </View>

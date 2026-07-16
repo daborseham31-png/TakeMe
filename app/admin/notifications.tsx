@@ -1,5 +1,5 @@
 import { collection, getDocs, query, where } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,6 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { sendAdminNotification } from "./adminNotificationsLib";
@@ -22,12 +23,12 @@ import AdminScreen from "./components/AdminScreen";
 import SearchBar from "./components/SearchBar";
 import { useAdminCollection } from "./useAdminCollection";
 
-const AUDIENCE_OPTIONS: { key: NotificationAudience; label: string }[] = [
-  { key: "single_user", label: "One passenger" },
-  { key: "single_driver", label: "One driver" },
-  { key: "all_passengers", label: "All passengers" },
-  { key: "all_drivers", label: "All drivers" },
-  { key: "all_users", label: "Everyone" },
+const AUDIENCE_OPTION_KEYS: { key: NotificationAudience; labelKey: string }[] = [
+  { key: "single_user", labelKey: "admin.audienceOnePassenger" },
+  { key: "single_driver", labelKey: "admin.audienceOneDriver" },
+  { key: "all_passengers", labelKey: "admin.audienceAllPassengers" },
+  { key: "all_drivers", labelKey: "admin.audienceAllDrivers" },
+  { key: "all_users", labelKey: "admin.audienceEveryone" },
 ];
 
 type SentNotification = {
@@ -39,6 +40,11 @@ type SentNotification = {
 };
 
 export default function AdminNotificationsScreen() {
+  const { t } = useTranslation();
+  const audienceOptions = useMemo(
+    () => AUDIENCE_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
+    [t],
+  );
   const [audience, setAudience] = useState<NotificationAudience>("all_users");
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
@@ -99,7 +105,7 @@ export default function AdminNotificationsScreen() {
     if (sending) return;
 
     if (needsUserPicker && !selectedUser) {
-      Alert.alert("Choose a recipient", "Please select who this notification is for.");
+      Alert.alert(t("admin.chooseRecipientTitle"), t("admin.selectWhoForMessage"));
       return;
     }
 
@@ -117,16 +123,19 @@ export default function AdminNotificationsScreen() {
       setSelectedUser(null);
       await loadSent();
 
-      Alert.alert("Sent", `Notification delivered to ${count} recipient${count === 1 ? "" : "s"}.`);
+      Alert.alert(
+        t("admin.sentTitle"),
+        t("admin.notificationDeliveredMessage", { count }),
+      );
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not send this notification.");
+      Alert.alert(t("common.error"), error?.message || t("admin.couldNotSendNotification"));
     } finally {
       setSending(false);
     }
   };
 
   return (
-    <AdminScreen title="Notifications" activeKey="notifications">
+    <AdminScreen title={t("admin.notifications")} activeKey="notifications">
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -138,9 +147,9 @@ export default function AdminNotificationsScreen() {
           contentContainerStyle={styles.scroll}
           ListHeaderComponent={
             <View>
-              <Text style={styles.label}>Send to</Text>
+              <Text style={styles.label}>{t("admin.sendToLabel")}</Text>
               <View style={styles.audienceRow}>
-                {AUDIENCE_OPTIONS.map((option) => (
+                {audienceOptions.map((option) => (
                   <Pressable
                     key={option.key}
                     style={[
@@ -166,7 +175,7 @@ export default function AdminNotificationsScreen() {
 
               {needsUserPicker ? (
                 <View style={styles.pickerBox}>
-                  <SearchBar value={search} onChangeText={setSearch} placeholder="Search recipient" />
+                  <SearchBar value={search} onChangeText={setSearch} placeholder={t("admin.searchRecipientPlaceholder")} />
                   <View style={styles.pickerList}>
                     {pickerUsers.slice(0, 6).map((user) => (
                       <Pressable
@@ -183,26 +192,26 @@ export default function AdminNotificationsScreen() {
                     ))}
                   </View>
                   {selectedUser ? (
-                    <Text style={styles.selectedText}>Selected: {selectedUser.name}</Text>
+                    <Text style={styles.selectedText}>{t("admin.selectedLabel", { name: selectedUser.name })}</Text>
                   ) : null}
                 </View>
               ) : null}
 
-              <Text style={styles.label}>Title</Text>
+              <Text style={styles.label}>{t("admin.titleLabel")}</Text>
               <TextInput
                 style={styles.input}
                 value={title}
                 onChangeText={setTitle}
-                placeholder="Notification title"
+                placeholder={t("admin.notificationTitlePlaceholder")}
                 placeholderTextColor={adminColors.placeholder}
               />
 
-              <Text style={styles.label}>Message</Text>
+              <Text style={styles.label}>{t("admin.messageLabel")}</Text>
               <TextInput
                 style={[styles.input, styles.messageInput]}
                 value={message}
                 onChangeText={setMessage}
-                placeholder="Notification message"
+                placeholder={t("admin.notificationMessagePlaceholder")}
                 placeholderTextColor={adminColors.placeholder}
                 multiline
               />
@@ -215,11 +224,11 @@ export default function AdminNotificationsScreen() {
                 {sending ? (
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.sendButtonText}>Send Notification</Text>
+                  <Text style={styles.sendButtonText}>{t("admin.sendNotificationButton")}</Text>
                 )}
               </Pressable>
 
-              <Text style={styles.sectionTitle}>Recently sent</Text>
+              <Text style={styles.sectionTitle}>{t("admin.recentlySentTitle")}</Text>
             </View>
           }
           renderItem={({ item }) => (
@@ -231,7 +240,7 @@ export default function AdminNotificationsScreen() {
             </View>
           )}
           ListEmptyComponent={
-            <Text style={styles.emptyText}>Notifications you send will show up here.</Text>
+            <Text style={styles.emptyText}>{t("admin.sentNotificationsEmptyHint")}</Text>
           }
         />
       </KeyboardAvoidingView>

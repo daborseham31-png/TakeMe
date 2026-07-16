@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
@@ -30,6 +31,7 @@ import {
 type Mode = "" | "person" | "store";
 
 export default function DeliveryScreen() {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<Mode>("");
 
   if (mode === "person") {
@@ -51,8 +53,8 @@ export default function DeliveryScreen() {
         </Pressable>
 
         <View style={styles.card}>
-          <Text style={styles.title}>Item Delivery</Text>
-          <Text style={styles.subtitle}>What would you like to offer?</Text>
+          <Text style={styles.title}>{t("driverCreate.itemDeliveryTitle")}</Text>
+          <Text style={styles.subtitle}>{t("driverCreate.whatToOffer")}</Text>
 
           <Pressable
             style={styles.licenseButton}
@@ -63,9 +65,11 @@ export default function DeliveryScreen() {
             </View>
 
             <View style={styles.column}>
-              <Text style={styles.licenseButtonText}>Deliver Item</Text>
+              <Text style={styles.licenseButtonText}>
+                {t("driverCreate.deliverItemTitle")}
+              </Text>
               <Text style={styles.subtitleSmall}>
-                Send an item from one person to another
+                {t("driverCreate.deliverItemDesc")}
               </Text>
             </View>
           </Pressable>
@@ -79,9 +83,11 @@ export default function DeliveryScreen() {
             </View>
 
             <View style={styles.column}>
-              <Text style={styles.licenseButtonText}>Store Delivery</Text>
+              <Text style={styles.licenseButtonText}>
+                {t("driverCreate.storeDeliveryTitle")}
+              </Text>
               <Text style={styles.subtitleSmall}>
-                Bring items from a store or supermarket
+                {t("driverCreate.storeDeliveryDesc")}
               </Text>
             </View>
           </Pressable>
@@ -92,6 +98,7 @@ export default function DeliveryScreen() {
 }
 
 function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
+  const { t } = useTranslation();
   const { driverName, phone, driverAge, languages } = useDriverAccount();
 
   const [loading, setLoading] = useState(false);
@@ -135,7 +142,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
     const user = auth.currentUser;
 
     if (!user) {
-      Alert.alert("Login required", "Please login first.");
+      Alert.alert(t("auth.loginRequiredTitle"), t("auth.pleaseLoginFirst"));
       router.replace("/");
       return;
     }
@@ -144,8 +151,8 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
 
     if (!eligibility.eligible) {
       Alert.alert(
-        "Verification required",
-        "You must verify a valid driving license before creating a driver trip.",
+        t("driver.verificationRequired"),
+        t("driver.mustVerifyLicense"),
       );
       return;
     }
@@ -156,8 +163,8 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
 
     if (languages.length === 0) {
       Alert.alert(
-        "Missing language",
-        "Your language is missing from your account profile.",
+        t("driver.missingLanguageTitle"),
+        t("driver.missingLanguageMessage"),
       );
       return;
     }
@@ -173,25 +180,25 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
       !recipientPhone ||
       !itemDescription
     ) {
-      Alert.alert("Missing details", "Please fill in all fields.");
+      Alert.alert(t("auth.missingDetails"), t("validation.fillAllFields"));
       return;
     }
 
     if (!isValidCarPlate(carPlate)) {
       Alert.alert(
-        "Invalid vehicle number",
-        "Vehicle number must contain between 7 and 9 digits.",
+        t("validation.invalidVehicleNumberTitle"),
+        t("validation.invalidVehicleNumber"),
       );
       return;
     }
 
     if (!fromLocation) {
-      setFromError("Please select a location from the list.");
+      setFromError(t("validation.selectLocationFromList"));
       return;
     }
 
     if (!toLocation) {
-      setToError("Please select a location from the list.");
+      setToError(t("validation.selectLocationFromList"));
       return;
     }
 
@@ -199,8 +206,8 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
       deliveryDate,
       time,
       {
-        dateLabel: "delivery date",
-        timeLabel: "arrival time",
+        dateLabelKey: "driverCreate.deliveryDate",
+        timeLabelKey: "driverCreate.arrivalTimeToArea",
       },
     );
 
@@ -214,8 +221,8 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
 
     if (cleanRecipientPhone.length !== 10) {
       Alert.alert(
-        "Invalid phone",
-        "Recipient phone number must be exactly 10 digits.",
+        t("validation.invalidPhoneTitle"),
+        t("validation.recipientPhoneDigits"),
       );
       return;
     }
@@ -223,7 +230,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
     const cleanPrice = price ? Number(price) : 0;
 
     if (price && (Number.isNaN(cleanPrice) || cleanPrice <= 0)) {
-      Alert.alert("Invalid price", "Price must be more than 0.");
+      Alert.alert(t("validation.invalidPriceTitle"), t("validation.invalidPrice"));
       return;
     }
 
@@ -282,11 +289,11 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
         createdAt: serverTimestamp(),
       });
 
-      Alert.alert("Success", "Your delivery was created successfully.");
+      Alert.alert(t("common.success"), t("driver.deliveryCreated"));
       router.replace("/(tabs)/home" as any);
     } catch (error: any) {
       console.log("CREATE PERSONAL DELIVERY ERROR:", error);
-      Alert.alert("Error", error.message || "Could not create delivery.");
+      Alert.alert(t("common.error"), error.message || t("driver.couldNotCreateDelivery"));
     } finally {
       setLoading(false);
     }
@@ -303,39 +310,39 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
         </Pressable>
 
         <View style={styles.card}>
-          <Text style={styles.title}>Deliver Item</Text>
-          <Text style={styles.subtitle}>Send an item to someone</Text>
+          <Text style={styles.title}>{t("driverCreate.deliverItemTitle")}</Text>
+          <Text style={styles.subtitle}>{t("driverCreate.sendItemSubtitle")}</Text>
 
-          <Text style={styles.label}>Car Model</Text>
+          <Text style={styles.label}>{t("driverCreate.carModel")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="car-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter your car model"
+              placeholder={t("driverCreate.enterCarModel")}
               placeholderTextColor="#8B7B6B"
               value={car}
               onChangeText={setCar}
             />
           </View>
 
-          <Text style={styles.label}>Car Color</Text>
+          <Text style={styles.label}>{t("driverCreate.carColor")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter your car color"
+              placeholder={t("driverCreate.enterCarColor")}
               placeholderTextColor="#8B7B6B"
               value={carColor}
               onChangeText={setCarColor}
             />
           </View>
 
-          <Text style={styles.label}>Car Plate Number</Text>
+          <Text style={styles.label}>{t("driverCreate.carPlateNumber")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter your car plate number"
+              placeholder={t("driverCreate.enterCarPlateNumber")}
               placeholderTextColor="#8B7B6B"
               keyboardType="number-pad"
               value={carPlate}
@@ -344,31 +351,31 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
           </View>
 
           <IsraelLocationAutocomplete
-            label="From"
+            label={t("booking.from")}
             value={from}
             onChangeText={handleFromChange}
             onSelectLocation={(location) => {
               setFromLocation(location);
               setFromError("");
             }}
-            placeholder="Enter departure city"
+            placeholder={t("booking.enterDepartureCity")}
             error={fromError}
           />
 
           <IsraelLocationAutocomplete
-            label="To"
+            label={t("booking.to")}
             value={to}
             onChangeText={handleToChange}
             onSelectLocation={(location) => {
               setToLocation(location);
               setToError("");
             }}
-            placeholder="Enter destination city"
+            placeholder={t("booking.enterDestinationCity")}
             error={toError}
           />
 
           <DateInput
-            label="Delivery Date"
+            label={t("driverCreate.deliveryDate")}
             value={deliveryDate}
             onChange={setDeliveryDate}
             showPicker={showDeliveryDatePicker}
@@ -376,19 +383,19 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
           />
 
           <TimeInput
-            label="Arrival Time to the Area"
+            label={t("driverCreate.arrivalTimeToArea")}
             value={time}
             onChange={setTime}
             showPicker={showTimePicker}
             setShowPicker={setShowTimePicker}
           />
 
-          <Text style={styles.label}>Recipient Phone Number</Text>
+          <Text style={styles.label}>{t("driverCreate.recipientPhoneLabel")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="call-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter recipient's phone number"
+              placeholder={t("driverCreate.enterRecipientPhone")}
               placeholderTextColor="#8B7B6B"
               keyboardType="numeric"
               maxLength={10}
@@ -397,22 +404,22 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             />
           </View>
 
-          <Text style={styles.label}>Item Description</Text>
+          <Text style={styles.label}>{t("driverCreate.itemDescriptionLabel")}</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
-            placeholder="Describe the item to deliver"
+            placeholder={t("driverCreate.describeItemToDeliver")}
             placeholderTextColor="#8B7B6B"
             value={itemDescription}
             onChangeText={setItemDescription}
             multiline
           />
 
-          <Text style={styles.label}>Price (₪)</Text>
+          <Text style={styles.label}>{t("booking.price")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter price"
+              placeholder={t("booking.enterPrice")}
               placeholderTextColor="#8B7B6B"
               keyboardType="numeric"
               value={price}
@@ -429,7 +436,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             disabled={loading}
           >
             <Text style={styles.submitText}>
-              {loading ? "Creating..." : "Create Delivery"}
+              {loading ? t("driverCreate.creating") : t("driverCreate.createDelivery")}
             </Text>
           </Pressable>
         </View>
@@ -439,6 +446,7 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
 }
 
 function StoreDeliverForm({ onBack }: { onBack: () => void }) {
+  const { t } = useTranslation();
   const { driverName, phone, driverAge, languages } = useDriverAccount();
 
   const [loading, setLoading] = useState(false);
@@ -481,7 +489,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
     const user = auth.currentUser;
 
     if (!user) {
-      Alert.alert("Login required", "Please login first.");
+      Alert.alert(t("auth.loginRequiredTitle"), t("auth.pleaseLoginFirst"));
       router.replace("/");
       return;
     }
@@ -490,8 +498,8 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
 
     if (!eligibility.eligible) {
       Alert.alert(
-        "Verification required",
-        "You must verify a valid driving license before creating a driver trip.",
+        t("driver.verificationRequired"),
+        t("driver.mustVerifyLicense"),
       );
       return;
     }
@@ -502,8 +510,8 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
 
     if (languages.length === 0) {
       Alert.alert(
-        "Missing language",
-        "Your language is missing from your account profile.",
+        t("driver.missingLanguageTitle"),
+        t("driver.missingLanguageMessage"),
       );
       return;
     }
@@ -518,25 +526,25 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
       !deliveryDate ||
       !time
     ) {
-      Alert.alert("Missing details", "Please fill in all fields.");
+      Alert.alert(t("auth.missingDetails"), t("validation.fillAllFields"));
       return;
     }
 
     if (!isValidCarPlate(carPlate)) {
       Alert.alert(
-        "Invalid vehicle number",
-        "Vehicle number must contain between 7 and 9 digits.",
+        t("validation.invalidVehicleNumberTitle"),
+        t("validation.invalidVehicleNumber"),
       );
       return;
     }
 
     if (!fromLocation) {
-      setFromError("Please select a location from the list.");
+      setFromError(t("validation.selectLocationFromList"));
       return;
     }
 
     if (!toLocation) {
-      setToError("Please select a location from the list.");
+      setToError(t("validation.selectLocationFromList"));
       return;
     }
 
@@ -544,8 +552,8 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
       deliveryDate,
       time,
       {
-        dateLabel: "delivery date",
-        timeLabel: "expected arrival time",
+        dateLabelKey: "driverCreate.deliveryDate",
+        timeLabelKey: "driverCreate.expectedArrivalTime",
       },
     );
 
@@ -558,7 +566,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
     const cleanPrice = price ? Number(price) : 0;
 
     if (price && (Number.isNaN(cleanPrice) || cleanPrice <= 0)) {
-      Alert.alert("Invalid price", "Price must be more than 0.");
+      Alert.alert(t("validation.invalidPriceTitle"), t("validation.invalidPrice"));
       return;
     }
 
@@ -617,11 +625,11 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
         createdAt: serverTimestamp(),
       });
 
-      Alert.alert("Success", "Your delivery was created successfully.");
+      Alert.alert(t("common.success"), t("driver.deliveryCreated"));
       router.replace("/(tabs)/home" as any);
     } catch (error: any) {
       console.log("CREATE DELIVERY ERROR:", error);
-      Alert.alert("Error", error.message || "Could not create delivery.");
+      Alert.alert(t("common.error"), error.message || t("driver.couldNotCreateDelivery"));
     } finally {
       setLoading(false);
     }
@@ -638,41 +646,41 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
         </Pressable>
 
         <View style={styles.card}>
-          <Text style={styles.title}>Store Delivery</Text>
+          <Text style={styles.title}>{t("driverCreate.storeDeliveryTitle")}</Text>
           <Text style={styles.subtitle}>
-            Set your car, pickup, drop-off, store, date, and arrival time
+            {t("driverCreate.storeDeliverySubtitle")}
           </Text>
 
-          <Text style={styles.label}>Car Model</Text>
+          <Text style={styles.label}>{t("driverCreate.carModel")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="car-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter your car model"
+              placeholder={t("driverCreate.enterCarModel")}
               placeholderTextColor="#8B7B6B"
               value={car}
               onChangeText={setCar}
             />
           </View>
 
-          <Text style={styles.label}>Car Color</Text>
+          <Text style={styles.label}>{t("driverCreate.carColor")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter your car color"
+              placeholder={t("driverCreate.enterCarColor")}
               placeholderTextColor="#8B7B6B"
               value={carColor}
               onChangeText={setCarColor}
             />
           </View>
 
-          <Text style={styles.label}>Car Plate Number</Text>
+          <Text style={styles.label}>{t("driverCreate.carPlateNumber")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter your car plate number"
+              placeholder={t("driverCreate.enterCarPlateNumber")}
               placeholderTextColor="#8B7B6B"
               keyboardType="number-pad"
               value={carPlate}
@@ -681,35 +689,35 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
           </View>
 
           <IsraelLocationAutocomplete
-            label="From"
+            label={t("booking.from")}
             value={from}
             onChangeText={handleFromChange}
             onSelectLocation={(location) => {
               setFromLocation(location);
               setFromError("");
             }}
-            placeholder="Enter departure city"
+            placeholder={t("booking.enterDepartureCity")}
             error={fromError}
           />
 
           <IsraelLocationAutocomplete
-            label="To"
+            label={t("booking.to")}
             value={to}
             onChangeText={handleToChange}
             onSelectLocation={(location) => {
               setToLocation(location);
               setToError("");
             }}
-            placeholder="Enter destination city"
+            placeholder={t("booking.enterDestinationCity")}
             error={toError}
           />
 
-          <Text style={styles.label}>Store Name</Text>
+          <Text style={styles.label}>{t("driverCreate.storeNameLabel")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="storefront-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter store name"
+              placeholder={t("driverCreate.enterStoreName")}
               placeholderTextColor="#8B7B6B"
               value={storeName}
               onChangeText={setStoreName}
@@ -717,7 +725,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
           </View>
 
           <DateInput
-            label="Delivery Date"
+            label={t("driverCreate.deliveryDate")}
             value={deliveryDate}
             onChange={setDeliveryDate}
             showPicker={showDeliveryDatePicker}
@@ -725,19 +733,19 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
           />
 
           <TimeInput
-            label="Expected Arrival Time"
+            label={t("driverCreate.expectedArrivalTime")}
             value={time}
             onChange={setTime}
             showPicker={showTimePicker}
             setShowPicker={setShowTimePicker}
           />
 
-          <Text style={styles.label}>Price (₪)</Text>
+          <Text style={styles.label}>{t("booking.price")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter price"
+              placeholder={t("booking.enterPrice")}
               placeholderTextColor="#8B7B6B"
               keyboardType="numeric"
               value={price}
@@ -754,7 +762,7 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             disabled={loading}
           >
             <Text style={styles.submitText}>
-              {loading ? "Creating..." : "Create Delivery"}
+              {loading ? t("driverCreate.creating") : t("driverCreate.createDelivery")}
             </Text>
           </Pressable>
         </View>
