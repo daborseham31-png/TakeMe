@@ -4,6 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { RIDE_CATEGORY } from "../booking/rideBookingLib";
@@ -65,6 +66,7 @@ function BookingsTabIcon({
 }
 
 export default function TabLayout() {
+  const { t } = useTranslation();
   const [hasPassengerAttention, setHasPassengerAttention] = useState(false);
   const [hasDriverAttention, setHasDriverAttention] = useState(false);
   const hasActiveRide = hasPassengerAttention || hasDriverAttention;
@@ -125,7 +127,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="home"
         options={{
-          title: "Home",
+          title: t("home.tabTitle"),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),
@@ -135,7 +137,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="bookings"
         options={{
-          title: "My Bookings",
+          title: t("bookings.tabTitle"),
           tabBarIcon: ({ color, size }) => (
             <BookingsTabIcon
               color={color}
@@ -149,7 +151,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: "Profile",
+          title: t("profile.tabTitle"),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person" size={size} color={color} />
           ),

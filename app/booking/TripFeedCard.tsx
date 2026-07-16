@@ -8,9 +8,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { FeedCategory, FeedItem } from "./homeFeedLib";
 
+// Language names are always shown in their own script, regardless of the
+// app's current UI language — these are never translated.
 const LANGUAGE_LABELS: Record<string, string> = {
   ar: "العربية",
   he: "עברית",
@@ -20,31 +23,36 @@ const LANGUAGE_LABELS: Record<string, string> = {
 
 const CATEGORY_META: Record<
   FeedCategory,
-  { label: string; icon: keyof typeof Ionicons.glyphMap; color: string; bookLabel: string }
+  {
+    labelKey: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    color: string;
+    bookLabelKey: string;
+  }
 > = {
   personal: {
-    label: "Personal Ride",
+    labelKey: "rides.personalRide",
     icon: "person-outline",
     color: "#EC4899",
-    bookLabel: "Book Ride",
+    bookLabelKey: "rides.bookRide",
   },
   school: {
-    label: "School",
+    labelKey: "rides.schoolRide",
     icon: "school-outline",
     color: "#3B82F6",
-    bookLabel: "Request School Ride",
+    bookLabelKey: "rides.requestSchoolRide",
   },
   work: {
-    label: "Work",
+    labelKey: "rides.work",
     icon: "briefcase-outline",
     color: "#22C55E",
-    bookLabel: "Apply for Work",
+    bookLabelKey: "rides.applyForWork",
   },
   errand: {
-    label: "Errand",
+    labelKey: "rides.errand",
     icon: "location-outline",
     color: "#F58220",
-    bookLabel: "Request Errand",
+    bookLabelKey: "rides.requestErrand",
   },
 };
 
@@ -55,6 +63,7 @@ type Props = {
 };
 
 export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
+  const { t } = useTranslation();
   const meta = CATEGORY_META[item.category];
   const languageLabels = item.languages
     .map((code) => LANGUAGE_LABELS[code] || code)
@@ -66,7 +75,7 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
         <View style={[styles.badge, { backgroundColor: `${meta.color}1A` }]}>
           <Ionicons name={meta.icon} size={14} color={meta.color} />
           <Text style={[styles.badgeText, { color: meta.color }]}>
-            {meta.label}
+            {t(meta.labelKey)}
           </Text>
         </View>
 
@@ -74,21 +83,16 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
           {typeof distanceKm === "number" ? (
             <View style={styles.distancePill}>
               <Ionicons name="navigate-outline" size={12} color="#2563EB" />
-              <View>
-                <Text style={styles.distancePillText}>
-                  {distanceKm.toFixed(1)} km away
-                </Text>
-                <Text style={styles.distancePillTextAr}>
-                  على بعد {distanceKm.toFixed(1)} كم
-                </Text>
-              </View>
+              <Text style={styles.distancePillText}>
+                {t("home.distanceAway", { distance: distanceKm.toFixed(1) })}
+              </Text>
             </View>
           ) : null}
 
           {item.isWeekly ? (
             <View style={styles.weeklyPill}>
               <Ionicons name="calendar-outline" size={12} color="#B86115" />
-              <Text style={styles.weeklyPillText}>Weekly</Text>
+              <Text style={styles.weeklyPillText}>{t("rides.weekly")}</Text>
             </View>
           ) : null}
         </View>
@@ -139,8 +143,9 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
           <View style={styles.metaItem}>
             <Ionicons name="calendar-outline" size={14} color="#7C5F46" />
             <Text style={styles.metaText}>
-              {item.availableWeeklyDays.length} day
-              {item.availableWeeklyDays.length === 1 ? "" : "s"} available
+              {t("rides.daysAvailable", {
+                count: item.availableWeeklyDays.length,
+              })}
             </Text>
           </View>
         ) : (
@@ -180,7 +185,9 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
         {item.category === "work" ? (
           <View style={styles.metaItem}>
             <Ionicons name="cash-outline" size={14} color="#F58220" />
-            <Text style={styles.priceText}>₪{item.price ?? 0}/hour</Text>
+            <Text style={styles.priceText}>
+              ₪{item.price ?? 0}/{t("rides.perHour")}
+            </Text>
           </View>
         ) : item.price !== null ? (
           <View style={styles.metaItem}>
@@ -188,7 +195,7 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
             <Text style={styles.priceText}>
               ₪{item.price}
               {item.category === "personal" || item.category === "school"
-                ? " per seat"
+                ? ` ${t("rides.perSeat")}`
                 : ""}
             </Text>
           </View>
@@ -200,10 +207,10 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
             <Text style={styles.metaText}>
               {item.seats}{" "}
               {item.category === "work"
-                ? "workers needed"
+                ? t("rides.workersNeeded")
                 : item.category === "errand"
-                  ? "places available"
-                  : "seats available"}
+                  ? t("rides.placesAvailable")
+                  : t("rides.seatsAvailable")}
             </Text>
           </View>
         ) : null}
@@ -234,7 +241,10 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
           {item.carPlateLast3 ? (
             <View style={styles.metaItem}>
               <Ionicons name="barcode-outline" size={14} color="#7C5F46" />
-              <Text style={styles.metaText}>***{item.carPlateLast3}</Text>
+              {/* Plate numbers stay LTR regardless of app language. */}
+              <Text style={[styles.metaText, styles.ltrText]}>
+                ***{item.carPlateLast3}
+              </Text>
             </View>
           ) : null}
         </View>
@@ -268,7 +278,7 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
               {item.ratingAverage.toFixed(1)}
             </Text>
           ) : (
-            <Text style={styles.ratingText}>New</Text>
+            <Text style={styles.ratingText}>{t("rides.newProvider")}</Text>
           )}
         </View>
       </View>
@@ -280,7 +290,7 @@ export default function TripFeedCard({ item, onPressBook, distanceKm }: Props) {
           end={{ x: 1, y: 0 }}
           style={styles.bookButton}
         >
-          <Text style={styles.bookButtonText}>{meta.bookLabel}</Text>
+          <Text style={styles.bookButtonText}>{t(meta.bookLabelKey)}</Text>
         </LinearGradient>
       </Pressable>
     </View>
@@ -337,12 +347,6 @@ const styles = StyleSheet.create({
     color: "#2563EB",
     fontWeight: "800",
     fontSize: 11,
-  },
-  distancePillTextAr: {
-    color: "#2563EB",
-    fontWeight: "600",
-    fontSize: 10,
-    textAlign: "right",
   },
   weeklyPill: {
     flexDirection: "row",
@@ -434,6 +438,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: "#7C5F46",
+  },
+  ltrText: {
+    textAlign: "left",
+    writingDirection: "ltr",
   },
   priceText: {
     fontSize: 14,

@@ -11,7 +11,9 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "LSApplicationQueriesSchemes": ["bit"]
+        "LSApplicationQueriesSchemes": [
+          "bit"
+        ]
       }
     },
     "android": {
@@ -55,7 +57,8 @@
           "cameraPermission": "TakeMe uses your camera to scan your ID and driving license for verification."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true,

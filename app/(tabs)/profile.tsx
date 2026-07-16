@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { signOut } from "firebase/auth";
@@ -16,21 +17,38 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { createReport } from "../admin/adminReportsLib";
 import { ReportCategory } from "../admin/adminTypes";
+import { useLanguage } from "../i18n/LanguageProvider";
+import LanguageSelectorModal from "../i18n/LanguageSelectorModal";
+import { SUPPORTED_LANGUAGES } from "../i18n/languages";
 
-const REPORT_CATEGORIES: { key: ReportCategory; label: string }[] = [
-  { key: "user", label: "A user" },
-  { key: "driver", label: "A driver" },
-  { key: "ride", label: "A ride" },
-  { key: "booking", label: "A booking" },
-  { key: "payment", label: "Payment" },
-  { key: "other", label: "Other" },
+// The Firestore `gender` field keeps storing these exact English strings
+// (existing data shape — never changed here); only the label shown for each
+// is translated.
+const GENDER_VALUES = ["Male", "Female", "No Preference"] as const;
+const GENDER_LABEL_KEY: Record<(typeof GENDER_VALUES)[number], string> = {
+  Male: "common.male",
+  Female: "common.female",
+  "No Preference": "common.noPreference",
+};
+
+const REPORT_CATEGORIES: { key: ReportCategory; labelKey: string }[] = [
+  { key: "user", labelKey: "profile.reportCategories.user" },
+  { key: "driver", labelKey: "profile.reportCategories.driver" },
+  { key: "ride", labelKey: "profile.reportCategories.ride" },
+  { key: "booking", labelKey: "profile.reportCategories.booking" },
+  { key: "payment", labelKey: "profile.reportCategories.payment" },
+  { key: "other", labelKey: "profile.reportCategories.other" },
 ];
 
 export default function ProfileScreen() {
+  const { t } = useTranslation();
+  const { isRTL, language } = useLanguage();
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -41,6 +59,11 @@ export default function ProfileScreen() {
   const [reportCategory, setReportCategory] = useState<ReportCategory>("other");
   const [reportDescription, setReportDescription] = useState("");
   const [submittingReport, setSubmittingReport] = useState(false);
+  const [languageModalVisible, setLanguageModalVisible] = useState(false);
+
+  const currentLanguageName =
+    SUPPORTED_LANGUAGES.find((lang) => lang.code === language)?.nativeName ??
+    language;
 
   useEffect(() => {
     loadProfile();
@@ -93,7 +116,7 @@ export default function ProfileScreen() {
       photo,
     });
 
-    Alert.alert("Saved", "Profile updated successfully.");
+    Alert.alert(t("common.success"), t("profile.profileUpdated"));
   };
 
   const handleLogout = async () => {
@@ -110,13 +133,31 @@ export default function ProfileScreen() {
       setReportVisible(false);
       setReportDescription("");
       setReportCategory("other");
-      Alert.alert("Report sent", "Thank you — our team will review it shortly.");
+      Alert.alert(t("profile.reportSentTitle"), t("profile.reportSent"));
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not send your report.");
+      Alert.alert(t("common.error"), error?.message || t("profile.couldNotSendReport"));
     } finally {
       setSubmittingReport(false);
     }
   };
+
+  const openGenderPicker = () => {
+    Alert.alert(
+      t("profile.chooseDriverGender"),
+      "",
+      [
+        ...GENDER_VALUES.map((value) => ({
+          text: t(GENDER_LABEL_KEY[value]),
+          onPress: () => setGender(value),
+        })),
+        { text: t("common.cancel"), style: "cancel" as const },
+      ],
+    );
+  };
+
+  const genderLabel =
+    t(GENDER_LABEL_KEY[gender as (typeof GENDER_VALUES)[number]]) ||
+    t("common.noPreference");
 
   return (
     <SafeAreaView style={styles.page}>
@@ -136,53 +177,74 @@ export default function ProfileScreen() {
             </Pressable>
           </View>
 
-          <Text style={styles.label}>Full Name</Text>
-          <TextInput style={styles.input} value={name} onChangeText={setName} />
+          <Text style={[styles.label, isRTL && styles.textRTL]}>
+            {t("profile.fullName")}
+          </Text>
+          <TextInput
+            style={[styles.input, isRTL && styles.textRTL]}
+            value={name}
+            onChangeText={setName}
+          />
 
-          <Text style={styles.label}>Email</Text>
+          <Text style={[styles.label, isRTL && styles.textRTL]}>
+            {t("profile.email")}
+          </Text>
           <TextInput
             style={styles.inputDisabled}
             value={email}
             editable={false}
+            // Email must stay readable regardless of app language.
+            textAlign="left"
           />
 
-          <Text style={styles.label}>Phone Number</Text>
+          <Text style={[styles.label, isRTL && styles.textRTL]}>
+            {t("profile.phoneNumber")}
+          </Text>
           <TextInput
             style={styles.input}
             value={phone}
             onChangeText={setPhone}
             keyboardType="phone-pad"
+            // Phone numbers must stay readable regardless of app language.
+            textAlign="left"
           />
 
-          <Text style={styles.label}>Preferred Driver Gender</Text>
-          <Pressable
-            style={styles.selectBox}
-            onPress={() =>
-              Alert.alert("Choose driver gender", "", [
-                { text: "Male", onPress: () => setGender("Male") },
-                { text: "Female", onPress: () => setGender("Female") },
-                {
-                  text: "No Preference",
-                  onPress: () => setGender("No Preference"),
-                },
-                { text: "Cancel", style: "cancel" },
-              ])
-            }
-          >
-            <Text>{gender}</Text>
+          <Text style={[styles.label, isRTL && styles.textRTL]}>
+            {t("profile.preferredDriverGender")}
+          </Text>
+          <Pressable style={styles.selectBox} onPress={openGenderPicker}>
+            <Text>{genderLabel}</Text>
             <Text>⌄</Text>
           </Pressable>
 
           <Pressable style={styles.saveButton} onPress={saveChanges}>
-            <Text style={styles.saveText}>Save Changes</Text>
+            <Text style={styles.saveText}>{t("profile.saveChanges")}</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.settingsRow}
+            onPress={() => setLanguageModalVisible(true)}
+          >
+            <View style={styles.settingsRowLeft}>
+              <Ionicons name="globe-outline" size={20} color="#7C5F46" />
+              <Text style={styles.settingsRowLabel}>{t("settings.language")}</Text>
+            </View>
+            <View style={styles.settingsRowRight}>
+              <Text style={styles.settingsRowValue}>{currentLanguageName}</Text>
+              <Ionicons
+                name={isRTL ? "chevron-back" : "chevron-forward"}
+                size={18}
+                color="#C7B9AC"
+              />
+            </View>
           </Pressable>
 
           <Pressable style={styles.reportButton} onPress={() => setReportVisible(true)}>
-            <Text style={styles.reportText}>Report a Problem</Text>
+            <Text style={styles.reportText}>{t("profile.reportProblem")}</Text>
           </Pressable>
 
           <Pressable style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutText}>Log Out</Text>
+            <Text style={styles.logoutText}>{t("profile.logOut")}</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -195,9 +257,13 @@ export default function ProfileScreen() {
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Report a Problem</Text>
+            <Text style={[styles.modalTitle, isRTL && styles.textRTL]}>
+              {t("profile.reportProblem")}
+            </Text>
 
-            <Text style={styles.label}>What is this about?</Text>
+            <Text style={[styles.label, isRTL && styles.textRTL]}>
+              {t("profile.reportSubject")}
+            </Text>
             <View style={styles.categoryRow}>
               {REPORT_CATEGORIES.map((option) => (
                 <Pressable
@@ -214,18 +280,20 @@ export default function ProfileScreen() {
                       reportCategory === option.key && styles.categoryChipTextActive,
                     ]}
                   >
-                    {option.label}
+                    {t(option.labelKey)}
                   </Text>
                 </Pressable>
               ))}
             </View>
 
-            <Text style={styles.label}>Description</Text>
+            <Text style={[styles.label, isRTL && styles.textRTL]}>
+              {t("profile.reportDescription")}
+            </Text>
             <TextInput
-              style={[styles.input, styles.reportInput]}
+              style={[styles.input, styles.reportInput, isRTL && styles.textRTL]}
               value={reportDescription}
               onChangeText={setReportDescription}
-              placeholder="Describe what happened"
+              placeholder={t("profile.reportDescriptionPlaceholder")}
               placeholderTextColor="#8B7B6B"
               multiline
             />
@@ -236,7 +304,7 @@ export default function ProfileScreen() {
                 onPress={() => setReportVisible(false)}
                 disabled={submittingReport}
               >
-                <Text style={styles.modalCancelText}>Cancel</Text>
+                <Text style={styles.modalCancelText}>{t("common.cancel")}</Text>
               </Pressable>
 
               <Pressable
@@ -250,13 +318,18 @@ export default function ProfileScreen() {
                 {submittingReport ? (
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.modalSubmitText}>Submit</Text>
+                  <Text style={styles.modalSubmitText}>{t("common.submit")}</Text>
                 )}
               </Pressable>
             </View>
           </View>
         </View>
       </Modal>
+
+      <LanguageSelectorModal
+        visible={languageModalVisible}
+        onClose={() => setLanguageModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -316,6 +389,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     color: "#111827",
   },
+  textRTL: {
+    textAlign: "right",
+    writingDirection: "rtl",
+  },
   input: {
     borderWidth: 1,
     borderColor: "#E2D8CF",
@@ -351,6 +428,38 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "900",
     fontSize: 16,
+  },
+  settingsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginTop: 14,
+    backgroundColor: "#FFFDFC",
+  },
+  settingsRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  settingsRowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  settingsRowLabel: {
+    fontWeight: "800",
+    color: "#111827",
+    fontSize: 15,
+  },
+  settingsRowValue: {
+    color: "#7C5F46",
+    fontWeight: "700",
+    fontSize: 14,
   },
   logoutButton: {
     borderWidth: 1.5,

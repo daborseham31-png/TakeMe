@@ -7,6 +7,7 @@
 
 import * as Location from "expo-location";
 
+import { SupportedLanguage } from "../i18n/languages";
 import { IsraelLocation, ISRAEL_LOCATIONS } from "./israelLocations";
 
 export type InputLanguage = "arabic" | "hebrew" | "english";
@@ -122,6 +123,24 @@ export function getLocationDisplayName(
   language: InputLanguage,
 ): string {
   return nameForLanguage(loc, language) || loc.english;
+}
+
+const APP_LANGUAGE_TO_INPUT_LANGUAGE: Record<SupportedLanguage, InputLanguage> = {
+  ar: "arabic",
+  en: "english",
+  he: "hebrew",
+};
+
+// Same dataset, same stable IDs/coordinates — this only picks which of the
+// three names already on IsraelLocation to display, based on the app's
+// current UI language. Never creates a second copy of the city list, and
+// never affects what gets saved for a ride (that stays the location's id +
+// coordinates — see resolveLocationCoordinates below).
+export function getLocalizedLocationName(
+  loc: IsraelLocation,
+  appLanguage: SupportedLanguage,
+): string {
+  return getLocationDisplayName(loc, APP_LANGUAGE_TO_INPUT_LANGUAGE[appLanguage]);
 }
 
 // ---------------------------------------------------------------------------
