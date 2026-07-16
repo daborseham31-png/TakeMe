@@ -189,27 +189,49 @@ export default function HomeScreen() {
   // Subscribed exactly once for the component's lifetime; onSnapshot already
   // keeps the list live, so pull-to-refresh / Nearby-All switching only ever
   // re-filters this same already-loaded array — no extra Firebase reads.
+  //
+  // Gated behind onAuthStateChanged (like the two listener effects above) —
+  // driverRoutes/workJobs/errandJobs all require a signed-in caller per
+  // firestore.rules. Subscribing unconditionally on mount could race ahead
+  // of Firebase Auth's async rehydration on cold start (auth.currentUser is
+  // briefly null until the first onAuthStateChanged callback), throwing
+  // "Missing or insufficient permissions" for that first connection attempt.
   useEffect(() => {
     let cancelled = false;
-    setFeedLoading(true);
+    let unsubFeed: (() => void) | null = null;
 
-    const unsubFeed = subscribeHomeFeed(
-      (items) => {
-        if (cancelled) return;
-        setFeedItems(items);
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      unsubFeed?.();
+      unsubFeed = null;
+
+      if (!user) {
+        setFeedItems([]);
         setFeedLoading(false);
         setRefreshing(false);
-      },
-      () => {
-        if (cancelled) return;
-        setFeedLoading(false);
-        setRefreshing(false);
-      },
-    );
+        return;
+      }
+
+      setFeedLoading(true);
+
+      unsubFeed = subscribeHomeFeed(
+        (items) => {
+          if (cancelled) return;
+          setFeedItems(items);
+          setFeedLoading(false);
+          setRefreshing(false);
+        },
+        () => {
+          if (cancelled) return;
+          setFeedLoading(false);
+          setRefreshing(false);
+        },
+      );
+    });
 
     return () => {
       cancelled = true;
-      unsubFeed();
+      unsubFeed?.();
+      unsubAuth();
     };
   }, []);
 
