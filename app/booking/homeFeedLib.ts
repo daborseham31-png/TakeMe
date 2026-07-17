@@ -95,18 +95,57 @@ export type FeedItem = {
   raw: any;
 };
 
-const todayYMD = () => {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+// ---------------------------------------------------------------------------
+// Expiry — a listing is expired once its real departure Date/Time (date +
+// time combined, not date alone) is in the past. Used both here (at
+// normalize time, against the raw Firestore date/time strings) and by
+// isRideExpired below (against an already-built FeedItem, so Home can
+// re-filter on a periodic tick without waiting for a new Firestore snapshot).
+// ---------------------------------------------------------------------------
+
+const combineDateTimeMs = (date: string, time: string): number | null => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ""));
+  if (!match) return null;
+
+  const [, y, m, d] = match;
+  const timeMatch = /^(\d{1,2}):(\d{2})$/.exec(String(time || "").trim());
+  const hours = timeMatch ? Number(timeMatch[1]) : 0;
+  const minutes = timeMatch ? Number(timeMatch[2]) : 0;
+
+  const dt = new Date(Number(y), Number(m) - 1, Number(d), hours, minutes, 0, 0);
+  return Number.isNaN(dt.getTime()) ? null : dt.getTime();
 };
 
-const isTodayOrFuture = (dateText: string) => {
-  const match = String(dateText || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return true;
-  return dateText >= todayYMD();
+// Raw-field version — used inside the normalizers below, directly on
+// Firestore data, before a FeedItem even exists.
+export const isDateTimeExpired = (
+  date: string,
+  time: string,
+  now: number = Date.now(),
+): boolean => {
+  const ms = combineDateTimeMs(date, time);
+  if (ms === null) return false;
+  return ms <= now;
+};
+
+// FeedItem version — used by Home to re-filter already-loaded items on a
+// periodic tick (pull-to-refresh / focus / once a minute) without needing a
+// new Firestore snapshot. Weekly items expire only once every one of their
+// still-available days has passed.
+export const isRideExpired = (
+  item: FeedItem,
+  now: number = Date.now(),
+): boolean => {
+  if (item.isWeekly) {
+    return (
+      item.availableWeeklyDays.length > 0 &&
+      item.availableWeeklyDays.every((day) =>
+        isDateTimeExpired(day.date, day.time, now),
+      )
+    );
+  }
+
+  return isDateTimeExpired(item.date, item.time || item.startTime, now);
 };
 
 const getLast3Digits = (value: string) => {
@@ -134,14 +173,16 @@ const normalizeDriverRouteItem = (id: string, data: any): FeedItem | null => {
 
   const isWeekly = !!data.isRecurring && Array.isArray(data.weeklyTrips);
   const dayTrips = getDriverDayTrips(data);
-  const availableWeeklyDays = dayTrips.filter((d) => d.remainingSeats > 0);
+  const availableWeeklyDays = dayTrips.filter(
+    (d) => d.remainingSeats > 0 && !isDateTimeExpired(d.date, d.time),
+  );
 
   const date = data.tripDate || data.deliveryDate || "";
 
   if (isWeekly) {
     if (availableWeeklyDays.length === 0) return null;
   } else {
-    if (!isTodayOrFuture(date)) return null;
+    if (isDateTimeExpired(date, data.time)) return null;
     if (typeof data.seats === "number" && data.seats <= 0) return null;
   }
 
@@ -210,7 +251,7 @@ const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
     typeof data.remainingSeats === "number" ? data.remainingSeats : totalSeats;
 
   if (remainingSeats <= 0) return null;
-  if (!isTodayOrFuture(data.date)) return null;
+  if (isDateTimeExpired(data.date, data.startTime)) return null;
 
   return {
     id,
@@ -282,7 +323,7 @@ const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
 const normalizeErrandJobItem = (id: string, data: any): FeedItem | null => {
   if (data.deletedForDriver === true) return null;
   if (data.status === "completed" || data.status === "cancelled") return null;
-  if (!isTodayOrFuture(data.date)) return null;
+  if (isDateTimeExpired(data.date, data.startTime)) return null;
 
   return {
     id,
@@ -561,12 +602,13 @@ export const subscribeHomeFeed = (
 export type FeedNavTarget = { pathname: string; params: Record<string, string> };
 
 // Personal/School — single-day ("quick") booking. Mirrors handleBookDriver's
-// non-weekly branch exactly; defaults to 1 seat since the feed card has no
-// seat-count picker (matching ride-payment's own screen, which doesn't let
-// the passenger change seats after arriving either).
+// non-weekly branch; defaults to 1 seat, but now also passes maxSeats (the
+// ride's real remaining capacity) so ride-payment's own seat stepper can let
+// the passenger book more than 1 seat, up to that capacity.
 export const buildQuickRideNav = (item: FeedItem): FeedNavTarget => {
   const seats = 1;
   const unitPrice = item.price || 0;
+  const maxSeats = typeof item.seats === "number" && item.seats > 0 ? item.seats : 1;
 
   return {
     pathname: "/booking/ride-payment",
@@ -588,6 +630,7 @@ export const buildQuickRideNav = (item: FeedItem): FeedNavTarget => {
       time: item.time,
 
       seats: String(seats),
+      maxSeats: String(maxSeats),
       price: String(unitPrice * seats),
       unitPrice: String(unitPrice),
 

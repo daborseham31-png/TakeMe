@@ -164,6 +164,17 @@ export default function AdminDriverDetailScreen() {
             </View>
           ) : null}
 
+          {driver.licenseNeedsManualDocumentReview ? (
+            <View style={styles.missingBox}>
+              <Ionicons name="eye-outline" size={18} color={adminColors.warning} />
+              <Text style={styles.missingText}>
+                The system could not confidently confirm the uploaded document
+                is a driving license — please review the document manually
+                before approving.
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.section}>
             <Row icon="call-outline" label={t("admin.phoneLabel")} value={driver.phone || "—"} />
             <Row icon="mail-outline" label={t("admin.emailLabel")} value={driver.email || "—"} />
@@ -172,6 +183,17 @@ export default function AdminDriverDetailScreen() {
               icon="document-text-outline"
               label={t("admin.licenseExpiryLabel")}
               value={driver.licenseExpiryDate || "—"}
+            />
+            <Row
+              icon="scan-outline"
+              label="License document check"
+              value={
+                driver.licenseDocumentType
+                  ? `${driver.licenseDocumentType} (${Math.round(
+                      driver.licenseDocumentTypeConfidence * 100,
+                    )}% confidence)`
+                  : "—"
+              }
             />
             <Row
               icon="language-outline"

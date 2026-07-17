@@ -27,6 +27,7 @@ import { useLanguage } from "../i18n/LanguageProvider";
 import { translateStoredDayName } from "../i18n/formatters";
 import BitBadge from "./BitBadge";
 import { openBitPayment } from "./bitPayment";
+import { isDateTimeExpired } from "./homeFeedLib";
 import { RIDE_CATEGORY, RidePayment } from "./rideBookingLib";
 import {
   computeWeeklyTotal,
@@ -50,7 +51,6 @@ const getLast3 = (value: string) => {
 
 export default function RidePaymentScreen() {
   const { t } = useTranslation();
-  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
 
   const category = String(params.category || "personal");
@@ -80,6 +80,8 @@ export default function RidePaymentScreen() {
   const time = String(params.time || "");
   const seats = num(params.seats);
   const price = num(params.price);
+  const maxSeatsParam = num(params.maxSeats);
+  const unitPriceParam = num(params.unitPrice);
 
   // "Pickup location for driver navigation" — a SEPARATE, optional GPS point
   // from the booking form. Never used for driver matching (that already
@@ -133,7 +135,28 @@ export default function RidePaymentScreen() {
   const [method, setMethod] = useState<Method>(null);
   const [processing, setProcessing] = useState(false);
 
-  const amountDue = isWeekly ? weeklyTotal : price;
+  // The ride's real remaining capacity (falls back to the old fixed `seats`
+  // param for any link built before maxSeats existed) and its per-seat price
+  // — the seat stepper below lets the passenger pick how many of those seats
+  // to book, up to that capacity. Never used for weekly bookings, which keep
+  // their own per-day seat counts from the day picker.
+  const maxSeatsValue = Math.max(1, maxSeatsParam ?? seats ?? 1);
+  const unitPrice = unitPriceParam ?? price ?? 0;
+  const [selectedSeats, setSelectedSeats] = useState(1);
+
+  const decreaseSeats = () =>
+    setSelectedSeats((prev) => Math.max(1, prev - 1));
+
+  const increaseSeats = () =>
+    setSelectedSeats((prev) => Math.min(maxSeatsValue, prev + 1));
+
+  const totalPrice = isWeekly
+    ? weeklyTotal
+    : Number.isFinite(unitPrice * selectedSeats)
+      ? unitPrice * selectedSeats
+      : 0;
+
+  const amountDue = totalPrice;
 
   // Selecting the BIT method card only reveals the receiver info + action
   // buttons below — it never copies anything or opens BIT by itself. The
@@ -188,6 +211,10 @@ const createBookingAfterPayment = async (
     throw new Error(t("rides.missingTripId"));
   }
 
+  if (!isWeekly && isDateTimeExpired(date, time)) {
+    throw new Error(t("rides.rideExpired"));
+  }
+
   const bookingRef = doc(collection(db, "bookings"));
   const routeRef = doc(db, "driverRoutes", routeId);
 
@@ -240,7 +267,17 @@ const createBookingAfterPayment = async (
       !!routeData.bookedBy;
 
     if (alreadyBooked) {
-      throw new Error(t("rides.tripAlreadyBooked"));
+      throw new Error(t("rides.seatAvailabilityChanged"));
+    }
+
+    // Re-check the freshest seat capacity read inside this very transaction
+    // — a driver could have reduced the route's declared seats between when
+    // this screen loaded and when Continue was pressed.
+    if (
+      typeof routeData.seats === "number" &&
+      selectedSeats > routeData.seats
+    ) {
+      throw new Error(t("rides.notEnoughSeats"));
     }
 
     transaction.set(bookingRef, {
@@ -268,8 +305,12 @@ const createBookingAfterPayment = async (
       day,
       time,
 
-      seats: seats ?? null,
-      price: price ?? null,
+      // This function only ever runs for the non-weekly path (weekly bookings
+      // go through createWeeklyBookings instead) — always the passenger's own
+      // stepper selection / calculated total, never the old fixed params.
+      seats: selectedSeats,
+      price: totalPrice,
+      pricePerSeat: unitPrice,
 
       // Existing fields — already read by driver navigation / live tracking
       // (app/driver/ride-navigation.tsx, app/booking/live-tracking.tsx).
@@ -345,7 +386,9 @@ const createBookingAfterPayment = async (
       senderId: user.uid,
       type: isSchool ? "school_ride_booking" : "personal_ride_booking",
       title: "New ride booking",
-      message: `${passengerName} booked a ride with you`,
+      message: `${passengerName} booked a ride with you (${selectedSeats} seat${
+        selectedSeats > 1 ? "s" : ""
+      }, ₪${totalPrice})`,
       applicationId: bookingRef.id,
       bookingId: bookingRef.id,
       category: isSchool ? "school" : RIDE_CATEGORY,
@@ -553,15 +596,6 @@ const createBookingAfterPayment = async (
               </View>
             ) : null}
 
-            {!isWeekly && seats !== null ? (
-              <View style={styles.summaryRow}>
-                <Ionicons name="people-outline" size={15} color="#7C5F46" />
-                <Text style={styles.summaryText}>
-                  {t("booking.seatsCount", { count: seats })}
-                </Text>
-              </View>
-            ) : null}
-
             {isWeekly ? (
               <View style={styles.weeklyDaysBox}>
                 <Text style={styles.weeklyDaysTitle}>{t("rides.selectedDays")}</Text>
@@ -587,11 +621,7 @@ const createBookingAfterPayment = async (
             <View style={styles.amountRow}>
               <Text style={styles.amountLabel}>{t("rides.amount")}</Text>
               <Text style={styles.amountValue}>
-                {isWeekly
-                  ? `${weeklyTotal} ₪`
-                  : price !== null
-                    ? `${price} ₪`
-                    : "—"}
+                {isWeekly ? `${weeklyTotal} ₪` : `${totalPrice} ₪`}
               </Text>
             </View>
 
@@ -600,7 +630,82 @@ const createBookingAfterPayment = async (
             ) : null}
           </View>
 
-          <Text style={styles.sectionTitle}>{t("rides.paymentMethod")}</Text>
+          {!isWeekly ? (
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryTitle}>{t("rides.numberOfSeats")}</Text>
+
+              <View style={styles.seatStepperRow}>
+                <Pressable
+                  style={[
+                    styles.seatButton,
+                    selectedSeats <= 1 && styles.seatButtonDisabled,
+                  ]}
+                  onPress={decreaseSeats}
+                  disabled={selectedSeats <= 1}
+                  hitSlop={8}
+                >
+                  <Ionicons
+                    name="remove"
+                    size={20}
+                    color={selectedSeats <= 1 ? "#C9BBAE" : "#111827"}
+                  />
+                </Pressable>
+
+                <Text style={styles.seatCountText}>{selectedSeats}</Text>
+
+                <Pressable
+                  style={[
+                    styles.seatButton,
+                    selectedSeats >= maxSeatsValue && styles.seatButtonDisabled,
+                  ]}
+                  onPress={increaseSeats}
+                  disabled={selectedSeats >= maxSeatsValue}
+                  hitSlop={8}
+                >
+                  <Ionicons
+                    name="add"
+                    size={20}
+                    color={selectedSeats >= maxSeatsValue ? "#C9BBAE" : "#111827"}
+                  />
+                </Pressable>
+              </View>
+
+              <Text style={styles.seatAvailableHint}>
+                {t("rides.seatsAvailableCount", { count: maxSeatsValue })}
+              </Text>
+
+              <View style={styles.priceSummaryBox}>
+                <Text style={styles.priceSummaryTitle}>
+                  {t("rides.paymentSummary")}
+                </Text>
+
+                <View style={styles.priceSummaryRow}>
+                  <Text style={styles.priceSummaryLabel}>
+                    {t("rides.pricePerSeat")}
+                  </Text>
+                  <Text style={styles.priceSummaryValue}>₪{unitPrice}</Text>
+                </View>
+
+                <View style={styles.priceSummaryRow}>
+                  <Text style={styles.priceSummaryLabel}>
+                    {t("rides.numberOfSeats")}
+                  </Text>
+                  <Text style={styles.priceSummaryValue}>{selectedSeats}</Text>
+                </View>
+
+                <View style={[styles.priceSummaryRow, styles.priceSummaryTotalRow]}>
+                  <Text style={styles.priceSummaryTotalLabel}>
+                    {t("rides.totalPrice")}
+                  </Text>
+                  <Text style={styles.priceSummaryTotalValue}>
+                    ₪{totalPrice}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ) : null}
+
+          <Text style={styles.sectionTitle}>Payment Method</Text>
 
           <View style={styles.methodRow}>
             <Pressable
@@ -819,6 +924,86 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#111827",
     marginBottom: 12,
+  },
+  seatStepperRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 24,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  seatButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    backgroundColor: "#FFFDFC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  seatButtonDisabled: {
+    opacity: 0.5,
+  },
+  seatCountText: {
+    fontSize: 26,
+    fontWeight: "900",
+    color: "#111827",
+    minWidth: 40,
+    textAlign: "center",
+  },
+  seatAvailableHint: {
+    textAlign: "center",
+    color: "#7C5F46",
+    fontSize: 12.5,
+    fontWeight: "700",
+    marginBottom: 16,
+  },
+  priceSummaryBox: {
+    backgroundColor: "#FFF8F2",
+    borderWidth: 1,
+    borderColor: "#F0DFC8",
+    borderRadius: 14,
+    padding: 14,
+    gap: 8,
+  },
+  priceSummaryTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 4,
+  },
+  priceSummaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  priceSummaryLabel: {
+    color: "#7C5F46",
+    fontSize: 13.5,
+    fontWeight: "700",
+  },
+  priceSummaryValue: {
+    color: "#111827",
+    fontSize: 13.5,
+    fontWeight: "900",
+  },
+  priceSummaryTotalRow: {
+    borderTopWidth: 1,
+    borderTopColor: "#F0DFC8",
+    paddingTop: 8,
+    marginTop: 2,
+  },
+  priceSummaryTotalLabel: {
+    color: "#111827",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  priceSummaryTotalValue: {
+    color: "#F58220",
+    fontSize: 17,
+    fontWeight: "900",
   },
   methodRow: {
     flexDirection: "row",

@@ -99,6 +99,22 @@ const asImageQuality = (value) => {
   return "unreadable";
 };
 
+// What kind of document the image actually shows — lets the caller reject a
+// clearly-wrong document (ID card, passport, random photo) instead of only
+// checking file type/extension, which can never tell a license from an ID.
+const asDocumentType = (value) => {
+  const allowed = [
+    "driver_license",
+    "id_card",
+    "passport",
+    "other_document",
+    "random_photo",
+    "unclear",
+  ];
+
+  return allowed.includes(value) ? value : "unclear";
+};
+
 // Distinguishes "server is misconfigured" (missing/invalid Gemini key) from
 // "the model genuinely couldn't read this image" — the two need very
 // different messages so setup mistakes aren't mistaken for photo quality.
@@ -117,5 +133,6 @@ module.exports = {
   asNullableNumber,
   asStringArray,
   asImageQuality,
+  asDocumentType,
   isApiKeyError,
 };

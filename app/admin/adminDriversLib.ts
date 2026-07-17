@@ -30,6 +30,9 @@ export const subscribeDrivers = (
 // A driver can only be approved once these are present — mirrors what
 // signup.tsx already requires to mark someone as a driver in the first
 // place, so this just re-checks the same fields haven't been left blank.
+// Vehicle plate number is deliberately NOT required here — it's no longer
+// collected at sign up; drivers enter it later, per vehicle, when creating
+// a trip (see RideForm.tsx), so it belongs to driverRoutes, not this profile.
 export const getMissingDriverRequirements = (driver: AdminUserRow): string[] => {
   const missing: string[] = [];
 
@@ -37,6 +40,9 @@ export const getMissingDriverRequirements = (driver: AdminUserRow): string[] => 
   if (!driver.licenseExpiryDate) missing.push(i18n.t("admin.missingLicenseExpiry"));
   if (driver.spokenLanguages.length === 0) missing.push(i18n.t("admin.missingSpokenLanguages"));
   if (!driver.phone) missing.push(i18n.t("admin.missingPhoneNumber"));
+  if (!driver.licenseExpiryDate) missing.push("Driving license expiry date");
+  if (driver.spokenLanguages.length === 0) missing.push("Spoken languages");
+  if (!driver.phone) missing.push("Phone number");
 
   return missing;
 };

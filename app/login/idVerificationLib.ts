@@ -38,7 +38,21 @@ export type IdAnalysisResult = {
   confidence: number;
 };
 
+// What the uploaded image actually shows, per the backend's real Gemini
+// Vision classification — never inferred from filename/file extension, which
+// can't tell a license from an ID card. See checkLicenseDocumentType below
+// for how this gates sign up.
+export type LicenseDocumentType =
+  | "driver_license"
+  | "id_card"
+  | "passport"
+  | "other_document"
+  | "random_photo"
+  | "unclear";
+
 export type LicenseAnalysisResult = {
+  documentType: LicenseDocumentType;
+  documentTypeConfidence: number;
   licenseNumber: string | null;
   fullName: string | null;
   birthDate: string | null;
@@ -216,6 +230,44 @@ export const calculateAgeFromBirthDate = (birthDate: string | null): number | nu
   if (!hasHadBirthdayThisYear) age -= 1;
 
   return age >= 0 && age < 130 ? age : null;
+};
+
+// Real document-type check — never based on file type/extension, which
+// can't distinguish a license from an ID card/passport/random photo.
+//
+// - "valid"               — confidently a driving license. Submission may
+//                            proceed (the driver still stays pending_admin_review).
+// - "wrong_document"      — confidently something else (ID/passport/other
+//                            document/random photo). Submission is blocked.
+// - "needs_manual_review" — the model couldn't confidently tell. Never
+//                            auto-approved: submission may proceed, but the
+//                            account is flagged so admin review looks at the
+//                            document itself, not just the extracted fields.
+export type LicenseDocumentCheck = "valid" | "wrong_document" | "needs_manual_review";
+
+const CONFIDENT_THRESHOLD = 0.6;
+
+export const checkLicenseDocumentType = (
+  result: LicenseAnalysisResult | null,
+): LicenseDocumentCheck => {
+  if (!result) return "needs_manual_review";
+
+  const confidence = Number(result.documentTypeConfidence) || 0;
+
+  if (result.documentType === "driver_license" && confidence >= CONFIDENT_THRESHOLD) {
+    return "valid";
+  }
+
+  const confidentlyWrong =
+    confidence >= CONFIDENT_THRESHOLD &&
+    (result.documentType === "id_card" ||
+      result.documentType === "passport" ||
+      result.documentType === "other_document" ||
+      result.documentType === "random_photo");
+
+  if (confidentlyWrong) return "wrong_document";
+
+  return "needs_manual_review";
 };
 
 export type LicenseValidity = "valid" | "expired" | "unknown";

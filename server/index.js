@@ -24,6 +24,7 @@ const {
   asNullableNumber,
   asNullableString,
   asStringArray,
+  asDocumentType,
   isApiKeyError,
 } = require("./gemini");
 
@@ -51,13 +52,42 @@ Return strict JSON only, matching exactly this shape:
   "confidence": number
 }`;
 
-const LICENSE_PROMPT = `You are reading a driving license image.
-Extract only information that is clearly visible.
-Do not guess.
-If a field is not visible, return null.
+const LICENSE_PROMPT = `You are looking at a photo that is supposed to be a driving license.
+
+First, classify what the document in the image ACTUALLY is, based only on its
+real visual layout, printed labels, and content — never based on a filename
+or file type, which you don't have access to anyway. A driving license
+typically has a licensing-authority header, a license/permit number, issue
+and expiry dates, and vehicle category/class codes. A national ID card or
+passport looks different (different header, a national ID number instead of
+a license number, no vehicle categories, often a passport's photo page
+layout). If the image is a random photo, a screenshot, a blank/unrelated
+picture, or any other non-license document, say so honestly.
+
+documentType must be one of:
+- "driver_license"  — this is clearly a driving license/permit.
+- "id_card"          — this is clearly a national ID card.
+- "passport"         — this is clearly a passport.
+- "other_document"   — some other real document, not a license.
+- "random_photo"     — not an official document at all (a person, object, screenshot, scenery, etc).
+- "unclear"          — you cannot confidently tell what this document is (too blurry, cropped, obscured, or ambiguous).
+
+documentTypeConfidence is a number from 0 to 1 for how sure you are about
+documentType. Be conservative: only use a high number (0.8+) when the
+license-specific markers above are clearly visible. If you are not sure,
+use "unclear" with a low confidence rather than guessing "driver_license".
+
+Only extract the license fields below if documentType is "driver_license".
+For any other documentType, every one of those fields must be null/empty —
+never invent license data from an ID card or passport just because some
+fields (like a name or birth date) happen to look similar.
+
+Do not guess. If a field is not visible, return null.
 Return strict JSON only, matching exactly this shape:
 
 {
+  "documentType": "driver_license" | "id_card" | "passport" | "other_document" | "random_photo" | "unclear",
+  "documentTypeConfidence": number,
   "licenseNumber": string | null,
   "fullName": string | null,
   "birthDate": "YYYY-MM-DD" | null,
@@ -120,6 +150,8 @@ app.post("/analyze-license", async (req, res) => {
     const raw = await askGeminiVision(LICENSE_PROMPT, imageBase64, mimeType);
 
     res.json({
+      documentType: asDocumentType(raw.documentType),
+      documentTypeConfidence: asNullableNumber(raw.documentTypeConfidence) ?? 0,
       licenseNumber: asNullableString(raw.licenseNumber),
       fullName: asNullableString(raw.fullName),
       birthDate: asNullableString(raw.birthDate),
