@@ -17,6 +17,7 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
+import i18n from "../i18n";
 import { notify } from "../booking/work-errand/workErrandLib";
 import { writeAuditLog } from "./adminAuditLib";
 import { AdminReportRow, ReportCategory, ReportStatus } from "./adminTypes";
@@ -29,7 +30,7 @@ const toSeconds = (value: unknown): number => {
 const normalizeReport = (id: string, data: Record<string, any>): AdminReportRow => ({
   id,
   reporterId: data.reporterId || "",
-  reporterName: data.reporterName || "User",
+  reporterName: data.reporterName || i18n.t("common.user"),
   targetType: data.targetType || "",
   targetId: data.targetId || "",
   category: data.category || "other",
@@ -52,14 +53,14 @@ export type CreateReportInput = {
 export const createReport = async (input: CreateReportInput): Promise<void> => {
   const user = auth.currentUser;
   if (!user) {
-    throw new Error("Please login first.");
+    throw new Error(i18n.t("auth.pleaseLoginFirst"));
   }
 
   if (!input.description.trim()) {
-    throw new Error("Please describe the issue.");
+    throw new Error(i18n.t("admin.describeIssue"));
   }
 
-  let reporterName = user.displayName || "User";
+  let reporterName = user.displayName || i18n.t("common.user");
 
   try {
     const profileSnap = await getDoc(doc(db, "users", user.uid));

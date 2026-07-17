@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { subscribeAllRides } from "./adminRidesLib";
 import { AdminRideRow, RideCategory, RideStatus } from "./adminTypes";
@@ -15,27 +16,27 @@ type CategoryFilter = "all" | RideCategory;
 type StatusFilter = "all" | RideStatus;
 type SortKey = "newest" | "oldest" | "date" | "price";
 
-const CATEGORY_OPTIONS: { key: CategoryFilter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "personal", label: "Personal" },
-  { key: "school", label: "School" },
-  { key: "work", label: "Work" },
-  { key: "errand", label: "Errand" },
+const CATEGORY_OPTION_KEYS: { key: CategoryFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "admin.allFilter" },
+  { key: "personal", labelKey: "admin.rideCategoryLabel.personal" },
+  { key: "school", labelKey: "admin.rideCategoryLabel.school" },
+  { key: "work", labelKey: "admin.rideCategoryLabel.work" },
+  { key: "errand", labelKey: "admin.rideCategoryLabel.errand" },
 ];
 
-const STATUS_OPTIONS: { key: StatusFilter; label: string }[] = [
-  { key: "all", label: "All statuses" },
-  { key: "upcoming", label: "Upcoming" },
-  { key: "active", label: "Active" },
-  { key: "completed", label: "Completed" },
-  { key: "cancelled", label: "Cancelled" },
+const STATUS_OPTION_KEYS: { key: StatusFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "admin.allStatuses" },
+  { key: "upcoming", labelKey: "admin.rideStatusLabel.upcoming" },
+  { key: "active", labelKey: "admin.rideStatusLabel.active" },
+  { key: "completed", labelKey: "admin.rideStatusLabel.completed" },
+  { key: "cancelled", labelKey: "admin.rideStatusLabel.cancelled" },
 ];
 
-const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-  { key: "newest", label: "Newest" },
-  { key: "oldest", label: "Oldest" },
-  { key: "date", label: "Nearest date" },
-  { key: "price", label: "Price" },
+const SORT_OPTION_KEYS: { key: SortKey; labelKey: string }[] = [
+  { key: "newest", labelKey: "admin.sortLabel.newest" },
+  { key: "oldest", labelKey: "admin.sortLabel.oldest" },
+  { key: "date", labelKey: "admin.sortLabel.nearestDate" },
+  { key: "price", labelKey: "admin.sortLabel.price" },
 ];
 
 const statusColor = (status: RideStatus) => {
@@ -46,11 +47,25 @@ const statusColor = (status: RideStatus) => {
 };
 
 export default function AdminRidesScreen() {
+  const { t } = useTranslation();
   const { data: rides, loading, error, refresh } = useAdminCollection(subscribeAllRides);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sort, setSort] = useState<SortKey>("newest");
+
+  const categoryOptions = useMemo(
+    () => CATEGORY_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
+    [t],
+  );
+  const statusOptions = useMemo(
+    () => STATUS_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
+    [t],
+  );
+  const sortOptions = useMemo(
+    () => SORT_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
+    [t],
+  );
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -84,10 +99,14 @@ export default function AdminRidesScreen() {
     >
       <View style={styles.cardTop}>
         <View style={styles.categoryBadge}>
-          <Text style={styles.categoryBadgeText}>{item.category}</Text>
+          <Text style={styles.categoryBadgeText}>
+            {t(`admin.rideCategoryLabel.${item.category}`, { defaultValue: item.category })}
+          </Text>
         </View>
         <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
-        <Text style={styles.statusText}>{item.status}</Text>
+        <Text style={styles.statusText}>
+          {t(`admin.rideStatusLabel.${item.status}`, { defaultValue: item.status })}
+        </Text>
       </View>
 
       <Text style={styles.title} numberOfLines={1}>
@@ -95,29 +114,29 @@ export default function AdminRidesScreen() {
       </Text>
 
       <Text style={styles.subtitle} numberOfLines={1}>
-        {item.driverName} · {item.date || "No date"} {item.time ? `· ${item.time}` : ""}
+        {item.driverName} · {item.date || t("admin.noDateFallback")} {item.time ? `· ${item.time}` : ""}
       </Text>
 
       <View style={styles.metaRow}>
         {item.price !== null ? <Text style={styles.price}>₪{item.price}</Text> : null}
         {item.seats !== null ? (
-          <Text style={styles.metaText}>{item.seats} seats</Text>
+          <Text style={styles.metaText}>{t("admin.ridesSeatsCount", { count: item.seats })}</Text>
         ) : null}
       </View>
     </Pressable>
   );
 
   return (
-    <AdminScreen title="Rides" activeKey="rides">
+    <AdminScreen title={t("admin.rides")} activeKey="rides">
       <View style={styles.filtersWrap}>
-        <SearchBar value={search} onChangeText={setSearch} placeholder="Search driver, origin, destination" />
-        <FilterChips options={CATEGORY_OPTIONS} value={categoryFilter} onChange={setCategoryFilter} />
-        <FilterChips options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} />
-        <FilterChips options={SORT_OPTIONS} value={sort} onChange={setSort} />
+        <SearchBar value={search} onChangeText={setSearch} placeholder={t("admin.searchDriverOriginDest")} />
+        <FilterChips options={categoryOptions} value={categoryFilter} onChange={setCategoryFilter} />
+        <FilterChips options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
+        <FilterChips options={sortOptions} value={sort} onChange={setSort} />
       </View>
 
       {loading ? (
-        <LoadingState label="Loading rides..." />
+        <LoadingState label={t("admin.loadingRides")} />
       ) : error ? (
         <ErrorState message={error} onRetry={refresh} />
       ) : (
@@ -130,8 +149,8 @@ export default function AdminRidesScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="navigate-outline"
-              title="No rides found"
-              subtitle="Try a different search or filter."
+              title={t("admin.noRidesFound")}
+              subtitle={t("admin.tryDifferentSearchFilter")}
             />
           }
         />

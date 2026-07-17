@@ -12,8 +12,10 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
+import { useLanguage } from "../../../i18n/LanguageProvider";
 import DriverReviewsSection from "../../DriverReviewsSection";
 import { getDisplayedDriverId } from "../../driverReviewsLib";
 
@@ -77,11 +79,14 @@ const isTodayOrFuture = (dateText: string) => {
 };
 
 export default function ErrandsScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadErrands();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadErrands = async () => {
@@ -160,7 +165,7 @@ export default function ErrandsScreen() {
       setDrivers(filteredErrands);
     } catch (error: any) {
       console.log("Load errands error:", error.message);
-      Alert.alert("Error", "Could not load errands.");
+      Alert.alert(t("common.error"), t("workErrand.couldNotLoadErrands"));
     } finally {
       setLoading(false);
     }
@@ -180,7 +185,7 @@ export default function ErrandsScreen() {
       <SafeAreaView style={styles.safe}>
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#F58220" />
-          <Text style={styles.loadingText}>Loading errands...</Text>
+          <Text style={styles.loadingText}>{t("workErrand.loadingErrands")}</Text>
         </View>
       </SafeAreaView>
     );
@@ -190,7 +195,11 @@ export default function ErrandsScreen() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={25} color="#7A5C4B" />
+          <Ionicons
+            name={isRTL ? "arrow-forward" : "arrow-back"}
+            size={25}
+            color="#7A5C4B"
+          />
         </Pressable>
 
         <View style={styles.pageHeader}>
@@ -199,18 +208,16 @@ export default function ErrandsScreen() {
           </View>
 
           <View>
-            <Text style={styles.title}>Errands</Text>
-            <Text style={styles.subtitle}>Shopping, appointments, etc.</Text>
+            <Text style={styles.title}>{t("workErrand.errandsTitle")}</Text>
+            <Text style={styles.subtitle}>{t("workErrand.errandsSubtitle")}</Text>
           </View>
         </View>
 
         {drivers.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="location-outline" size={44} color="#7A665C" />
-            <Text style={styles.emptyTitle}>No errands found</Text>
-            <Text style={styles.emptyText}>
-              When someone creates an errand, it will appear here.
-            </Text>
+            <Text style={styles.emptyTitle}>{t("workErrand.noErrandsFound")}</Text>
+            <Text style={styles.emptyText}>{t("workErrand.noErrandsHint")}</Text>
           </View>
         ) : (
           <View style={styles.list}>
@@ -260,7 +267,7 @@ export default function ErrandsScreen() {
                           </Text>
                         </>
                       ) : (
-                        <Text style={styles.reviewsText}>New driver</Text>
+                        <Text style={styles.reviewsText}>{t("workErrand.newEmployer")}</Text>
                       )}
                     </View>
                   </View>
@@ -321,7 +328,7 @@ export default function ErrandsScreen() {
                         </View>
 
                         <Text style={styles.detailText}>
-                          {driver.seats} seats available
+                          {t("workErrand.seatsAvailableCount", { count: driver.seats })}
                         </Text>
                       </View>
 
@@ -379,7 +386,7 @@ export default function ErrandsScreen() {
                             : styles.petNotAllowedText,
                         ]}
                       >
-                        {driver.allowsPets ? "Pets allowed" : "No pets"}
+                        {driver.allowsPets ? t("rides.petsAllowed") : t("rides.noPets")}
                       </Text>
                     </View>
 
@@ -409,7 +416,7 @@ export default function ErrandsScreen() {
                             : styles.kidsNotAllowedText,
                         ]}
                       >
-                        {driver.canTakeKids ? "Kids allowed" : "No kids"}
+                        {driver.canTakeKids ? t("workErrand.kidsAllowed") : t("workErrand.kidsNotAllowed")}
                       </Text>
                     </View>
                   </View>
@@ -425,7 +432,7 @@ export default function ErrandsScreen() {
                     style={styles.bookButton}
                     onPress={() => handleSelectDriver(driver)}
                   >
-                    <Text style={styles.bookButtonText}>Select & Book</Text>
+                    <Text style={styles.bookButtonText}>{t("workErrand.selectAndBook")}</Text>
 
                     <View style={styles.bookArrowCircle}>
                       <Ionicons

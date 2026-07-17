@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import {
   DashboardStats,
@@ -19,12 +20,14 @@ import {
   RecentReport,
   RecentRide,
 } from "./adminDashboardLib";
+import { translateReportCategory } from "../i18n/formatters";
 import { adminColors, adminRadius, adminSpacing } from "./adminTheme";
 import AdminScreen from "./components/AdminScreen";
 import { ErrorState, LoadingState } from "./components/AdminStates";
 import StatCard from "./components/StatCard";
 
 export default function AdminDashboardScreen() {
+  const { t } = useTranslation();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentRides, setRecentRides] = useState<RecentRide[]>([]);
   const [recentReports, setRecentReports] = useState<RecentReport[]>([]);
@@ -48,11 +51,12 @@ export default function AdminDashboardScreen() {
       setRecentRides(ridesResult);
       setRecentReports(reportsResult);
     } catch (err: any) {
-      setError(err?.message || "Could not load the dashboard. Please try again.");
+      setError(err?.message || t("admin.couldNotLoadDashboard"));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -72,9 +76,9 @@ export default function AdminDashboardScreen() {
   }, []);
 
   return (
-    <AdminScreen title="Admin Dashboard" activeKey="dashboard" showBack={false}>
+    <AdminScreen title={t("admin.dashboardTitle")} activeKey="dashboard" showBack={false}>
       {loading ? (
-        <LoadingState label="Loading dashboard..." />
+        <LoadingState label={t("admin.loadingDashboard")} />
       ) : error ? (
         <ErrorState message={error} onRetry={() => load()} />
       ) : !stats ? null : (
@@ -85,74 +89,74 @@ export default function AdminDashboardScreen() {
           }
         >
           <View style={styles.headerRow}>
-            <Text style={styles.sectionTitle}>Quick actions</Text>
+            <Text style={styles.sectionTitle}>{t("admin.quickActions")}</Text>
             <Pressable style={styles.refreshButton} onPress={() => load(true)}>
               <Ionicons name="refresh" size={16} color={adminColors.primary} />
-              <Text style={styles.refreshText}>Refresh</Text>
+              <Text style={styles.refreshText}>{t("admin.refresh")}</Text>
             </Pressable>
           </View>
 
           <View style={styles.quickActions}>
-            <QuickAction icon="people-outline" label="Users" onPress={() => router.push("/admin/users" as any)} />
-            <QuickAction icon="car-outline" label="Drivers" onPress={() => router.push("/admin/drivers" as any)} />
-            <QuickAction icon="navigate-outline" label="Rides" onPress={() => router.push("/admin/rides" as any)} />
-            <QuickAction icon="book-outline" label="Bookings" onPress={() => router.push("/admin/bookings" as any)} />
-            <QuickAction icon="flag-outline" label="Reports" onPress={() => router.push("/admin/reports" as any)} />
+            <QuickAction icon="people-outline" label={t("admin.users")} onPress={() => router.push("/admin/users" as any)} />
+            <QuickAction icon="car-outline" label={t("admin.drivers")} onPress={() => router.push("/admin/drivers" as any)} />
+            <QuickAction icon="navigate-outline" label={t("admin.rides")} onPress={() => router.push("/admin/rides" as any)} />
+            <QuickAction icon="book-outline" label={t("admin.bookings")} onPress={() => router.push("/admin/bookings" as any)} />
+            <QuickAction icon="flag-outline" label={t("admin.reports")} onPress={() => router.push("/admin/reports" as any)} />
             <QuickAction
               icon="notifications-outline"
-              label="Notify"
+              label={t("admin.notifyAction")}
               onPress={() => router.push("/admin/notifications" as any)}
             />
           </View>
 
-          <Text style={styles.sectionTitle}>Overview</Text>
+          <Text style={styles.sectionTitle}>{t("admin.overview")}</Text>
           <View style={styles.statsGrid}>
-            <StatCard icon="people-outline" label="Total users" value={stats.totalUsers} />
-            <StatCard icon="person-outline" label="Passengers" value={stats.totalPassengers} tint="#EC4899" />
-            <StatCard icon="car-outline" label="Drivers" value={stats.totalDrivers} tint="#22C55E" />
+            <StatCard icon="people-outline" label={t("admin.totalUsers")} value={stats.totalUsers} />
+            <StatCard icon="person-outline" label={t("admin.passengers")} value={stats.totalPassengers} tint="#EC4899" />
+            <StatCard icon="car-outline" label={t("admin.drivers")} value={stats.totalDrivers} tint="#22C55E" />
             <StatCard
               icon="shield-checkmark-outline"
-              label="Pending verification"
+              label={t("admin.pendingVerification")}
               value={stats.pendingDriverVerifications}
               tint="#B86115"
             />
           </View>
 
-          <Text style={styles.sectionTitle}>Rides</Text>
+          <Text style={styles.sectionTitle}>{t("admin.rides")}</Text>
           <View style={styles.statsGrid}>
-            <StatCard icon="navigate-outline" label="Active today" value={stats.activeRides} />
-            <StatCard icon="calendar-outline" label="Upcoming" value={stats.upcomingRides} tint="#3B82F6" />
-            <StatCard icon="checkmark-done-outline" label="Completed" value={stats.completedRides} tint="#22C55E" />
-            <StatCard icon="close-circle-outline" label="Cancelled" value={stats.cancelledRides} tint="#DC2626" />
+            <StatCard icon="navigate-outline" label={t("admin.activeToday")} value={stats.activeRides} />
+            <StatCard icon="calendar-outline" label={t("admin.upcoming")} value={stats.upcomingRides} tint="#3B82F6" />
+            <StatCard icon="checkmark-done-outline" label={t("common.completed")} value={stats.completedRides} tint="#22C55E" />
+            <StatCard icon="close-circle-outline" label={t("bookings.status.cancelled")} value={stats.cancelledRides} tint="#DC2626" />
           </View>
 
-          <Text style={styles.sectionTitle}>Bookings</Text>
+          <Text style={styles.sectionTitle}>{t("admin.bookings")}</Text>
           <View style={styles.statsGrid}>
-            <StatCard icon="book-outline" label="Total bookings" value={stats.totalBookings} />
-            <StatCard icon="time-outline" label="Pending" value={stats.pendingBookings} tint="#B86115" />
-            <StatCard icon="checkmark-circle-outline" label="Confirmed" value={stats.confirmedBookings} tint="#22C55E" />
-            <StatCard icon="close-circle-outline" label="Cancelled" value={stats.cancelledBookings} tint="#DC2626" />
+            <StatCard icon="book-outline" label={t("admin.totalBookings")} value={stats.totalBookings} />
+            <StatCard icon="time-outline" label={t("bookings.status.pending")} value={stats.pendingBookings} tint="#B86115" />
+            <StatCard icon="checkmark-circle-outline" label={t("bookings.status.confirmed")} value={stats.confirmedBookings} tint="#22C55E" />
+            <StatCard icon="close-circle-outline" label={t("bookings.status.cancelled")} value={stats.cancelledBookings} tint="#DC2626" />
           </View>
 
-          <Text style={styles.sectionTitle}>Today &amp; this week</Text>
+          <Text style={styles.sectionTitle}>{t("admin.todayAndThisWeek")}</Text>
           <View style={styles.statsGrid}>
-            <StatCard icon="flag-outline" label="Open reports" value={stats.openReports} tint="#DC2626" />
-            <StatCard icon="add-circle-outline" label="Rides created today" value={stats.ridesCreatedToday} />
-            <StatCard icon="person-add-outline" label="New users this week" value={stats.newUsersThisWeek} />
+            <StatCard icon="flag-outline" label={t("admin.openReports")} value={stats.openReports} tint="#DC2626" />
+            <StatCard icon="add-circle-outline" label={t("admin.ridesCreatedToday")} value={stats.ridesCreatedToday} />
+            <StatCard icon="person-add-outline" label={t("admin.newUsersThisWeek")} value={stats.newUsersThisWeek} />
           </View>
 
           <View style={styles.headerRow}>
-            <Text style={styles.sectionTitle}>Recent rides</Text>
+            <Text style={styles.sectionTitle}>{t("admin.recentRides")}</Text>
             <Pressable
               style={styles.viewAllButton}
               onPress={() => router.push("/admin/rides" as any)}
             >
-              <Text style={styles.viewAllText}>View all</Text>
+              <Text style={styles.viewAllText}>{t("admin.viewAll")}</Text>
               <Ionicons name="chevron-forward" size={14} color={adminColors.primary} />
             </Pressable>
           </View>
           {recentRides.length === 0 ? (
-            <Text style={styles.emptyText}>No rides yet.</Text>
+            <Text style={styles.emptyText}>{t("admin.noRidesYet")}</Text>
           ) : (
             recentRides.map((ride) => (
               <Pressable
@@ -169,17 +173,17 @@ export default function AdminDashboardScreen() {
           )}
 
           <View style={styles.headerRow}>
-            <Text style={styles.sectionTitle}>Recent reports</Text>
+            <Text style={styles.sectionTitle}>{t("admin.recentReports")}</Text>
             <Pressable
               style={styles.viewAllButton}
               onPress={() => router.push("/admin/reports" as any)}
             >
-              <Text style={styles.viewAllText}>View all</Text>
+              <Text style={styles.viewAllText}>{t("admin.viewAll")}</Text>
               <Ionicons name="chevron-forward" size={14} color={adminColors.primary} />
             </Pressable>
           </View>
           {recentReports.length === 0 ? (
-            <Text style={styles.emptyText}>No reports yet.</Text>
+            <Text style={styles.emptyText}>{t("admin.noReportsYet")}</Text>
           ) : (
             recentReports.map((reportItem) => (
               <Pressable
@@ -189,7 +193,7 @@ export default function AdminDashboardScreen() {
               >
                 <Ionicons name="flag-outline" size={16} color={adminColors.textMuted} />
                 <Text style={styles.recentText} numberOfLines={1}>
-                  {reportItem.category}: {reportItem.description}
+                  {translateReportCategory(reportItem.category, t)}: {reportItem.description}
                 </Text>
               </Pressable>
             ))

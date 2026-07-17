@@ -7,6 +7,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import i18n from "../i18n";
+
 export type AdminSubscribe<T> = (
   onUpdate: (items: T[]) => void,
   onError: (error: unknown) => void,
@@ -29,7 +31,7 @@ export function useAdminCollection<T>(subscribe: AdminSubscribe<T>) {
       },
       (err) => {
         const message =
-          err instanceof Error ? err.message : "Could not load data. Please try again.";
+          err instanceof Error ? err.message : i18n.t("errors.couldNotLoadDataTryAgain");
         setError(message);
         setLoading(false);
       },

@@ -8,6 +8,7 @@ import { User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 
 import { db } from "../../firebase";
+import i18n from "../i18n";
 import { AccountStatus } from "./adminTypes";
 
 export const isUserAdmin = async (user: User | null): Promise<boolean> => {
@@ -65,7 +66,7 @@ export const getAdminProfile = async (uid: string): Promise<AdminProfile | null>
 
     return {
       id: uid,
-      name: data.name || "Admin",
+      name: data.name || i18n.t("admin.adminFallbackName"),
       email: data.email || "",
       photo: data.photo || null,
     };

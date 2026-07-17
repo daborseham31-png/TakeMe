@@ -11,7 +11,9 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
+import { useLanguage } from "../../i18n/LanguageProvider";
 import CurrentLocationButton, {
   CurrentLocationResult,
 } from "../CurrentLocationButton";
@@ -46,6 +48,9 @@ const getTodayDate = () => {
 };
 
 export default function SchoolRideScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
+
   const [schoolName, setSchoolName] = useState("");
   // Manual matching field ("Nazareth") — this is what driver search compares
   // against driver.from/driver.to. It is NEVER auto-filled with an exact GPS
@@ -128,20 +133,17 @@ export default function SchoolRideScreen() {
 
   const handleSearch = () => {
     if (!schoolName.trim() || !fromAddress.trim() || !schoolLocation.trim()) {
-      Alert.alert(
-        "Missing details",
-        "Please enter school name, pickup location, and school location.",
-      );
+      Alert.alert(t("auth.missingDetails"), t("validation.schoolMissingDetails"));
       return;
     }
 
     if (!fromPlace) {
-      setFromError("Please select a location from the list.");
+      setFromError(t("validation.selectLocationFromList"));
       return;
     }
 
     if (!schoolPlace) {
-      setSchoolLocationError("Please select a location from the list.");
+      setSchoolLocationError(t("validation.selectLocationFromList"));
       return;
     }
 
@@ -211,10 +213,7 @@ export default function SchoolRideScreen() {
     const cleanDate = normalizeDateToYMD(tripDate);
 
     if (!cleanDate) {
-      Alert.alert(
-        "Invalid date",
-        "Please choose a valid date today or in the future.",
-      );
+      Alert.alert(t("validation.invalidDateTitle"), t("validation.invalidDateFuture"));
       return;
     }
 
@@ -223,23 +222,17 @@ export default function SchoolRideScreen() {
     const cleanTime = normalizeTime(tripTime);
 
     if (!cleanTime) {
-      Alert.alert(
-        "Invalid time",
-        "Please choose a valid time between 00:00 and 23:59.",
-      );
+      Alert.alert(t("validation.invalidTimeTitle"), t("validation.invalidTime"));
       return;
     }
 
     if (!isTimeAvailableForDate(cleanDate, cleanTime)) {
-      Alert.alert(
-        "Invalid time",
-        "You cannot book a time that already passed.",
-      );
+      Alert.alert(t("validation.invalidTimeTitle"), t("validation.pastTime"));
       return;
     }
 
     if (seats < 1 || seats > 8) {
-      Alert.alert("Invalid seats", "Seats must be between 1 and 8.");
+      Alert.alert(t("validation.invalidSeatsTitle"), t("validation.invalidSeats"));
       return;
     }
 
@@ -271,18 +264,20 @@ export default function SchoolRideScreen() {
 
         <View style={styles.header}>
           <Text style={styles.headerEmoji}>🎒</Text>
-          <Text style={styles.title}>School Ride</Text>
+          <Text style={styles.title}>{t("school.headerTitle")}</Text>
         </View>
 
-        <Text style={styles.subtitle}>Book a ride to school or university</Text>
+        <Text style={styles.subtitle}>{t("school.subtitle")}</Text>
 
         <View style={styles.card}>
-          <Text style={styles.label}>School / University Name</Text>
+          <Text style={[styles.label, isRTL && styles.textRTL]}>
+            {t("school.schoolNameLabel")}
+          </Text>
           <View style={styles.inputRow}>
             <Ionicons name="school-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.input}
-              placeholder="School name"
+              placeholder={t("school.schoolNamePlaceholder")}
               placeholderTextColor="#8B7B6B"
               value={schoolName}
               onChangeText={setSchoolName}
@@ -292,38 +287,39 @@ export default function SchoolRideScreen() {
           <View style={styles.twoColumns}>
             <View style={styles.column}>
               <IsraelLocationAutocomplete
-                label="From"
+                label={t("booking.from")}
                 value={fromAddress}
                 onChangeText={handleFromChange}
                 onSelectLocation={(location) => {
                   setFromPlace(location);
                   setFromError("");
                 }}
-                placeholder="Enter departure city"
+                placeholder={t("booking.enterDepartureCity")}
                 error={fromError}
               />
             </View>
 
             <View style={styles.column}>
               <IsraelLocationAutocomplete
-                label="To"
+                label={t("booking.to")}
                 value={schoolLocation}
                 onChangeText={handleSchoolLocationChange}
                 onSelectLocation={(location) => {
                   setSchoolPlace(location);
                   setSchoolLocationError("");
                 }}
-                placeholder="School address"
+                placeholder={t("school.toPlaceholder")}
                 error={schoolLocationError}
               />
             </View>
           </View>
 
           <View style={styles.navPickupBox}>
-            <Text style={styles.label}>Pickup location for driver navigation</Text>
-            <Text style={styles.navPickupHint}>
-              Optional — used only to guide your driver to your exact spot.
-              Does not affect which drivers you see.
+            <Text style={[styles.label, isRTL && styles.textRTL]}>
+              {t("booking.pickupSectionTitle")}
+            </Text>
+            <Text style={[styles.navPickupHint, isRTL && styles.textRTL]}>
+              {t("booking.pickupSectionHint")}
             </Text>
 
             <CurrentLocationButton onLocated={handleUseCurrentLocation} />
@@ -331,7 +327,9 @@ export default function SchoolRideScreen() {
             {navAddress ? (
               <View style={styles.navPickupResult}>
                 <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
-                <Text style={styles.navPickupSavedText}>Location saved</Text>
+                <Text style={styles.navPickupSavedText}>
+                  {t("booking.locationSaved")}
+                </Text>
               </View>
             ) : null}
           </View>
@@ -339,7 +337,7 @@ export default function SchoolRideScreen() {
           {!weeklyBooking ? (
             <>
               <DateInput
-                label="Trip Date"
+                label={t("booking.tripDate")}
                 value={tripDate}
                 onChange={setTripDate}
                 showPicker={showTripDatePicker}
@@ -349,7 +347,7 @@ export default function SchoolRideScreen() {
               <View style={styles.twoColumns}>
                 <View style={styles.column}>
                   <TimeInput
-                    label="Trip Time"
+                    label={t("booking.tripTime")}
                     value={tripTime}
                     onChange={setTripTime}
                     showPicker={showTripTimePicker}
@@ -359,7 +357,9 @@ export default function SchoolRideScreen() {
                 </View>
 
                 <View style={styles.column}>
-                  <Text style={weeklyStyles.label}>Seats</Text>
+                  <Text style={[weeklyStyles.label, isRTL && styles.textRTL]}>
+                    {t("booking.seats")}
+                  </Text>
                   <View style={styles.seatsRow}>
                     <Pressable style={styles.seatButton} onPress={decreaseSeats}>
                       <Ionicons name="remove" size={20} color="#111827" />
@@ -383,7 +383,7 @@ export default function SchoolRideScreen() {
               color={weeklyBooking ? "#F58220" : "#8B7B6B"}
             />
             <Ionicons name="calendar-outline" size={16} color="#7C5F46" />
-            <Text style={styles.weeklyText}>Book for the whole week</Text>
+            <Text style={styles.weeklyText}>{t("booking.bookWholeWeek")}</Text>
           </Pressable>
 
           {weeklyBooking ? (
@@ -401,10 +401,14 @@ export default function SchoolRideScreen() {
         <View style={styles.card}>
           <View style={styles.sectionHeader}>
             <Ionicons name="person-outline" size={18} color="#F58220" />
-            <Text style={styles.sectionTitle}>Driver Preferences</Text>
+            <Text style={styles.sectionTitle}>
+              {t("booking.driverPreferences")}
+            </Text>
           </View>
 
-          <Text style={styles.label}>Driver Gender</Text>
+          <Text style={[styles.label, isRTL && styles.textRTL]}>
+            {t("booking.driverGender")}
+          </Text>
           <View style={styles.optionRow}>
             {(["any", "male", "female"] as const).map((item) => (
               <Pressable
@@ -421,13 +425,19 @@ export default function SchoolRideScreen() {
                     genderPref === item && styles.optionTextActive,
                   ]}
                 >
-                  {item === "any" ? "Any" : item === "male" ? "Male" : "Female"}
+                  {item === "any"
+                    ? t("common.any")
+                    : item === "male"
+                      ? t("common.male")
+                      : t("common.female")}
                 </Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={styles.label}>Driver speaks</Text>
+          <Text style={[styles.label, isRTL && styles.textRTL]}>
+            {t("booking.driverSpeaks")}
+          </Text>
           <View style={styles.languageRow}>
             {LANGUAGES_LIST.map((lang) => {
               const active = selectedLanguages.includes(lang.key);
@@ -457,7 +467,7 @@ export default function SchoolRideScreen() {
 
         <Pressable style={styles.searchButton} onPress={handleSearch}>
           <Ionicons name="search-outline" size={18} color="#FFFFFF" />
-          <Text style={styles.searchText}>Search Drivers</Text>
+          <Text style={styles.searchText}>{t("booking.searchDrivers")}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -531,6 +541,10 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 8,
     marginTop: 10,
+  },
+  textRTL: {
+    textAlign: "right",
+    writingDirection: "rtl",
   },
   inputRow: {
     flexDirection: "row",

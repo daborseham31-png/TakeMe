@@ -11,32 +11,33 @@ import { router } from "expo-router";
 import { signOut } from "firebase/auth";
 import React from "react";
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth } from "../../../firebase";
 import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 
 type MenuItem = {
   key: string;
-  label: string;
+  labelKey: string;
   icon: keyof typeof Ionicons.glyphMap;
   path: string;
 };
 
 const MENU_ITEMS: MenuItem[] = [
-  { key: "dashboard", label: "Dashboard", icon: "grid-outline", path: "/admin" },
+  { key: "dashboard", labelKey: "admin.dashboard", icon: "grid-outline", path: "/admin" },
   {
     key: "reports",
-    label: "Reports & Support",
+    labelKey: "admin.reportsAndSupport",
     icon: "flag-outline",
     path: "/admin/reports",
   },
   {
     key: "notifications",
-    label: "Notifications",
+    labelKey: "admin.notifications",
     icon: "notifications-outline",
     path: "/admin/notifications",
   },
-  { key: "settings", label: "Settings", icon: "settings-outline", path: "/admin/settings" },
+  { key: "settings", labelKey: "admin.settings", icon: "settings-outline", path: "/admin/settings" },
 ];
 
 type Props = {
@@ -46,6 +47,8 @@ type Props = {
 };
 
 export default function AdminMenuModal({ visible, onClose, activeKey }: Props) {
+  const { t } = useTranslation();
+
   const handleNavigate = (path: string) => {
     onClose();
     router.push(path as any);
@@ -54,10 +57,10 @@ export default function AdminMenuModal({ visible, onClose, activeKey }: Props) {
   const handleLogout = () => {
     onClose();
 
-    Alert.alert("Log out", "Are you sure you want to log out of the admin panel?", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("admin.logOutConfirmTitle"), t("admin.logOutConfirmMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Log out",
+        text: t("admin.logOutConfirmTitle"),
         style: "destructive",
         onPress: async () => {
           await signOut(auth);
@@ -74,7 +77,7 @@ export default function AdminMenuModal({ visible, onClose, activeKey }: Props) {
 
         <View style={styles.sheet}>
           <View style={styles.handle} />
-          <Text style={styles.title}>Admin Menu</Text>
+          <Text style={styles.title}>{t("admin.menuTitle")}</Text>
 
           {MENU_ITEMS.map((item) => (
             <Pressable
@@ -90,7 +93,7 @@ export default function AdminMenuModal({ visible, onClose, activeKey }: Props) {
               <Text
                 style={[styles.rowText, activeKey === item.key && styles.rowTextActive]}
               >
-                {item.label}
+                {t(item.labelKey)}
               </Text>
               <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
             </Pressable>
@@ -98,7 +101,7 @@ export default function AdminMenuModal({ visible, onClose, activeKey }: Props) {
 
           <Pressable style={styles.logoutRow} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={20} color={adminColors.danger} />
-            <Text style={styles.logoutText}>Log Out</Text>
+            <Text style={styles.logoutText}>{t("admin.logOut")}</Text>
           </Pressable>
         </View>
       </View>

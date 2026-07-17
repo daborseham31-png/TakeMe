@@ -13,6 +13,10 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { auth } from "../../firebase";
+
+export default function ForgotPasswordScreen() {
+  const { t } = useTranslation();
 import { auth, firebaseAuthDomain } from "../../firebase";
 import { useLanguage } from "../i18n/LanguageProvider";
 
@@ -55,6 +59,8 @@ export default function ForgotPasswordScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const handleReset = async () => {
+    if (!email) {
+      alert(t("auth.pleaseEnterYourEmail"));
     const trimmedEmail = email.trim();
 
     if (!trimmedEmail) {
@@ -65,6 +71,8 @@ export default function ForgotPasswordScreen() {
     if (submitting) return;
 
     try {
+      await sendPasswordResetEmail(auth, email.trim());
+      alert(t("auth.resetEmailSentMessage"));
       setSubmitting(true);
 
       // Best-effort — affects which language Firebase's own default email
@@ -99,6 +107,14 @@ export default function ForgotPasswordScreen() {
   return (
     <SafeAreaView style={styles.page}>
       <View style={styles.card}>
+        <Text style={styles.title}>{t("auth.resetPasswordTitle")}</Text>
+        <Text style={styles.subtitle}>
+          {t("auth.enterEmailToReceiveLink")}
+        </Text>
+
+        <Text style={styles.label}>{t("auth.email")}</Text>
+        <TextInput
+          style={styles.input}
         <Text style={[styles.title, isRTL && styles.textRTL]}>
           {t("auth.forgotPasswordTitle")}
         </Text>
@@ -120,6 +136,12 @@ export default function ForgotPasswordScreen() {
           editable={!submitting}
         />
 
+        <Pressable style={styles.button} onPress={handleReset}>
+          <Text style={styles.buttonText}>{t("auth.sendResetLinkButton")}</Text>
+        </Pressable>
+
+        <Pressable onPress={() => router.replace("/")}>
+          <Text style={styles.backText}>{t("auth.backToLoginButton")}</Text>
         <Pressable
           style={[styles.button, submitting && styles.buttonDisabled]}
           onPress={handleReset}

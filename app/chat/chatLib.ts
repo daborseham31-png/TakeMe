@@ -28,6 +28,7 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
+import i18n from "../i18n";
 
 export type ChatUser = {
   id: string;
@@ -52,7 +53,7 @@ export const searchUsers = async (term: string): Promise<ChatUser[]> => {
       const data = d.data();
       return {
         id: d.id,
-        name: data.name || "User",
+        name: data.name || i18n.t("common.user"),
         role: data.role || data.userType || "user",
       };
     })
@@ -64,7 +65,7 @@ export const searchUsers = async (term: string): Promise<ChatUser[]> => {
 // Get or create the conversation between the current user and `other`.
 export const openConversation = async (other: ChatUser): Promise<string> => {
   const me = auth.currentUser;
-  if (!me) throw new Error("You must be logged in.");
+  if (!me) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
 
   const id = conversationId(me.uid, other.id);
   const ref = doc(db, "conversations", id);
@@ -114,7 +115,7 @@ export const sendMessage = async (
   receiverId: string,
 ) => {
   const me = auth.currentUser;
-  if (!me) throw new Error("You must be logged in.");
+  if (!me) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
 
   const clean = text.trim();
   if (!clean) return;

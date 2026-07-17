@@ -9,11 +9,12 @@ import {
     Text,
     View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 type DeliveryOption = {
   key: string;
-  title: string;
-  desc: string;
+  titleKey: string;
+  descKey: string;
   icon: keyof typeof Ionicons.glyphMap;
   iconColor: string;
   iconBg: string;
@@ -23,8 +24,8 @@ type DeliveryOption = {
 const OPTIONS: DeliveryOption[] = [
   {
     key: "deliver-item",
-    title: "Deliver Item",
-    desc: "Send an item from one person to another",
+    titleKey: "driverCreate.deliverItemTitle",
+    descKey: "driverCreate.deliverItemDesc",
     icon: "cube-outline",
     iconColor: "#A855F7",
     iconBg: "#F3E8FF",
@@ -32,8 +33,8 @@ const OPTIONS: DeliveryOption[] = [
   },
   {
     key: "store-delivery",
-    title: "Store Delivery",
-    desc: "Bring items from a store or supermarket",
+    titleKey: "driverCreate.storeDeliveryTitle",
+    descKey: "driverCreate.storeDeliveryDesc",
     icon: "storefront-outline",
     iconColor: "#F58220",
     iconBg: "#FFF3E8",
@@ -42,6 +43,8 @@ const OPTIONS: DeliveryOption[] = [
 ];
 
 export default function ItemDeliverySelectionScreen() {
+  const { t } = useTranslation();
+
   return (
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -50,8 +53,8 @@ export default function ItemDeliverySelectionScreen() {
         </Pressable>
 
         <View style={styles.card}>
-          <Text style={styles.title}>Item Delivery</Text>
-          <Text style={styles.subtitle}>What would you like to offer?</Text>
+          <Text style={styles.title}>{t("driverCreate.itemDeliveryTitle")}</Text>
+          <Text style={styles.subtitle}>{t("driverCreate.whatToOffer")}</Text>
 
           {OPTIONS.map((option) => (
             <Pressable
@@ -70,8 +73,8 @@ export default function ItemDeliverySelectionScreen() {
               </View>
 
               <View style={styles.optionTextBox}>
-                <Text style={styles.optionTitle}>{option.title}</Text>
-                <Text style={styles.optionDesc}>{option.desc}</Text>
+                <Text style={styles.optionTitle}>{t(option.titleKey)}</Text>
+                <Text style={styles.optionDesc}>{t(option.descKey)}</Text>
               </View>
             </Pressable>
           ))}

@@ -31,7 +31,10 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "react-i18next";
+
 import { db } from "../../../firebase";
+import { translateProblemTypesList } from "../../i18n/formatters";
 import BitBadge from "../BitBadge";
 import { openBitPayment } from "../bitPayment";
 import { payRoadsideHelp, RoadsidePaymentMethod } from "./roadsideLib";
@@ -63,11 +66,12 @@ const normalize = (id: string, data: any): BookingDoc => ({
 });
 
 export default function RoadsideHelpPaymentScreen() {
+  const { t } = useTranslation();
   const params = useLocalSearchParams();
 
   const bookingIdParam = String(params.bookingId || "");
   const requestId = String(params.requestId || "");
-  const driverNameParam = String(params.driverName || "Your helper");
+  const driverNameParam = String(params.driverName || t("roadsideHelp.yourHelperFallback"));
   const amountParam = Number(params.amount) || 0;
 
   const [booking, setBooking] = useState<BookingDoc | null>(null);
@@ -154,18 +158,22 @@ export default function RoadsideHelpPaymentScreen() {
       setProcessing(true);
       const result = await payRoadsideHelp(bookingId, method);
 
-      Alert.alert("Payment successful", `You paid ₪${result.amount}.`, [
-        {
-          text: "OK",
-          onPress: () =>
-            router.replace({
-              pathname: "/(tabs)/bookings",
-              params: { tab: "passenger", bookingId },
-            } as any),
-        },
-      ]);
+      Alert.alert(
+        t("roadsideHelp.paymentSuccessfulTitle"),
+        t("roadsideHelp.paidAmountMessage", { amount: result.amount }),
+        [
+          {
+            text: t("common.ok"),
+            onPress: () =>
+              router.replace({
+                pathname: "/(tabs)/bookings",
+                params: { tab: "passenger", bookingId },
+              } as any),
+          },
+        ],
+      );
     } catch (error: any) {
-      Alert.alert("Payment failed", error?.message || "Please try again.");
+      Alert.alert(t("roadsideHelp.paymentFailedTitle"), error?.message || t("validation.pleaseTryAgain"));
     } finally {
       setProcessing(false);
     }
@@ -182,10 +190,10 @@ export default function RoadsideHelpPaymentScreen() {
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-          <Text style={styles.backText}>Back</Text>
+          <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
 
-        <Text style={styles.title}>Roadside Help Payment</Text>
+        <Text style={styles.title}>{t("roadsideHelp.paymentTitle")}</Text>
 
         {loading ? (
           <View style={styles.loadingBox}>
@@ -194,16 +202,19 @@ export default function RoadsideHelpPaymentScreen() {
         ) : notFound || !booking ? (
           <View style={styles.card}>
             <Text style={styles.summaryText}>
-              This roadside help booking could not be found.
+              {t("roadsideHelp.bookingNotFoundMessage")}
             </Text>
           </View>
         ) : alreadyPaid ? (
           <View style={styles.card}>
             <View style={styles.paidBox}>
               <Ionicons name="checkmark-circle" size={40} color="#16A34A" />
-              <Text style={styles.paidTitle}>Already paid</Text>
+              <Text style={styles.paidTitle}>{t("roadsideHelp.alreadyPaidTitle")}</Text>
               <Text style={styles.summaryText}>
-                ₪{booking.paidAmount ?? amount} was paid to {driverName}.
+                {t("roadsideHelp.paidToMessage", {
+                  amount: booking.paidAmount ?? amount,
+                  name: driverName,
+                })}
               </Text>
             </View>
           </View>
@@ -212,12 +223,12 @@ export default function RoadsideHelpPaymentScreen() {
             <View style={styles.card}>
               <View style={styles.cardTitleRow}>
                 <Ionicons name="checkmark-circle" size={20} color="#F58220" />
-                <Text style={styles.cardTitle}>Trip Summary</Text>
+                <Text style={styles.cardTitle}>{t("roadsideHelp.tripSummary")}</Text>
               </View>
 
               <View style={styles.summaryRow}>
                 <Ionicons name="construct-outline" size={16} color="#7C5F46" />
-                <Text style={styles.summaryStrong}>Payment to: {driverName}</Text>
+                <Text style={styles.summaryStrong}>{t("roadsideHelp.paymentToLabel", { name: driverName })}</Text>
               </View>
 
               {booking.address ? (
@@ -231,7 +242,7 @@ export default function RoadsideHelpPaymentScreen() {
                 <View style={styles.summaryRow}>
                   <Ionicons name="build-outline" size={16} color="#7C5F46" />
                   <Text style={styles.summaryText}>
-                    {booking.problemTypes.join(", ")}
+                    {translateProblemTypesList(booking.problemTypes, t)}
                   </Text>
                 </View>
               ) : null}
@@ -239,7 +250,7 @@ export default function RoadsideHelpPaymentScreen() {
               <View style={styles.divider} />
 
               <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Amount</Text>
+                <Text style={styles.totalLabel}>{t("rides.amount")}</Text>
                 <Text style={styles.totalValue}>₪{amount}</Text>
               </View>
             </View>
@@ -247,8 +258,7 @@ export default function RoadsideHelpPaymentScreen() {
             {!readyForPayment ? (
               <View style={styles.card}>
                 <Text style={styles.summaryText}>
-                  This help isn&apos;t ready for payment yet. Please wait for the
-                  driver to mark it finished.
+                  {t("roadsideHelp.notReadyForPaymentMessage")}
                 </Text>
               </View>
             ) : (
@@ -256,7 +266,7 @@ export default function RoadsideHelpPaymentScreen() {
                 <View style={styles.card}>
                   <View style={styles.cardTitleRow}>
                     <Ionicons name="card-outline" size={20} color="#F58220" />
-                    <Text style={styles.cardTitle}>Payment Method</Text>
+                    <Text style={styles.cardTitle}>{t("rides.paymentMethod")}</Text>
                   </View>
 
                   <View style={styles.methodRow}>
@@ -274,7 +284,7 @@ export default function RoadsideHelpPaymentScreen() {
                           method === "cash" && styles.methodTextActive,
                         ]}
                       >
-                        Cash
+                        {t("common.cash")}
                       </Text>
                     </Pressable>
 
@@ -292,7 +302,7 @@ export default function RoadsideHelpPaymentScreen() {
                           method === "bit" && styles.methodTextActive,
                         ]}
                       >
-                        Pay with BIT
+                        {t("roadsideHelp.payWithBit")}
                       </Text>
                     </Pressable>
                   </View>
@@ -305,10 +315,9 @@ export default function RoadsideHelpPaymentScreen() {
                         color="#B86115"
                       />
                       <Text style={styles.bitInfoText}>
-                        BIT was opened with{" "}
-                        {booking.driverPhone || "the driver's number"} copied
-                        to your clipboard — paste it into BIT&apos;s &quot;Send
-                        money to&quot; field, then press Pay below.
+                        {t("roadsideHelp.bitOpenedInfo", {
+                          phone: booking.driverPhone || t("roadsideHelp.theDriversNumberFallback"),
+                        })}
                       </Text>
                     </View>
                   ) : null}
@@ -321,7 +330,7 @@ export default function RoadsideHelpPaymentScreen() {
                     color="#7C5F46"
                   />
                   <Text style={styles.secureText}>
-                    Your payment is secure and encrypted
+                    {t("roadsideHelp.securePaymentNote")}
                   </Text>
                 </View>
 
@@ -338,7 +347,7 @@ export default function RoadsideHelpPaymentScreen() {
                   ) : (
                     <>
                       <Ionicons name="card-outline" size={20} color="#FFFFFF" />
-                      <Text style={styles.payText}>Pay ₪{amount}</Text>
+                      <Text style={styles.payText}>{t("roadsideHelp.payAmount", { amount })}</Text>
                     </>
                   )}
                 </Pressable>

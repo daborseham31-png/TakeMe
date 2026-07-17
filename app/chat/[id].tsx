@@ -19,7 +19,10 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "react-i18next";
+
 import { auth, db } from "../../firebase";
+import { useLanguage } from "../i18n/LanguageProvider";
 import { markConversationRead, sendMessage } from "./chatLib";
 
 type Message = {
@@ -38,11 +41,13 @@ const formatTime = (seconds: number) => {
 };
 
 export default function ChatScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
   const convId = typeof params.id === "string" ? params.id : "";
   const otherId = typeof params.otherId === "string" ? params.otherId : "";
   const otherName =
-    typeof params.otherName === "string" ? params.otherName : "Chat";
+    typeof params.otherName === "string" ? params.otherName : t("messages.chatFallbackTitle");
 
   const me = auth.currentUser?.uid ?? null;
   const [messages, setMessages] = useState<Message[]>([]);
@@ -110,7 +115,7 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.page}>
       <View style={styles.headerBar}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Ionicons name="arrow-back" size={24} color="#7C5F46" />
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
         </Pressable>
         <View style={styles.headerAvatar}>
           <Text style={styles.headerAvatarText}>
@@ -141,7 +146,7 @@ export default function ChatScreen() {
           >
             {messages.length === 0 ? (
               <Text style={styles.empty}>
-                No messages yet. Say hello 👋
+                {t("messages.noMessagesYetSayHello")}
               </Text>
             ) : (
               messages.map((m) => {
@@ -187,7 +192,7 @@ export default function ChatScreen() {
         <View style={styles.inputBar}>
           <TextInput
             style={styles.input}
-            placeholder="Type a message…"
+            placeholder={t("messages.typeMessagePlaceholder")}
             placeholderTextColor="#8B7B6B"
             value={text}
             onChangeText={setText}

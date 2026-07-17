@@ -12,13 +12,16 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "react-i18next";
+
 import { auth } from "../../firebase";
+import { useLanguage } from "../i18n/LanguageProvider";
 import { fetchDriverEligibility } from "./driverEligibility";
 
 type Category = {
   key: string;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
   background: string;
@@ -28,8 +31,8 @@ type Category = {
 const categories: Category[] = [
   {
     key: "school",
-    label: "School Rides",
-    description: "Offer student rides",
+    labelKey: "driverCreate.schoolRidesLabel",
+    descriptionKey: "driverCreate.schoolRidesDesc",
     icon: "school-outline",
     color: "#3B82F6",
     background: "#EAF2FF",
@@ -37,8 +40,8 @@ const categories: Category[] = [
   },
   {
     key: "personal",
-    label: "Personal Rides",
-    description: "Drive people to places",
+    labelKey: "driverCreate.personalRidesLabel",
+    descriptionKey: "driverCreate.personalRidesDesc",
     icon: "person-outline",
     color: "#EC4899",
     background: "#FDEAF5",
@@ -46,8 +49,8 @@ const categories: Category[] = [
   },
   {
     key: "workErrands",
-    label: "Work Helpers",
-    description: "Post helper work jobs",
+    labelKey: "driverCreate.workHelpersLabel",
+    descriptionKey: "driverCreate.workHelpersDesc",
     icon: "briefcase-outline",
     color: "#22C55E",
     background: "#EAF9EF",
@@ -55,8 +58,8 @@ const categories: Category[] = [
   },
   {
     key: "errands",
-    label: "Errands",
-    description: "Offer errands with others",
+    labelKey: "driverCreate.errandsLabel",
+    descriptionKey: "driverCreate.errandsDesc",
     icon: "location-outline",
     color: "#F58220",
     background: "#FFF2E8",
@@ -64,8 +67,8 @@ const categories: Category[] = [
   },
   {
     key: "delivery",
-    label: "Item Delivery",
-    description: "Deliver items or orders",
+    labelKey: "driverCreate.itemDeliveryLabel",
+    descriptionKey: "driverCreate.itemDeliveryDesc",
     icon: "cube-outline",
     color: "#A855F7",
     background: "#F4EAFE",
@@ -74,6 +77,8 @@ const categories: Category[] = [
 ];
 
 export default function AddDriverRouteScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const { width } = useWindowDimensions();
 
   const pagePadding = 20;
@@ -131,13 +136,13 @@ export default function AddDriverRouteScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={26} color="#7C5F46" />
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={26} color="#7C5F46" />
         </Pressable>
 
         <View style={styles.header}>
-          <Text style={styles.title}>What do you want to offer?</Text>
+          <Text style={styles.title}>{t("driverCreate.addRouteTitle")}</Text>
           <Text style={styles.subtitle}>
-            Choose the service you want to provide
+            {t("driverCreate.addRouteSubtitle")}
           </Text>
         </View>
 
@@ -178,9 +183,9 @@ export default function AddDriverRouteScreen() {
                 </View>
 
                 <View style={styles.cardTextBox}>
-                  <Text style={styles.cardTitle}>{category.label}</Text>
+                  <Text style={styles.cardTitle}>{t(category.labelKey)}</Text>
                   <Text style={styles.cardDescription}>
-                    {category.description}
+                    {t(category.descriptionKey)}
                   </Text>
                 </View>
               </Pressable>

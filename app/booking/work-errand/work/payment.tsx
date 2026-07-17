@@ -25,8 +25,10 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
+import { useLanguage } from "../../../i18n/LanguageProvider";
 import BitBadge from "../../BitBadge";
 import { openBitPayment } from "../../bitPayment";
 import { payCompletedWork, WorkPaymentInput } from "../workErrandLib";
@@ -39,6 +41,8 @@ const num = (value: unknown): number => {
 };
 
 export default function WorkPaymentScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
 
   const bookingId = String(params.bookingId || "");
@@ -98,7 +102,7 @@ export default function WorkPaymentScreen() {
     if (!bookingId || alreadyPaid) return;
 
     if (!method) {
-      Alert.alert("Choose payment", "Please select Cash or Pay with BIT.");
+      Alert.alert(t("rides.choosePaymentTitle"), t("rides.choosePaymentMessage"));
       return;
     }
 
@@ -110,11 +114,11 @@ export default function WorkPaymentScreen() {
       await payCompletedWork(bookingId, amount, payment);
 
       Alert.alert(
-        "Payment sent",
-        `You paid ${payeeName} ₪${amount}.`,
+        t("workErrand.paymentSentTitle"),
+        t("workErrand.paidAmountMessage", { name: payeeName, amount }),
         [
           {
-            text: "OK",
+            text: t("common.ok"),
             onPress: () =>
               router.replace({
                 pathname: "/(tabs)/bookings",
@@ -124,7 +128,7 @@ export default function WorkPaymentScreen() {
         ],
       );
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not confirm payment.");
+      Alert.alert(t("common.error"), error?.message || t("rides.couldNotConfirmPayment"));
     } finally {
       setProcessing(false);
     }
@@ -145,9 +149,9 @@ export default function WorkPaymentScreen() {
       <SafeAreaView style={styles.safe}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={44} color="#8B7B6B" />
-          <Text style={styles.emptyTitle}>Booking not found</Text>
+          <Text style={styles.emptyTitle}>{t("rides.bookingNotFound")}</Text>
           <Pressable style={styles.backLink} onPress={() => router.back()}>
-            <Text style={styles.backLinkText}>Go back</Text>
+            <Text style={styles.backLinkText}>{t("common.goBack")}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -159,15 +163,15 @@ export default function WorkPaymentScreen() {
       <SafeAreaView style={styles.safe}>
         <View style={styles.center}>
           <Ionicons name="checkmark-circle-outline" size={54} color="#16A34A" />
-          <Text style={styles.emptyTitle}>Already paid</Text>
+          <Text style={styles.emptyTitle}>{t("workErrand.alreadyPaidTitle")}</Text>
           <Text style={styles.emptyText}>
-            You already paid {payeeName} for this job.
+            {t("workErrand.alreadyPaidMessage", { name: payeeName })}
           </Text>
           <Pressable
             style={styles.backLink}
             onPress={() => router.replace("/(tabs)/bookings" as any)}
           >
-            <Text style={styles.backLinkText}>Go to My Bookings</Text>
+            <Text style={styles.backLinkText}>{t("rides.goToMyBookings")}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -182,33 +186,41 @@ export default function WorkPaymentScreen() {
       >
         <ScrollView contentContainerStyle={styles.container}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-            <Text style={styles.backText}>Back</Text>
+            <Ionicons
+              name={isRTL ? "arrow-forward" : "arrow-back"}
+              size={22}
+              color="#7C5F46"
+            />
+            <Text style={styles.backText}>{t("common.back")}</Text>
           </Pressable>
 
-          <Text style={styles.title}>Pay Worker</Text>
+          <Text style={styles.title}>{t("workErrand.payWorkerTitle")}</Text>
           <Text style={styles.subtitle}>
-            The job is complete — pay {payeeName} for their work.
+            {t("workErrand.payWorkerSubtitle", { name: payeeName })}
           </Text>
 
           <View style={styles.summaryCard}>
             <View style={styles.summaryRow}>
               <Ionicons name="person-outline" size={15} color="#7C5F46" />
-              <Text style={styles.summaryText}>Payment to: {payeeName}</Text>
+              <Text style={styles.summaryText}>
+                {t("workErrand.paymentToLabel", { name: payeeName })}
+              </Text>
             </View>
 
             <View style={styles.summaryRow}>
               <Ionicons name="wallet-outline" size={15} color="#7C5F46" />
-              <Text style={styles.summaryText}>Paid by: {payerName}</Text>
+              <Text style={styles.summaryText}>
+                {t("workErrand.paidByLabel", { name: payerName })}
+              </Text>
             </View>
 
             <View style={styles.amountRow}>
-              <Text style={styles.amountLabel}>Amount</Text>
+              <Text style={styles.amountLabel}>{t("rides.amount")}</Text>
               <Text style={styles.amountValue}>₪{amount}</Text>
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Payment Method</Text>
+          <Text style={styles.sectionTitle}>{t("rides.paymentMethod")}</Text>
 
           <View style={styles.methodRow}>
             <Pressable
@@ -229,7 +241,7 @@ export default function WorkPaymentScreen() {
                   method === "cash" && styles.methodTextActive,
                 ]}
               >
-                Cash
+                {t("common.cash")}
               </Text>
             </Pressable>
 
@@ -247,7 +259,7 @@ export default function WorkPaymentScreen() {
                   method === "bit" && styles.methodTextActive,
                 ]}
               >
-                Pay with BIT
+                {t("rides.payWithBit")}
               </Text>
             </Pressable>
           </View>
@@ -260,7 +272,7 @@ export default function WorkPaymentScreen() {
                 color="#B86115"
               />
               <Text style={styles.infoText}>
-                You&apos;ll pay {payeeName} in cash. Press Continue to confirm.
+                {t("workErrand.cashInfoTextNamed", { name: payeeName })}
               </Text>
             </View>
           ) : null}
@@ -270,15 +282,15 @@ export default function WorkPaymentScreen() {
               <View style={styles.demoBanner}>
                 <Ionicons name="information-circle-outline" size={15} color="#B86115" />
                 <Text style={styles.demoText}>
-                  BIT was opened with {payeePhone || `${payeeName}'s number`}{" "}
-                  copied to your clipboard — paste it into BIT&apos;s &quot;Send
-                  money to&quot; field, then press Continue below.
+                  {t("rides.bitOpenedBanner", {
+                    phone: payeePhone || t("workErrand.theirNumber", { name: payeeName }),
+                  })}
                 </Text>
               </View>
 
               <Pressable style={styles.reopenBitButton} onPress={handleSelectBit}>
                 <Ionicons name="open-outline" size={16} color="#F58220" />
-                <Text style={styles.reopenBitText}>Reopen BIT</Text>
+                <Text style={styles.reopenBitText}>{t("rides.reopenBit")}</Text>
               </Pressable>
             </View>
           ) : null}
@@ -294,7 +306,7 @@ export default function WorkPaymentScreen() {
             {processing ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.continueText}>Continue</Text>
+              <Text style={styles.continueText}>{t("common.continue")}</Text>
             )}
           </Pressable>
         </ScrollView>

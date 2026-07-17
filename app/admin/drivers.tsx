@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { adminColors, adminRadius, adminSpacing } from "./adminTheme";
 import { subscribeDrivers } from "./adminDriversLib";
@@ -11,15 +12,16 @@ import { EmptyState, ErrorState, LoadingState } from "./components/AdminStates";
 import FilterChips from "./components/FilterChips";
 import SearchBar from "./components/SearchBar";
 import { useAdminCollection } from "./useAdminCollection";
+import { translateDriverVerificationStatus } from "../i18n/formatters";
 
 type StatusFilter = "all" | "pending_admin_review" | "approved" | "rejected" | "suspended";
 
-const STATUS_OPTIONS: { key: StatusFilter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "pending_admin_review", label: "Pending" },
-  { key: "approved", label: "Approved" },
-  { key: "rejected", label: "Rejected" },
-  { key: "suspended", label: "Suspended" },
+const STATUS_OPTION_KEYS: { key: StatusFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "admin.allFilter" },
+  { key: "pending_admin_review", labelKey: "admin.pendingFilter" },
+  { key: "approved", labelKey: "admin.approvedFilter" },
+  { key: "rejected", labelKey: "admin.rejectedFilter" },
+  { key: "suspended", labelKey: "admin.suspended" },
 ];
 
 const statusColor = (status: string) => {
@@ -29,9 +31,15 @@ const statusColor = (status: string) => {
 };
 
 export default function AdminDriversScreen() {
+  const { t } = useTranslation();
   const { data: drivers, loading, error, refresh } = useAdminCollection(subscribeDrivers);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
+  const statusOptions = useMemo(
+    () => STATUS_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
+    [t],
+  );
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -68,7 +76,7 @@ export default function AdminDriversScreen() {
           {item.name}
         </Text>
         <Text style={styles.detail} numberOfLines={1}>
-          {item.phone || item.email || "No contact info"}
+          {item.phone || item.email || t("admin.noContactInfo")}
         </Text>
         <View style={styles.badgeRow}>
           <View
@@ -78,7 +86,7 @@ export default function AdminDriversScreen() {
             ]}
           />
           <Text style={styles.statusText}>
-            {item.driverVerificationStatus || "unknown"}
+            {translateDriverVerificationStatus(item.driverVerificationStatus, t)}
           </Text>
           {item.ratingCount > 0 ? (
             <>
@@ -95,14 +103,14 @@ export default function AdminDriversScreen() {
   );
 
   return (
-    <AdminScreen title="Drivers" activeKey="drivers">
+    <AdminScreen title={t("admin.drivers")} activeKey="drivers">
       <View style={styles.filtersWrap}>
-        <SearchBar value={search} onChangeText={setSearch} placeholder="Search by name, email, phone" />
-        <FilterChips options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} />
+        <SearchBar value={search} onChangeText={setSearch} placeholder={t("admin.searchByNameEmailPhone")} />
+        <FilterChips options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
       </View>
 
       {loading ? (
-        <LoadingState label="Loading drivers..." />
+        <LoadingState label={t("admin.loadingDrivers")} />
       ) : error ? (
         <ErrorState message={error} onRetry={refresh} />
       ) : (
@@ -115,8 +123,8 @@ export default function AdminDriversScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="car-outline"
-              title="No drivers found"
-              subtitle="Try a different search or filter."
+              title={t("admin.noDriversFound")}
+              subtitle={t("admin.tryDifferentSearchFilter")}
             />
           }
         />

@@ -14,6 +14,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { DriverReviewItem, loadDriverReviews } from "./driverReviewsLib";
 
@@ -28,6 +29,7 @@ export default function DriverReviewsSection({
   driverId,
   reviewCountHint,
 }: Props) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -65,7 +67,7 @@ export default function DriverReviewsSection({
             color="#F58220"
           />
           <Text style={styles.reviewsButtonText}>
-            Reviews ({displayCount})
+            {t("driver.reviewsCount", { count: displayCount })}
           </Text>
         </View>
 
@@ -81,17 +83,17 @@ export default function DriverReviewsSection({
           {loading ? (
             <View style={styles.noCommentsRow}>
               <ActivityIndicator color="#F58220" />
-              <Text style={styles.commentText}>Loading reviews...</Text>
+              <Text style={styles.commentText}>{t("driver.loadingReviews")}</Text>
             </View>
           ) : loadError ? (
-            <Text style={styles.commentText}>Could not load reviews.</Text>
+            <Text style={styles.commentText}>{t("driver.couldNotLoadReviews")}</Text>
           ) : reviews.length === 0 ? (
             <View style={styles.noCommentsRow}>
               <View style={styles.noCommentsIcon}>
                 <Ionicons name="chatbox-outline" size={18} color="#7C5F46" />
               </View>
 
-              <Text style={styles.commentText}>No reviews yet.</Text>
+              <Text style={styles.commentText}>{t("driver.noReviewsYet")}</Text>
             </View>
           ) : (
             reviews.map((review, index) => (

@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
@@ -31,6 +32,7 @@ import {
 } from "./driverHelpers";
 
 export default function WorkJobScreen() {
+  const { t } = useTranslation();
   const { driverName, phone, driverAge, languages } = useDriverAccount();
 
   const [loading, setLoading] = useState(false);
@@ -64,7 +66,7 @@ export default function WorkJobScreen() {
     const user = auth.currentUser;
 
     if (!user) {
-      Alert.alert("Login required", "Please login first.");
+      Alert.alert(t("auth.loginRequiredTitle"), t("auth.pleaseLoginFirst"));
       router.replace("/");
       return;
     }
@@ -73,8 +75,8 @@ export default function WorkJobScreen() {
 
     if (!eligibility.eligible) {
       Alert.alert(
-        "Verification required",
-        "You must verify a valid driving license before creating a driver trip.",
+        t("driver.verificationRequired"),
+        t("driver.mustVerifyLicense"),
       );
       return;
     }
@@ -85,8 +87,8 @@ export default function WorkJobScreen() {
 
     if (languages.length === 0) {
       Alert.alert(
-        "Missing language",
-        "Your language is missing from your account profile.",
+        t("driver.missingLanguageTitle"),
+        t("driver.missingLanguageMessage"),
       );
       return;
     }
@@ -101,12 +103,12 @@ export default function WorkJobScreen() {
       !hourlyPay ||
       !workersNeeded
     ) {
-      Alert.alert("Missing details", "Please fill in all work details.");
+      Alert.alert(t("auth.missingDetails"), t("validation.fillAllFields"));
       return;
     }
 
     if (!jobLocationPlace) {
-      setJobLocationError("Please select a location from the list.");
+      setJobLocationError(t("validation.selectLocationFromList"));
       return;
     }
 
@@ -114,8 +116,8 @@ export default function WorkJobScreen() {
       jobDate,
       startTime,
       {
-        dateLabel: "work date",
-        timeLabel: "start time",
+        dateLabelKey: "driverCreate.workDate",
+        timeLabelKey: "driverCreate.startTime",
       },
     );
 
@@ -128,10 +130,7 @@ export default function WorkJobScreen() {
     const cleanEndTime = normalizeTime(endTime);
 
     if (!cleanEndTime) {
-      Alert.alert(
-        "Invalid time",
-        "Please choose a valid end time between 00:00 and 23:59.",
-      );
+      Alert.alert(t("validation.invalidTimeTitle"), t("validation.invalidTime"));
       return;
     }
 
@@ -143,7 +142,7 @@ export default function WorkJobScreen() {
       endMinutes === null ||
       endMinutes <= startMinutes
     ) {
-      Alert.alert("Invalid time", "End time must be after start time.");
+      Alert.alert(t("validation.invalidTimeTitle"), t("validation.endTimeAfterStart"));
       return;
     }
 
@@ -151,7 +150,7 @@ export default function WorkJobScreen() {
     const cleanWorkersNeeded = Number(workersNeeded);
 
     if (Number.isNaN(cleanHourlyPay) || cleanHourlyPay <= 0) {
-      Alert.alert("Invalid pay", "Hourly pay must be more than 0.");
+      Alert.alert(t("validation.invalidPayTitle"), t("validation.invalidPay"));
       return;
     }
 
@@ -161,8 +160,8 @@ export default function WorkJobScreen() {
       cleanWorkersNeeded > 20
     ) {
       Alert.alert(
-        "Invalid workers",
-        "Workers needed must be between 1 and 20.",
+        t("validation.invalidWorkersTitle"),
+        t("validation.invalidWorkers"),
       );
       return;
     }
@@ -236,11 +235,11 @@ export default function WorkJobScreen() {
         updatedAt: serverTimestamp(),
       });
 
-      Alert.alert("Success", "Your work job was created successfully.");
+      Alert.alert(t("common.success"), t("driver.workJobCreated"));
       router.replace("/(tabs)/home" as any);
     } catch (error: any) {
       console.log("CREATE WORK JOB ERROR:", error);
-      Alert.alert("Error", error.message || "Could not create work job.");
+      Alert.alert(t("common.error"), error.message || t("driver.couldNotCreateWorkJob"));
     } finally {
       setLoading(false);
     }
@@ -257,25 +256,25 @@ export default function WorkJobScreen() {
         </Pressable>
 
         <View style={styles.card}>
-          <Text style={styles.title}>Create a Work Job</Text>
+          <Text style={styles.title}>{t("driverCreate.newWorkJobTitle")}</Text>
 
           <Text style={styles.subtitle}>
-            Post work details for helpers to apply
+            {t("driverCreate.newWorkJobSubtitle")}
           </Text>
 
-          <Text style={styles.label}>Job Title</Text>
+          <Text style={styles.label}>{t("driverCreate.jobTitleLabel")}</Text>
           <TextInput
             style={styles.input}
-            placeholder="Enter job title"
+            placeholder={t("driverCreate.enterJobTitle")}
             placeholderTextColor="#8B7B6B"
             value={jobTitle}
             onChangeText={setJobTitle}
           />
 
-          <Text style={styles.label}>Job Description</Text>
+          <Text style={styles.label}>{t("driverCreate.jobDescriptionLabel")}</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
-            placeholder="Describe the work needed"
+            placeholder={t("driverCreate.describeWorkNeeded")}
             placeholderTextColor="#8B7B6B"
             value={jobDescription}
             onChangeText={setJobDescription}
@@ -283,19 +282,19 @@ export default function WorkJobScreen() {
           />
 
           <IsraelLocationAutocomplete
-            label="Work Location"
+            label={t("driverCreate.workLocationLabel")}
             value={jobLocation}
             onChangeText={handleJobLocationChange}
             onSelectLocation={(location) => {
               setJobLocationPlace(location);
               setJobLocationError("");
             }}
-            placeholder="Enter work location"
+            placeholder={t("driverCreate.enterWorkLocation")}
             error={jobLocationError}
           />
 
           <DateInput
-            label="Work Date"
+            label={t("driverCreate.workDate")}
             value={jobDate}
             onChange={setJobDate}
             showPicker={showJobDatePicker}
@@ -305,7 +304,7 @@ export default function WorkJobScreen() {
           <View style={styles.twoColumns}>
             <View style={styles.column}>
               <TimeInput
-                label="Start Time"
+                label={t("driverCreate.startTime")}
                 value={startTime}
                 onChange={setStartTime}
                 showPicker={showStartTimePicker}
@@ -321,7 +320,7 @@ export default function WorkJobScreen() {
 
             <View style={styles.column}>
               <TimeInput
-                label="End Time"
+                label={t("driverCreate.endTime")}
                 value={endTime}
                 onChange={setEndTime}
                 showPicker={showEndTimePicker}
@@ -338,13 +337,13 @@ export default function WorkJobScreen() {
 
           <View style={styles.twoColumns}>
             <View style={styles.column}>
-              <Text style={styles.label}>Hourly Pay (₪)</Text>
+              <Text style={styles.label}>{t("driverCreate.hourlyPay")}</Text>
 
               <View style={styles.inputRow}>
                 <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Enter hourly pay"
+                  placeholder={t("driverCreate.enterHourlyPay")}
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   value={hourlyPay}
@@ -354,13 +353,13 @@ export default function WorkJobScreen() {
             </View>
 
             <View style={styles.column}>
-              <Text style={styles.label}>Workers Needed</Text>
+              <Text style={styles.label}>{t("driverCreate.workersNeededLabel")}</Text>
 
               <View style={styles.inputRow}>
                 <Ionicons name="people-outline" size={18} color="#8B7B6B" />
                 <TextInput
                   style={styles.rowInput}
-                  placeholder="Enter workers needed"
+                  placeholder={t("driverCreate.enterWorkersNeeded")}
                   placeholderTextColor="#8B7B6B"
                   keyboardType="numeric"
                   maxLength={2}
@@ -382,7 +381,7 @@ export default function WorkJobScreen() {
             disabled={loading}
           >
             <Text style={styles.submitText}>
-              {loading ? "Creating..." : "Create Work Job"}
+              {loading ? t("driverCreate.creating") : t("driverCreate.createWorkJob")}
             </Text>
           </Pressable>
         </View>

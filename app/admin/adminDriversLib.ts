@@ -7,6 +7,7 @@
 import { arrayUnion, collection, doc, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 
 import { db } from "../../firebase";
+import i18n from "../i18n";
 import { notify } from "../booking/work-errand/workErrandLib";
 import { writeAuditLog } from "./adminAuditLib";
 import { AdminUserRow, DriverVerificationStatus } from "./adminTypes";
@@ -35,6 +36,10 @@ export const subscribeDrivers = (
 export const getMissingDriverRequirements = (driver: AdminUserRow): string[] => {
   const missing: string[] = [];
 
+  if (!driver.carPlate) missing.push(i18n.t("admin.missingVehiclePlate"));
+  if (!driver.licenseExpiryDate) missing.push(i18n.t("admin.missingLicenseExpiry"));
+  if (driver.spokenLanguages.length === 0) missing.push(i18n.t("admin.missingSpokenLanguages"));
+  if (!driver.phone) missing.push(i18n.t("admin.missingPhoneNumber"));
   if (!driver.licenseExpiryDate) missing.push("Driving license expiry date");
   if (driver.spokenLanguages.length === 0) missing.push("Spoken languages");
   if (!driver.phone) missing.push("Phone number");

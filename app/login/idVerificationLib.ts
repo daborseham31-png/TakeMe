@@ -21,6 +21,8 @@ import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { Alert } from "react-native";
 
+import i18n from "../i18n";
+
 export type ImageQuality = "clear" | "blurry" | "partial" | "unreadable";
 
 export type IdAnalysisResult = {
@@ -86,16 +88,16 @@ const requestLibraryPermission = async () => {
 
 export const pickDocumentImage = (): Promise<string | null> => {
   return new Promise((resolve) => {
-    Alert.alert("Upload document", "Take a photo or choose one from your gallery.", [
+    Alert.alert(i18n.t("auth.uploadDocumentTitle"), i18n.t("auth.uploadDocumentMessage"), [
       {
-        text: "Take Photo",
+        text: i18n.t("common.takePhoto"),
         onPress: async () => {
           const granted = await requestCameraPermission();
 
           if (!granted) {
             Alert.alert(
-              "Camera permission needed",
-              "Please allow camera access to scan your document.",
+              i18n.t("auth.cameraPermissionNeededTitle"),
+              i18n.t("auth.cameraPermissionNeededMessage"),
             );
             resolve(null);
             return;
@@ -110,14 +112,14 @@ export const pickDocumentImage = (): Promise<string | null> => {
         },
       },
       {
-        text: "Choose from Gallery",
+        text: i18n.t("common.chooseFromGallery"),
         onPress: async () => {
           const granted = await requestLibraryPermission();
 
           if (!granted) {
             Alert.alert(
-              "Photo library permission needed",
-              "Please allow photo library access to scan your document.",
+              i18n.t("auth.photoLibraryPermissionNeededTitle"),
+              i18n.t("auth.photoLibraryPermissionNeededMessage"),
             );
             resolve(null);
             return;
@@ -131,7 +133,7 @@ export const pickDocumentImage = (): Promise<string | null> => {
           resolve(result.canceled ? null : result.assets[0].uri);
         },
       },
-      { text: "Cancel", style: "cancel", onPress: () => resolve(null) },
+      { text: i18n.t("common.cancel"), style: "cancel", onPress: () => resolve(null) },
     ]);
   });
 };
@@ -154,7 +156,7 @@ export const compressImageToBase64 = async (uri: string): Promise<string> => {
   });
 
   if (!result.base64) {
-    throw new Error("Could not process the image. Please try again.");
+    throw new Error(i18n.t("errors.couldNotProcessImage"));
   }
 
   return result.base64;
@@ -166,9 +168,7 @@ export const compressImageToBase64 = async (uri: string): Promise<string> => {
 
 const postForAnalysis = async <T>(path: string, imageBase64: string): Promise<T> => {
   if (!BACKEND_URL) {
-    throw new Error(
-      "EXPO_PUBLIC_BACKEND_URL is not set. Add it to the .env file at the project root (see .env.example), then restart with `npx expo start -c`.",
-    );
+    throw new Error(i18n.t("errors.backendUrlNotSet"));
   }
 
   let response: Response;
@@ -180,15 +180,13 @@ const postForAnalysis = async <T>(path: string, imageBase64: string): Promise<T>
       body: JSON.stringify({ imageBase64, mimeType: "image/jpeg" }),
     });
   } catch {
-    throw new Error(
-      "Could not reach the verification server. Make sure it's running and EXPO_PUBLIC_BACKEND_URL is set correctly.",
-    );
+    throw new Error(i18n.t("errors.couldNotReachVerificationServer"));
   }
 
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(data?.error || "The verification server returned an error.");
+    throw new Error(data?.error || i18n.t("errors.verificationServerError"));
   }
 
   return data as T;

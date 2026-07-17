@@ -14,8 +14,10 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";
+import { useLanguage } from "../i18n/LanguageProvider";
 import BitBadge from "./BitBadge";
 import { openBitPayment } from "./bitPayment";
 import {
@@ -30,6 +32,8 @@ import {
 type Method = "cash" | "bit" | null;
 
 export default function PaymentScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
   const kind = (params.kind === "errand" ? "errand" : "work") as WorkErrandKind;
   const id = typeof params.id === "string" ? params.id : "";
@@ -99,7 +103,7 @@ export default function PaymentScreen() {
   const handleContinue = async () => {
     if (!app) return;
     if (!method) {
-      Alert.alert("Choose payment", "Please select Cash or Pay with BIT.");
+      Alert.alert(t("rides.choosePaymentTitle"), t("rides.choosePaymentMessage"));
       return;
     }
 
@@ -111,14 +115,14 @@ export default function PaymentScreen() {
       await confirmPayment(kind, app.id, app, paymentPayload);
 
       Alert.alert(
-        "Booking confirmed",
+        t("rides.bookingConfirmedTitle"),
         method === "cash"
-          ? "You chose cash. Your booking is now confirmed."
-          : "Mock payment successful. Your booking is now confirmed.",
-        [{ text: "OK", onPress: () => router.replace("/(tabs)/bookings" as any) }],
+          ? t("rides.cashBookingConfirmed")
+          : t("rides.mockPaymentConfirmed"),
+        [{ text: t("common.ok"), onPress: () => router.replace("/(tabs)/bookings" as any) }],
       );
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not confirm payment.");
+      Alert.alert(t("common.error"), error?.message || t("rides.couldNotConfirmPayment"));
     } finally {
       setProcessing(false);
     }
@@ -139,9 +143,9 @@ export default function PaymentScreen() {
       <SafeAreaView style={styles.safe}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={44} color="#8B7B6B" />
-          <Text style={styles.emptyTitle}>Booking not found</Text>
+          <Text style={styles.emptyTitle}>{t("rides.bookingNotFound")}</Text>
           <Pressable style={styles.backLink} onPress={() => router.back()}>
-            <Text style={styles.backLinkText}>Go back</Text>
+            <Text style={styles.backLinkText}>{t("common.goBack")}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -158,15 +162,13 @@ export default function PaymentScreen() {
             size={54}
             color="#16A34A"
           />
-          <Text style={styles.emptyTitle}>Nothing to pay</Text>
-          <Text style={styles.emptyText}>
-            This booking is not waiting for payment.
-          </Text>
+          <Text style={styles.emptyTitle}>{t("rides.nothingToPay")}</Text>
+          <Text style={styles.emptyText}>{t("rides.notAwaitingPayment")}</Text>
           <Pressable
             style={styles.backLink}
             onPress={() => router.replace("/(tabs)/bookings" as any)}
           >
-            <Text style={styles.backLinkText}>Go to My Bookings</Text>
+            <Text style={styles.backLinkText}>{t("rides.goToMyBookings")}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -181,15 +183,19 @@ export default function PaymentScreen() {
       >
         <ScrollView contentContainerStyle={styles.container}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-            <Text style={styles.backText}>Back</Text>
+            <Ionicons
+              name={isRTL ? "arrow-forward" : "arrow-back"}
+              size={22}
+              color="#7C5F46"
+            />
+            <Text style={styles.backText}>{t("common.back")}</Text>
           </Pressable>
 
-          <Text style={styles.title}>Payment</Text>
+          <Text style={styles.title}>{t("rides.paymentTitle")}</Text>
           <Text style={styles.subtitle}>
             {kind === "work"
-              ? "Complete payment to confirm the worker"
-              : "Confirm your errand booking"}
+              ? t("rides.completePaymentWorker")
+              : t("rides.confirmErrandBooking")}
           </Text>
 
           {/* Booking summary */}
@@ -199,8 +205,8 @@ export default function PaymentScreen() {
               <Ionicons name="person-outline" size={15} color="#7C5F46" />
               <Text style={styles.summaryText}>
                 {kind === "work"
-                  ? `Worker: ${app.customerName}`
-                  : `Driver: ${app.providerName}`}
+                  ? t("rides.workerLabel", { name: app.customerName })
+                  : t("rides.driverLabel", { name: app.providerName })}
               </Text>
             </View>
             {app.date ? (
@@ -218,18 +224,18 @@ export default function PaymentScreen() {
               </View>
             ) : null}
             <View style={styles.amountRow}>
-              <Text style={styles.amountLabel}>Amount</Text>
+              <Text style={styles.amountLabel}>{t("rides.amount")}</Text>
               <Text style={styles.amountValue}>
                 {amount !== null
                   ? `${amount} ₪`
                   : perHour !== null
-                    ? `${perHour} ₪/hr`
+                    ? `${perHour} ₪${t("booking.perHourShort")}`
                     : "—"}
               </Text>
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Payment Method</Text>
+          <Text style={styles.sectionTitle}>{t("rides.paymentMethod")}</Text>
 
           <View style={styles.methodRow}>
             <Pressable
@@ -250,7 +256,7 @@ export default function PaymentScreen() {
                   method === "cash" && styles.methodTextActive,
                 ]}
               >
-                Cash
+                {t("common.cash")}
               </Text>
             </Pressable>
 
@@ -268,7 +274,7 @@ export default function PaymentScreen() {
                   method === "bit" && styles.methodTextActive,
                 ]}
               >
-                Pay with BIT
+                {t("rides.payWithBit")}
               </Text>
             </Pressable>
           </View>
@@ -276,9 +282,7 @@ export default function PaymentScreen() {
           {method === "cash" ? (
             <View style={styles.infoBox}>
               <Ionicons name="information-circle-outline" size={18} color="#B86115" />
-              <Text style={styles.infoText}>
-                You&apos;ll pay the driver in cash. Press Continue to confirm.
-              </Text>
+              <Text style={styles.infoText}>{t("rides.cashInfoText")}</Text>
             </View>
           ) : null}
 
@@ -287,15 +291,15 @@ export default function PaymentScreen() {
               <View style={styles.demoBanner}>
                 <Ionicons name="information-circle-outline" size={15} color="#B86115" />
                 <Text style={styles.demoText}>
-                  BIT was opened with {recipientPhone || "the recipient's number"}{" "}
-                  copied to your clipboard — paste it into BIT&apos;s &quot;Send
-                  money to&quot; field, then press Continue below.
+                  {t("rides.bitOpenedBanner", {
+                    phone: recipientPhone || t("rides.theRecipientsNumber"),
+                  })}
                 </Text>
               </View>
 
               <Pressable style={styles.reopenBitButton} onPress={handleSelectBit}>
                 <Ionicons name="open-outline" size={16} color="#F58220" />
-                <Text style={styles.reopenBitText}>Reopen BIT</Text>
+                <Text style={styles.reopenBitText}>{t("rides.reopenBit")}</Text>
               </Pressable>
             </View>
           ) : null}
@@ -311,7 +315,7 @@ export default function PaymentScreen() {
             {processing ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.continueText}>Continue</Text>
+              <Text style={styles.continueText}>{t("common.continue")}</Text>
             )}
           </Pressable>
         </ScrollView>

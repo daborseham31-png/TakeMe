@@ -14,7 +14,10 @@ import {
   View,
 } from "react-native";
 import MapView, { Marker, Region } from "react-native-maps";
+import { useTranslation } from "react-i18next";
 
+import { translateProblemType } from "../../i18n/formatters";
+import { useLanguage } from "../../i18n/LanguageProvider";
 import { createRoadsideRequest } from "./roadsideLib";
 
 // Default map region (Nazareth area) used until the user moves the pin.
@@ -57,6 +60,8 @@ const ProblemIcon: React.FC<{
 };
 
 export default function RoadsideHelpScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const mapRef = useRef<MapView | null>(null);
 
   const [marker, setMarker] = useState({
@@ -156,8 +161,8 @@ export default function RoadsideHelpScreen() {
   const handleFindHelp = async () => {
     if (problemTypes.length === 0) {
       Alert.alert(
-        "Select a problem",
-        "Please choose at least one problem before finding help.",
+        t("roadsideHelp.selectProblemTitle"),
+        t("roadsideHelp.selectProblemMessage"),
       );
       return;
     }
@@ -165,8 +170,11 @@ export default function RoadsideHelpScreen() {
     const trimmedDescription = description.trim();
 
     if (isOther && !trimmedDescription) {
-      setDescriptionError("Please describe the help you need.");
-      Alert.alert("Description required", "Please describe the help you need.");
+      setDescriptionError(t("roadsideHelp.descriptionRequiredMessage"));
+      Alert.alert(
+        t("roadsideHelp.descriptionRequiredTitle"),
+        t("roadsideHelp.descriptionRequiredMessage"),
+      );
       return;
     }
 
@@ -208,8 +216,8 @@ export default function RoadsideHelpScreen() {
       } as any);
     } catch (error: any) {
       Alert.alert(
-        "Could not send request",
-        error?.message || "Please try again.",
+        t("roadsideHelp.couldNotSendRequestTitle"),
+        error?.message || t("validation.pleaseTryAgain"),
       );
     } finally {
       setSending(false);
@@ -220,20 +228,20 @@ export default function RoadsideHelpScreen() {
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#7C5F46" />
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
         </Pressable>
 
         <View style={styles.header}>
           <Text style={styles.headerEmoji}>🔧</Text>
-          <Text style={styles.title}>Roadside Help</Text>
+          <Text style={styles.title}>{t("rideCategory.categories.help.title")}</Text>
         </View>
-        <Text style={styles.subtitle}>Get help with car trouble nearby</Text>
+        <Text style={styles.subtitle}>{t("roadsideHelp.subtitle")}</Text>
 
         {/* Your location + map */}
         <View style={styles.card}>
           <View style={styles.locationTitleRow}>
             <Ionicons name="location-outline" size={18} color="#F58220" />
-            <Text style={styles.sectionTitle}>Your Location</Text>
+            <Text style={styles.sectionTitle}>{t("roadsideHelp.yourLocation")}</Text>
           </View>
 
           <View style={styles.addressRow}>
@@ -243,8 +251,8 @@ export default function RoadsideHelpScreen() {
 
           <Text style={styles.hintText}>
             {locating
-              ? "Detecting your location..."
-              : "Drag the pin or tap on the map to adjust your exact location"}
+              ? t("roadsideHelp.detectingLocation")
+              : t("roadsideHelp.dragPinAdjustHint")}
           </Text>
 
           <View style={styles.mapWrapper}>
@@ -271,11 +279,11 @@ export default function RoadsideHelpScreen() {
         <View style={styles.card}>
           <View style={styles.locationTitleRow}>
             <Ionicons name="construct-outline" size={18} color="#F58220" />
-            <Text style={styles.sectionTitle}>What&apos;s the problem?</Text>
+            <Text style={styles.sectionTitle}>{t("roadsideHelp.whatsTheProblem")}</Text>
           </View>
 
           <Text style={styles.problemHint}>
-            Select at least one (you can choose more than one)
+            {t("roadsideHelp.selectAtLeastOneHint")}
           </Text>
 
           <View style={styles.grid}>
@@ -299,7 +307,7 @@ export default function RoadsideHelpScreen() {
                       selected && styles.problemTextActive,
                     ]}
                   >
-                    {problem.title}
+                    {translateProblemType(problem.title, t)}
                   </Text>
                 </Pressable>
               );
@@ -310,12 +318,12 @@ export default function RoadsideHelpScreen() {
         {/* Description */}
         <View style={styles.card}>
           <Text style={styles.label}>
-            Describe the problem{isOther ? " *" : ""}
+            {t("roadsideHelp.describeProblemLabel")}{isOther ? " *" : ""}
           </Text>
           <TextInput
             style={styles.textArea}
             placeholder={
-              isOther ? "Describe the help you need" : "Describe the problem"
+              isOther ? t("roadsideHelp.describeHelpNeededPlaceholder") : t("roadsideHelp.describeProblemPlaceholder")
             }
             placeholderTextColor="#8B7B6B"
             multiline
@@ -350,7 +358,7 @@ export default function RoadsideHelpScreen() {
           ) : (
             <>
               <Ionicons name="search-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.searchText}>Find Nearby Help</Text>
+              <Text style={styles.searchText}>{t("roadsideHelp.findNearbyHelp")}</Text>
             </>
           )}
         </Pressable>

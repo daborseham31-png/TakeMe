@@ -25,6 +25,7 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../../firebase";
+import i18n from "../i18n";
 
 export type DashboardStats = {
   totalUsers: number;
@@ -202,7 +203,7 @@ export const getRecentRides = async (limitCount = 5): Promise<RecentRide[]> => {
         id: docSnap.id,
         from: data.from || "",
         to: data.to || "",
-        driverName: data.driverName || "Driver",
+        driverName: data.driverName || i18n.t("common.driver"),
         createdAtSeconds: toSeconds(data.createdAt),
       };
     })
@@ -218,7 +219,7 @@ export const getRecentUsers = async (limitCount = 5): Promise<RecentUser[]> => {
       const data = docSnap.data();
       return {
         id: docSnap.id,
-        name: data.name || "User",
+        name: data.name || i18n.t("common.user"),
         email: data.email || "",
         role: data.role || "",
         createdAtSeconds: toSeconds(data.createdAt),

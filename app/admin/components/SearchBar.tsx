@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { StyleSheet, TextInput, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { adminColors, adminRadius } from "../adminTheme";
 
@@ -10,7 +11,9 @@ type Props = {
   placeholder?: string;
 };
 
-export default function SearchBar({ value, onChangeText, placeholder = "Searchâ€¦" }: Props) {
+export default function SearchBar({ value, onChangeText, placeholder }: Props) {
+  const { t } = useTranslation();
+
   return (
     <View style={styles.row}>
       <Ionicons name="search-outline" size={18} color={adminColors.placeholder} />
@@ -18,7 +21,7 @@ export default function SearchBar({ value, onChangeText, placeholder = "Searchâ€
         style={styles.input}
         value={value}
         onChangeText={onChangeText}
-        placeholder={placeholder}
+        placeholder={placeholder || t("admin.searchPlaceholder")}
         placeholderTextColor={adminColors.placeholder}
         autoCapitalize="none"
       />

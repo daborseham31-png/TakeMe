@@ -13,8 +13,12 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";
+import i18n from "../i18n";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { translateStoredDayName } from "../i18n/formatters";
 import { createPassengerBooking } from "./bookingsLib";
 import DriverReviewsSection from "./DriverReviewsSection";
 import { getDisplayedDriverId } from "./driverReviewsLib";
@@ -93,11 +97,14 @@ type DriverRoute = {
   active?: boolean;
 };
 
+// Language names are always shown in their own script, regardless of the
+// app's current UI language — same convention as TripFeedCard.tsx's
+// LANGUAGE_LABELS, never translated.
 const LANGUAGES: Record<string, string> = {
-  ar: "Arabic",
-  he: "Hebrew",
+  ar: "العربية",
+  he: "עברית",
   en: "English",
-  ru: "Russian",
+  ru: "Русский",
 };
 
 const MAX_TIME_DIFF_MINUTES = 30;
@@ -250,7 +257,7 @@ const getDriverGender = (driver: DriverRoute) => {
 };
 
 const getDriverName = (driver: DriverRoute) => {
-  return driver.profile?.name || driver.driverName || "Driver";
+  return driver.profile?.name || driver.driverName || i18n.t("rides.driverFallback");
 };
 
 const getDriverPhone = (driver: DriverRoute) => {
@@ -286,6 +293,8 @@ const getDaysText = (driver: DriverRoute) => {
 };
 
 export default function DriverResultsScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
 
   const [drivers, setDrivers] = useState<DriverRoute[]>([]);
@@ -499,7 +508,7 @@ export default function DriverResultsScreen() {
       setDrivers(filtered);
     } catch (error: any) {
       console.log("Load drivers error:", error.message);
-      Alert.alert("Error", "Could not load drivers.");
+      Alert.alert(t("common.error"), t("rides.couldNotLoadDrivers"));
     } finally {
       setLoading(false);
     }
@@ -594,13 +603,13 @@ const handleBookDriver = async (driver: DriverRoute) => {
     });
 
     Alert.alert(
-      "Booking Confirmed",
-      `You selected ${getDriverName(driver)}. It was added to My Bookings.`,
+      t("rides.bookingConfirmedTitle"),
+      t("rides.selectedDriverAdded", { name: getDriverName(driver) }),
     );
 
     router.push("/(tabs)/bookings" as any);
   } catch (error: any) {
-    Alert.alert("Error", error?.message || "Could not create the booking.");
+    Alert.alert(t("common.error"), error?.message || t("rides.couldNotConfirmBooking"));
   } finally {
     setBookingBusy(false);
   }
@@ -655,7 +664,7 @@ const confirmWeeklyDayPicker = () => {
   );
 
   if (chosen.length === 0) {
-    Alert.alert("Choose a day", "Please select at least one day to continue.");
+    Alert.alert(t("rides.chooseDayTitle"), t("rides.chooseDayMessage"));
     return;
   }
 
@@ -709,7 +718,7 @@ const confirmWeeklyDayPicker = () => {
       <SafeAreaView style={styles.page}>
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#F58220" />
-          <Text style={styles.loadingText}>Loading drivers...</Text>
+          <Text style={styles.loadingText}>{t("rides.loadingDrivers")}</Text>
         </View>
       </SafeAreaView>
     );
@@ -727,16 +736,20 @@ const availableDrivers = drivers.filter((driver: any) => {
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-          <Text style={styles.backText}>Back</Text>
+          <Ionicons
+            name={isRTL ? "arrow-forward" : "arrow-back"}
+            size={22}
+            color="#7C5F46"
+          />
+          <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
                 <Text style={styles.title}>
-          Available Drivers ({availableDrivers.length})
+          {t("rides.availableDriversCount", { count: availableDrivers.length })}
         </Text>
 
 
         <Text style={styles.routeText}>
-          {from || "Any location"} → {to || "Any destination"}
+          {from || t("rides.anyLocation")} → {to || t("rides.anyDestination")}
         </Text>
 
         {!isWeekly && requestedDate ? (
@@ -745,21 +758,20 @@ const availableDrivers = drivers.filter((driver: any) => {
 
         {isWeekly ? (
           <Text style={styles.routeText}>
-            📅 Weekly:{" "}
-            {requestedWeeklyDays
-              .map((day) => `${day.dayName} ${day.date}`)
-              .join(", ")}
+            📅{" "}
+            {t("rides.weeklyPrefix", {
+              days: requestedWeeklyDays
+                .map((day) => `${translateStoredDayName(day.dayName, t)} ${day.date}`)
+                .join(", "),
+            })}
           </Text>
         ) : null}
 
         {availableDrivers.length === 0? (
           <View style={styles.emptyCard}>
             <Ionicons name="car-outline" size={42} color="#8B7B6B" />
-            <Text style={styles.emptyTitle}>No drivers found</Text>
-            <Text style={styles.emptyText}>
-              Try changing pickup location, destination, time, gender, language,
-              date, or seats.
-            </Text>
+            <Text style={styles.emptyTitle}>{t("rides.noDriversFound")}</Text>
+            <Text style={styles.emptyText}>{t("rides.noDriversHint")}</Text>
           </View>
         ) : (
           <View style={styles.list}>
@@ -854,7 +866,7 @@ const availableDrivers = drivers.filter((driver: any) => {
                           </Text>
                         </>
                       ) : (
-                        <Text style={styles.reviewCount}>New</Text>
+                        <Text style={styles.reviewCount}>{t("rides.newProvider")}</Text>
                       )}
                     </View>
                   </View>
@@ -862,7 +874,7 @@ const availableDrivers = drivers.filter((driver: any) => {
                   {isWeekly ? (
                     <View style={styles.weeklyAvailBox}>
                       <Text style={styles.weeklyAvailTitle}>
-                        Available for:
+                        {t("rides.availableFor")}
                       </Text>
 
                       {(weeklyMatches[driver.id] || []).map((match) => (
@@ -876,9 +888,9 @@ const availableDrivers = drivers.filter((driver: any) => {
                             color="#F58220"
                           />
                           <Text style={styles.weeklyAvailText}>
-                            {match.driverDay.dayName} · {match.driverDay.date}{" "}
-                            · {match.driverDay.time} · {match.driverDay.price}{" "}
-                            ₪
+                            {translateStoredDayName(match.driverDay.dayName, t)} ·{" "}
+                            {match.driverDay.date} · {match.driverDay.time} ·{" "}
+                            {match.driverDay.price} ₪
                           </Text>
                         </View>
                       ))}
@@ -886,14 +898,14 @@ const availableDrivers = drivers.filter((driver: any) => {
                       <View style={styles.softLine} />
 
                       <Text style={styles.priceText}>
-                        Total if all days booked:{" "}
-                        {computeWeeklyTotal(
-                          (weeklyMatches[driver.id] || []).map((match) => ({
-                            price: match.driverDay.price,
-                            seats: match.requested.seats,
-                          })),
-                        )}{" "}
-                        ₪
+                        {t("rides.totalIfAllDaysBooked", {
+                          total: computeWeeklyTotal(
+                            (weeklyMatches[driver.id] || []).map((match) => ({
+                              price: match.driverDay.price,
+                              seats: match.requested.seats,
+                            })),
+                          ),
+                        })}
                       </Text>
                     </View>
                   ) : (
@@ -941,7 +953,9 @@ const availableDrivers = drivers.filter((driver: any) => {
                               {driver.time || "--:--"}
                             </Text>
                             <Text style={styles.detailSubText}>
-                              {isDelivery ? "Arrival time" : "Departure time"}
+                              {isDelivery
+                                ? t("rides.arrivalTimeLabel")
+                                : t("rides.departureTimeLabel")}
                             </Text>
                           </View>
                         </View>
@@ -962,10 +976,10 @@ const availableDrivers = drivers.filter((driver: any) => {
 
                             <View style={styles.detailTextBox}>
                               <Text style={styles.detailMainText}>
-                                {driver.seats || 1} seats
+                                {t("booking.seatsCount", { count: driver.seats || 1 })}
                               </Text>
                               <Text style={styles.detailSubText}>
-                                Available
+                                {t("rides.seatsAvailableSub")}
                               </Text>
                             </View>
                           </View>
@@ -986,7 +1000,7 @@ const availableDrivers = drivers.filter((driver: any) => {
                             <Text style={styles.priceText}>
                               {totalPrice} ₪
                             </Text>
-                            <Text style={styles.detailSubText}>Price</Text>
+                            <Text style={styles.detailSubText}>{t("rides.priceLabel")}</Text>
                           </View>
                         </View>
                       </View>
@@ -1032,7 +1046,7 @@ const availableDrivers = drivers.filter((driver: any) => {
                               : styles.petNotAllowedText,
                           ]}
                         >
-                          {driver.allowsPets ? "Pets allowed" : "No pets"}
+                          {driver.allowsPets ? t("rides.petsAllowed") : t("rides.noPets")}
                         </Text>
                       </View>
                     )}
@@ -1054,7 +1068,7 @@ const availableDrivers = drivers.filter((driver: any) => {
                     }
                     disabled={bookingBusy}
                   >
-                    <Text style={styles.bookButtonText}>Book This Driver</Text>
+                    <Text style={styles.bookButtonText}>{t("rides.bookThisDriver")}</Text>
                   </Pressable>
                 </View>
               );
@@ -1076,7 +1090,7 @@ const availableDrivers = drivers.filter((driver: any) => {
             <View style={styles.modalHandle} />
 
             <Text style={styles.modalTitle}>
-              Choose days to book with this driver
+              {t("rides.chooseDaysModalTitle")}
             </Text>
 
             {dayPickerDriver ? (
@@ -1104,11 +1118,13 @@ const availableDrivers = drivers.filter((driver: any) => {
 
                       <View style={styles.modalDayTextBox}>
                         <Text style={styles.modalDayTitle}>
-                          {match.driverDay.dayName} — {match.driverDay.date}
+                          {translateStoredDayName(match.driverDay.dayName, t)} —{" "}
+                          {match.driverDay.date}
                         </Text>
                         <Text style={styles.modalDaySubtitle}>
-                          {match.driverDay.time} · {match.requested.seats}{" "}
-                          seats · {match.driverDay.price} ₪
+                          {match.driverDay.time} ·{" "}
+                          {t("booking.seatsCount", { count: match.requested.seats })} ·{" "}
+                          {match.driverDay.price} ₪
                         </Text>
                       </View>
                     </Pressable>
@@ -1118,17 +1134,17 @@ const availableDrivers = drivers.filter((driver: any) => {
 
             <View style={styles.modalButtonsRow}>
               <Pressable style={styles.modalSecondaryButton} onPress={selectAllWeeklyDays}>
-                <Text style={styles.modalSecondaryButtonText}>Select all</Text>
+                <Text style={styles.modalSecondaryButtonText}>{t("common.selectAll")}</Text>
               </Pressable>
 
               <Pressable style={styles.modalSecondaryButton} onPress={closeWeeklyDayPicker}>
-                <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
+                <Text style={styles.modalSecondaryButtonText}>{t("common.cancel")}</Text>
               </Pressable>
             </View>
 
             <Pressable style={styles.modalPrimaryButton} onPress={confirmWeeklyDayPicker}>
               <Text style={styles.modalPrimaryButtonText}>
-                Continue to Payment
+                {t("rides.continueToPayment")}
               </Text>
             </Pressable>
           </View>

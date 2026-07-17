@@ -34,6 +34,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { IsraelLocation } from "./israelLocations";
 import {
@@ -91,6 +92,7 @@ export default function IsraelLocationAutocomplete({
   label,
   error,
 }: Props) {
+  const { t } = useTranslation();
   const [focused, setFocused] = useState(false);
   const blurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -165,7 +167,7 @@ export default function IsraelLocationAutocomplete({
           onChangeText={onChangeText}
           onFocus={handleFocus}
           onBlur={handleBlur}
-          placeholder={placeholder || "Enter a city, town, or village"}
+          placeholder={placeholder || t("booking.enterCityTownVillage")}
           placeholderTextColor="#9B7A68"
         />
         {value.length > 0 ? (
@@ -187,7 +189,7 @@ export default function IsraelLocationAutocomplete({
           {results.length === 0 ? (
             <View style={styles.emptyRow}>
               <Ionicons name="search-outline" size={16} color="#8B7B6B" />
-              <Text style={styles.emptyText}>No locations found</Text>
+              <Text style={styles.emptyText}>{t("booking.noLocationsFound")}</Text>
             </View>
           ) : (
             <ScrollView

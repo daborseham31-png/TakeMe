@@ -30,8 +30,16 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../../firebase";
+// Plain lib module (not a component) — uses the initialized global i18next
+// instance directly rather than the useTranslation() hook.
+import i18n from "../../i18n";
 
 export type WorkErrandKind = "work" | "errand";
+
+// A dedicated error type for "this work job is already full" — deliberately
+// NOT identified by comparing error.message (that string is now translated
+// and would never match once the app isn't in English), only by type.
+class WorkJobFullError extends Error {}
 
 // The status of an application as it moves through the flow. Work and errand
 // use DIFFERENT payment-pending statuses so the wording never gets confused.
@@ -115,9 +123,7 @@ export type GeoPoint = {
 export const detectCurrentLocation = async (): Promise<GeoPoint> => {
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== "granted") {
-    throw new Error(
-      "Location permission is required so the driver can reach you.",
-    );
+    throw new Error(i18n.t("workErrand.locationPermissionRequired"));
   }
 
   const pos = await Location.getCurrentPositionAsync({
@@ -257,10 +263,10 @@ export const createApplication = async (
   details: CustomerDetails,
 ): Promise<string> => {
   const me = await getCurrentUser();
-  if (!me) throw new Error("You must be logged in to send a request.");
+  if (!me) throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
 
   if (source.providerId && source.providerId === me.id) {
-    throw new Error("You cannot send a request to your own listing.");
+    throw new Error(i18n.t("workErrand.cannotRequestOwnListing"));
   }
 
   // Sending a request never reserves a place by itself — only an accepted
@@ -279,11 +285,11 @@ export const createApplication = async (
             : Number(jobData.totalSeats ?? jobData.workersNeeded ?? 1);
 
         if (remaining <= 0 || jobData.available === false) {
-          throw new Error("This work job is already full.");
+          throw new WorkJobFullError(i18n.t("workErrand.jobAlreadyFull"));
         }
       }
     } catch (error: any) {
-      if (error?.message === "This work job is already full.") {
+      if (error instanceof WorkJobFullError) {
         throw error;
       }
       // Any other read failure shouldn't block sending the request — the
@@ -456,7 +462,7 @@ export const acceptRequest = async (
 
 const acceptWorkRequest = async (id: string, data: NormalizedApplication) => {
   if (!data.sourceId) {
-    throw new Error("Missing job id.");
+    throw new Error(i18n.t("workErrand.missingJobId"));
   }
 
   const appRef = doc(db, "workApplications", id);
@@ -466,7 +472,7 @@ const acceptWorkRequest = async (id: string, data: NormalizedApplication) => {
     const appSnap = await transaction.get(appRef);
 
     if (!appSnap.exists()) {
-      throw new Error("Request not found.");
+      throw new Error(i18n.t("workErrand.requestNotFound"));
     }
 
     const appData: any = appSnap.data();
@@ -474,13 +480,13 @@ const acceptWorkRequest = async (id: string, data: NormalizedApplication) => {
     // Idempotency guard — a double-tap (or an already-handled request)
     // must not decrement capacity twice.
     if (appData.status !== "pending") {
-      throw new Error("This request was already handled.");
+      throw new Error(i18n.t("workErrand.requestAlreadyHandled"));
     }
 
     const jobSnap = await transaction.get(jobRef);
 
     if (!jobSnap.exists()) {
-      throw new Error("This work job no longer exists.");
+      throw new Error(i18n.t("workErrand.jobNoLongerExists"));
     }
 
     const jobData: any = jobSnap.data();
@@ -495,7 +501,7 @@ const acceptWorkRequest = async (id: string, data: NormalizedApplication) => {
         : totalSeats;
 
     if (currentRemaining <= 0) {
-      throw new Error("This work job is already full.");
+      throw new Error(i18n.t("workErrand.jobAlreadyFull"));
     }
 
     // Work doesn't currently collect a "places requested" count from the
@@ -744,7 +750,7 @@ export const payCompletedWork = async (
   const user = auth.currentUser;
 
   if (!user) {
-    throw new Error("Please login first.");
+    throw new Error(i18n.t("auth.pleaseLoginFirst"));
   }
 
   const ref = doc(db, COLLECTION.work, bookingId);
@@ -767,18 +773,18 @@ export const payCompletedWork = async (
     const snap = await transaction.get(ref);
 
     if (!snap.exists()) {
-      throw new Error("Booking not found.");
+      throw new Error(i18n.t("rides.bookingNotFound"));
     }
 
     const data: any = snap.data();
 
     // Protect against duplicate payments.
     if (data.driverPaymentStatus === "paid") {
-      throw new Error("This job has already been paid.");
+      throw new Error(i18n.t("workErrand.jobAlreadyPaid"));
     }
 
     if (data.employerId && data.employerId !== user.uid) {
-      throw new Error("Only the employer who booked this job can pay.");
+      throw new Error(i18n.t("workErrand.onlyEmployerCanPay"));
     }
 
     applicantId = data.applicantId || "";
@@ -852,7 +858,7 @@ export const cancelBlockedReason = (
   now: Date = new Date(),
 ): string | null => {
   if (UNCANCELLABLE.includes(item.status)) {
-    return "This booking can no longer be cancelled.";
+    return i18n.t("workErrand.cannotCancelAnymore");
   }
 
   const start = toDateTime(item.date, item.startTime);
@@ -861,7 +867,7 @@ export const cancelBlockedReason = (
   const oneHourBefore = new Date(start.getTime() - 60 * 60 * 1000);
 
   if (now.getTime() >= oneHourBefore.getTime()) {
-    return "You cannot cancel less than 1 hour before the start time.";
+    return i18n.t("workErrand.cannotCancelWithinHour");
   }
 
   return null;
@@ -926,7 +932,7 @@ const cancelAcceptedWorkRequest = async (
     const appSnap = await transaction.get(appRef);
 
     if (!appSnap.exists()) {
-      throw new Error("Request not found.");
+      throw new Error(i18n.t("workErrand.requestNotFound"));
     }
 
     const appData: any = appSnap.data();
@@ -1200,14 +1206,14 @@ export const submitApplicationRating = async (
   const user = auth.currentUser;
 
   if (!user) {
-    throw new Error("Please login first.");
+    throw new Error(i18n.t("auth.pleaseLoginFirst"));
   }
 
   // providerId must be the driver's real Firebase UID — never the job
   // listing id or this application's own id (guards against a wiring bug
   // accidentally saving the wrong id as driverId on the review).
   if (!app.providerId || app.providerId === id || app.providerId === app.sourceId) {
-    throw new Error("Missing driver id.");
+    throw new Error(i18n.t("workErrand.missingDriverId"));
   }
 
   const cleanComment = comment.trim();
@@ -1220,7 +1226,7 @@ export const submitApplicationRating = async (
     const appSnap = await transaction.get(appRef);
 
     if (!appSnap.exists()) {
-      throw new Error("Booking not found.");
+      throw new Error(i18n.t("rides.bookingNotFound"));
     }
 
     const appData: any = appSnap.data();

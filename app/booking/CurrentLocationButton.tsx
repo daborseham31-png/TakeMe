@@ -15,6 +15,7 @@ import {
   StyleSheet,
   Text,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 export type CurrentLocationResult = {
   address: string;
@@ -27,6 +28,7 @@ type Props = {
 };
 
 export default function CurrentLocationButton({ onLocated }: Props) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
 
   const handlePress = async () => {
@@ -39,8 +41,8 @@ export default function CurrentLocationButton({ onLocated }: Props) {
 
       if (status !== "granted") {
         Alert.alert(
-          "Location permission needed",
-          "Location permission is required to use your current location. You can still enter the address manually.",
+          t("booking.locationPermissionNeededTitle"),
+          t("booking.locationPermissionNeededMessage"),
         );
         return;
       }
@@ -75,8 +77,8 @@ export default function CurrentLocationButton({ onLocated }: Props) {
       onLocated({ address, latitude, longitude });
     } catch {
       Alert.alert(
-        "Could not detect your location",
-        "Could not detect your location. Please try again or enter the address manually.",
+        t("booking.couldNotDetectLocationTitle"),
+        t("booking.couldNotDetectLocationMessage"),
       );
     } finally {
       setLoading(false);
@@ -95,7 +97,7 @@ export default function CurrentLocationButton({ onLocated }: Props) {
         <Ionicons name="locate" size={15} color="#F58220" />
       )}
       <Text style={styles.text}>
-        {loading ? "Finding your location..." : "Use my current location"}
+        {loading ? t("booking.findingLocation") : t("booking.useCurrentLocation")}
       </Text>
     </Pressable>
   );

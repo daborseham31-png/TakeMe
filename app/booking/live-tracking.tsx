@@ -12,8 +12,10 @@ import {
   View,
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
+import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";
+import { useLanguage } from "../i18n/LanguageProvider";
 
 type LatLng = {
   latitude: number;
@@ -31,18 +33,20 @@ const toLatLng = (value: any): LatLng | null => {
   return { latitude, longitude };
 };
 
-const getStatusText = (booking: any) => {
+const getStatusKey = (booking: any) => {
   const status = booking?.tripStatus || booking?.status;
 
-  if (status === "driver_on_way") return "Driver is on the way to pickup";
-  if (status === "arrived_pickup") return "Driver arrived at pickup";
-  if (status === "in_progress") return "Trip in progress";
-  if (status === "completed") return "Trip completed";
+  if (status === "driver_on_way") return "rides.driverOnWay";
+  if (status === "arrived_pickup") return "rides.driverArrivedPickup";
+  if (status === "in_progress") return "rides.tripInProgress";
+  if (status === "completed") return "rides.tripCompleted";
 
-  return "Waiting for driver";
+  return "rides.waitingForDriver";
 };
 
 export default function LiveTrackingScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
   const id = typeof params.id === "string" ? params.id : "";
 
@@ -129,9 +133,9 @@ export default function LiveTrackingScreen() {
       <SafeAreaView style={styles.safe}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={44} color="#8B7B6B" />
-          <Text style={styles.emptyTitle}>Booking not found</Text>
+          <Text style={styles.emptyTitle}>{t("rides.bookingNotFound")}</Text>
           <Pressable style={styles.backButtonSmall} onPress={() => router.back()}>
-            <Text style={styles.backButtonText}>Go back</Text>
+            <Text style={styles.backButtonText}>{t("common.goBack")}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -144,13 +148,17 @@ export default function LiveTrackingScreen() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-          <Text style={styles.backText}>Back</Text>
+          <Ionicons
+            name={isRTL ? "arrow-forward" : "arrow-back"}
+            size={22}
+            color="#7C5F46"
+          />
+          <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
 
         <View style={styles.header}>
           <Ionicons name="car" size={28} color="#F58220" />
-          <Text style={styles.title}>Live Tracking</Text>
+          <Text style={styles.title}>{t("rides.liveTracking")}</Text>
         </View>
 
         <View style={styles.statusBox}>
@@ -165,7 +173,7 @@ export default function LiveTrackingScreen() {
               trackingActive ? styles.statusActive : styles.statusWaiting,
             ]}
           >
-            {getStatusText(booking)}
+            {t(getStatusKey(booking))}
           </Text>
         </View>
 
@@ -184,8 +192,8 @@ export default function LiveTrackingScreen() {
               {pickupLocation ? (
                 <Marker
                   coordinate={pickupLocation}
-                  title="Pickup"
-                  description="Child pickup location"
+                  title={t("rides.pickupMarkerTitle")}
+                  description={t("rides.pickupMarkerDesc")}
                 >
                   <View style={styles.pickupMarker}>
                     <Ionicons name="home" size={17} color="#FFFFFF" />
@@ -196,8 +204,8 @@ export default function LiveTrackingScreen() {
               {schoolLocation ? (
                 <Marker
                   coordinate={schoolLocation}
-                  title="School"
-                  description="School destination"
+                  title={t("rides.schoolMarkerTitle")}
+                  description={t("rides.schoolMarkerDesc")}
                 >
                   <View style={styles.schoolMarker}>
                     <Ionicons name="school" size={17} color="#FFFFFF" />
@@ -208,8 +216,8 @@ export default function LiveTrackingScreen() {
               {driverLocation ? (
                 <Marker
                   coordinate={driverLocation}
-                  title="Driver"
-                  description="Live driver location"
+                  title={t("rides.driverMarkerTitle")}
+                  description={t("rides.driverMarkerDesc")}
                 >
                   <View style={styles.driverMarker}>
                     <Ionicons name="car" size={20} color="#FFFFFF" />
@@ -222,7 +230,7 @@ export default function LiveTrackingScreen() {
           <View style={styles.noMapBox}>
             <Ionicons name="map-outline" size={42} color="#F58220" />
             <Text style={styles.noMapText}>
-              Waiting for the driver location...
+              {t("rides.waitingForDriverLocation")}
             </Text>
           </View>
         )}
@@ -231,7 +239,7 @@ export default function LiveTrackingScreen() {
           <View style={styles.infoRow}>
             <Ionicons name="person-outline" size={16} color="#7C5F46" />
             <Text style={styles.infoText}>
-              Driver: {booking.driverName || "Driver"}
+              {t("rides.driverLabel", { name: booking.driverName || t("rides.driverFallback") })}
             </Text>
           </View>
 
@@ -258,15 +266,15 @@ export default function LiveTrackingScreen() {
 
           {booking.driverLocationUpdatedAt?.seconds ? (
             <Text style={styles.updatedText}>
-              Last update:{" "}
-              {new Date(
-                booking.driverLocationUpdatedAt.seconds * 1000,
-              ).toLocaleTimeString()}
+              {t("rides.lastUpdate", {
+                time: new Date(
+                  booking.driverLocationUpdatedAt.seconds * 1000,
+                ).toLocaleTimeString(),
+              })}
             </Text>
           ) : (
             <Text style={styles.updatedText}>
-              The driver location will appear once the driver arrives for
-              pickup.
+              {t("rides.driverLocationWillAppear")}
             </Text>
           )}
         </View>

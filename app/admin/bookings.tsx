@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { subscribeAllBookings } from "./adminBookingsLib";
 import { AdminBookingRow } from "./adminTypes";
@@ -10,25 +11,26 @@ import { EmptyState, ErrorState, LoadingState } from "./components/AdminStates";
 import FilterChips from "./components/FilterChips";
 import SearchBar from "./components/SearchBar";
 import { useAdminCollection } from "./useAdminCollection";
+import { translateCategoryLabel } from "../i18n/formatters";
 
 type StatusFilter = "all" | "booked" | "ongoing" | "on_the_way" | "arrived" | "completed" | "cancelled";
 type PaymentFilter = "all" | "paid" | "unpaid" | "cash";
 
-const STATUS_OPTIONS: { key: StatusFilter; label: string }[] = [
-  { key: "all", label: "All statuses" },
-  { key: "booked", label: "Booked" },
-  { key: "ongoing", label: "Ongoing" },
-  { key: "on_the_way", label: "On the way" },
-  { key: "arrived", label: "Arrived" },
-  { key: "completed", label: "Completed" },
-  { key: "cancelled", label: "Cancelled" },
+const STATUS_OPTION_KEYS: { key: StatusFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "admin.allStatuses" },
+  { key: "booked", labelKey: "admin.bookingStatusLabel.booked" },
+  { key: "ongoing", labelKey: "admin.bookingStatusLabel.ongoing" },
+  { key: "on_the_way", labelKey: "admin.bookingStatusLabel.on_the_way" },
+  { key: "arrived", labelKey: "admin.bookingStatusLabel.arrived" },
+  { key: "completed", labelKey: "admin.bookingStatusLabel.completed" },
+  { key: "cancelled", labelKey: "admin.bookingStatusLabel.cancelled" },
 ];
 
-const PAYMENT_OPTIONS: { key: PaymentFilter; label: string }[] = [
-  { key: "all", label: "All payments" },
-  { key: "paid", label: "Paid" },
-  { key: "unpaid", label: "Unpaid" },
-  { key: "cash", label: "Cash" },
+const PAYMENT_OPTION_KEYS: { key: PaymentFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "admin.allPayments" },
+  { key: "paid", labelKey: "admin.paid" },
+  { key: "unpaid", labelKey: "admin.unpaid" },
+  { key: "cash", labelKey: "common.cash" },
 ];
 
 const statusColor = (status: string) => {
@@ -38,10 +40,20 @@ const statusColor = (status: string) => {
 };
 
 export default function AdminBookingsScreen() {
+  const { t } = useTranslation();
   const { data: bookings, loading, error, refresh } = useAdminCollection(subscribeAllBookings);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("all");
+
+  const statusOptions = useMemo(
+    () => STATUS_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
+    [t],
+  );
+  const paymentOptions = useMemo(
+    () => PAYMENT_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
+    [t],
+  );
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -71,9 +83,15 @@ export default function AdminBookingsScreen() {
   const renderBooking = ({ item }: { item: AdminBookingRow }) => (
     <Pressable style={styles.card} onPress={() => router.push(`/admin/bookings/${item.id}` as any)}>
       <View style={styles.cardTop}>
-        <Text style={styles.category}>{item.category || "booking"}</Text>
+        <Text style={styles.category}>
+          {item.category ? translateCategoryLabel(item.category, item.category, t) : t("admin.bookingFallback")}
+        </Text>
         <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
-        <Text style={styles.statusText}>{item.status || "—"}</Text>
+        <Text style={styles.statusText}>
+          {item.status
+            ? t(`admin.bookingStatusLabel.${item.status}`, { defaultValue: item.status })
+            : "—"}
+        </Text>
       </View>
 
       <Text style={styles.title} numberOfLines={1}>
@@ -87,23 +105,25 @@ export default function AdminBookingsScreen() {
       ) : null}
 
       <View style={styles.metaRow}>
-        <Text style={styles.metaText}>{item.date || "No date"}</Text>
+        <Text style={styles.metaText}>{item.date || t("admin.noDateFallback")}</Text>
         {item.price !== null ? <Text style={styles.price}>₪{item.price}</Text> : null}
-        <Text style={styles.metaText}>{item.paymentStatus || "unpaid"}</Text>
+        <Text style={styles.metaText}>
+          {item.paymentStatus === "paid" ? t("admin.paid") : t("admin.unpaid")}
+        </Text>
       </View>
     </Pressable>
   );
 
   return (
-    <AdminScreen title="Bookings" activeKey="bookings">
+    <AdminScreen title={t("admin.bookings")} activeKey="bookings">
       <View style={styles.filtersWrap}>
-        <SearchBar value={search} onChangeText={setSearch} placeholder="Search passenger, driver, place" />
-        <FilterChips options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} />
-        <FilterChips options={PAYMENT_OPTIONS} value={paymentFilter} onChange={setPaymentFilter} />
+        <SearchBar value={search} onChangeText={setSearch} placeholder={t("admin.searchPassengerDriverPlace")} />
+        <FilterChips options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
+        <FilterChips options={paymentOptions} value={paymentFilter} onChange={setPaymentFilter} />
       </View>
 
       {loading ? (
-        <LoadingState label="Loading bookings..." />
+        <LoadingState label={t("admin.loadingBookings")} />
       ) : error ? (
         <ErrorState message={error} onRetry={refresh} />
       ) : (
@@ -116,8 +136,8 @@ export default function AdminBookingsScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="book-outline"
-              title="No bookings found"
-              subtitle="Try a different search or filter."
+              title={t("admin.noBookingsFound")}
+              subtitle={t("admin.tryDifferentSearchFilter")}
             />
           }
         />

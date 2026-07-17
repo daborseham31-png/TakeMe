@@ -16,6 +16,8 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "react-i18next";
+
 import { auth, db } from "../../firebase";
 import {
   analyzeIdImage,
@@ -33,7 +35,17 @@ import {
 
 type Gender = "Male" | "Female" | "Other";
 
+// Native-script display only — the value saved to Firestore (spokenLanguages)
+// always stays one of SPOKEN_LANGUAGE_OPTIONS' English words.
+const SPOKEN_LANGUAGE_DISPLAY: Record<string, string> = {
+  Arabic: "العربية",
+  Hebrew: "עברית",
+  English: "English",
+  Russian: "Русский",
+};
+
 export default function SignUpScreen() {
+  const { t } = useTranslation();
   const [submitting, setSubmitting] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const [isDriver, setIsDriver] = useState(false);
@@ -68,7 +80,7 @@ export default function SignUpScreen() {
   const isValidEmail = /^[^\s@]+@(gmail\.com|hotmail\.com)$/.test(normalizedEmail);
   const emailError =
     email.trim().length > 0 && !isValidEmail
-      ? "Email must be a Gmail or Hotmail address."
+      ? t("auth.emailMustBeGmailHotmail")
       : "";
 
   const derivedAge =
@@ -96,12 +108,10 @@ export default function SignUpScreen() {
       setIdResult(result);
 
       if (!isIdReadable(result)) {
-        setIdError(
-          "We couldn't read your ID clearly. Please upload a clearer photo.",
-        );
+        setIdError(t("auth.couldNotReadIdClear"));
       }
     } catch (error: any) {
-      setIdError(error?.message || "Could not read your ID. Please try again.");
+      setIdError(error?.message || t("auth.couldNotReadIdTryAgain"));
     } finally {
       setIdAnalyzing(false);
     }
@@ -140,13 +150,11 @@ export default function SignUpScreen() {
       setLicenseResult(result);
 
       if (!result.expiryDate) {
-        setLicenseError(
-          "Could not read license expiry date. Please upload a clearer photo.",
-        );
+        setLicenseError(t("driverCreate.couldNotReadExpiryShort"));
       }
     } catch (error: any) {
       setLicenseError(
-        error?.message || "Could not read your license. Please try again.",
+        error?.message || t("validation.couldNotReadLicenseTryAgain"),
       );
     } finally {
       setLicenseAnalyzing(false);
@@ -166,45 +174,45 @@ export default function SignUpScreen() {
   const handleSignUp = async () => {
     if (!idResult || !isIdReadable(idResult) || !idImageUri) {
       Alert.alert(
-        "ID verification required",
-        "Please scan a clear photo of your ID before signing up.",
+        t("auth.idVerificationRequiredTitle"),
+        t("auth.scanClearIdMessage"),
       );
       return;
     }
 
     if (!email.trim() || !phone.trim() || !password) {
-      Alert.alert("Missing details", "Please fill in all required fields.");
+      Alert.alert(t("auth.missingDetails"), t("auth.fillAllRequiredFields"));
       return;
     }
 
     if (!isValidEmail) {
-      Alert.alert("Invalid email", "Email must be a Gmail or Hotmail address.");
+      Alert.alert(t("auth.invalidEmailTitle"), t("auth.emailMustBeGmailHotmail"));
       return;
     }
 
     if (!gender) {
-      Alert.alert("Missing gender", "Please select your gender.");
+      Alert.alert(t("auth.missingGenderTitle"), t("auth.selectYourGender"));
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert("Weak password", "Password must be at least 6 characters.");
+      Alert.alert(t("auth.weakPasswordTitle"), t("auth.passwordMinLength"));
       return;
     }
 
     if (isDriver) {
       if (spokenLanguages.length === 0) {
         Alert.alert(
-          "Languages required",
-          "Please select at least one language you speak.",
+          t("validation.languagesRequiredTitle"),
+          t("validation.selectAtLeastOneLanguage"),
         );
         return;
       }
 
       if (!licenseImageUri || !licenseResult) {
         Alert.alert(
-          "License required",
-          "Please upload a clear driving license image.",
+          t("validation.licenseRequiredTitle"),
+          t("validation.uploadClearLicenseMessage"),
         );
         return;
       }
@@ -222,16 +230,16 @@ export default function SignUpScreen() {
 
       if (licenseValidity === "unknown") {
         Alert.alert(
-          "License required",
-          "Please upload a clear driving license image.",
+          t("validation.licenseRequiredTitle"),
+          t("validation.uploadClearLicenseMessage"),
         );
         return;
       }
 
       if (licenseValidity === "expired") {
         Alert.alert(
-          "License expired",
-          "Your driving license is expired. You cannot register as a driver.",
+          t("validation.licenseExpiredTitle"),
+          t("auth.driverLicenseExpiredCannotRegister"),
         );
         return;
       }
@@ -293,14 +301,14 @@ export default function SignUpScreen() {
         });
       }
 
-      Alert.alert("Success", "Account created successfully!");
+      Alert.alert(t("admin.successTitle"), t("auth.accountCreatedSuccessMessage"));
       router.replace("/(tabs)/home" as any);
     } catch (error: any) {
       if (createdUid && auth.currentUser) {
         await deleteUser(auth.currentUser).catch(() => {});
       }
 
-      Alert.alert("Sign up failed", error?.message || "Please try again.");
+      Alert.alert(t("auth.signUpFailedTitle"), error?.message || t("validation.pleaseTryAgain"));
     } finally {
       setSubmitting(false);
     }
@@ -315,7 +323,7 @@ export default function SignUpScreen() {
 
     return (
       <Text style={styles.qualityNote}>
-        Image quality: {quality}. For best results use a clear, well-lit photo.
+        {t("driverCreate.imageQualityNote", { quality })}
       </Text>
     );
   };
@@ -324,8 +332,8 @@ export default function SignUpScreen() {
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.card}>
-          <Text style={styles.title}>Sign Up</Text>
-          <Text style={styles.subtitle}>Create your account</Text>
+          <Text style={styles.title}>{t("auth.signUp")}</Text>
+          <Text style={styles.subtitle}>{t("auth.createYourAccount")}</Text>
 
           {/* ---------------------------------------------------------- */}
           {/* Step 1 — Identity card scan                                 */}
@@ -333,11 +341,11 @@ export default function SignUpScreen() {
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeaderRow}>
               <Ionicons name="card-outline" size={20} color="#F58220" />
-              <Text style={styles.sectionTitle}>Scan your ID</Text>
+              <Text style={styles.sectionTitle}>{t("auth.scanYourIdTitle")}</Text>
             </View>
 
             <Text style={styles.consentText}>
-              Your document photo is used only to verify your account details.
+              {t("driverCreate.licenseConsentText")}
             </Text>
 
             {idImageUri ? (
@@ -351,14 +359,14 @@ export default function SignUpScreen() {
             >
               <Ionicons name="camera-outline" size={18} color="#FFFFFF" />
               <Text style={styles.scanButtonText}>
-                {idImageUri ? "Retake / Upload Again" : "Scan your ID"}
+                {idImageUri ? t("driverCreate.retakeUploadAgain") : t("auth.scanYourIdButton")}
               </Text>
             </Pressable>
 
             {idAnalyzing ? (
               <View style={styles.analyzingRow}>
                 <ActivityIndicator color="#F58220" />
-                <Text style={styles.analyzingText}>Reading your ID…</Text>
+                <Text style={styles.analyzingText}>{t("auth.readingYourId")}</Text>
               </View>
             ) : null}
 
@@ -373,24 +381,24 @@ export default function SignUpScreen() {
               <View style={styles.readOnlyBox}>
                 <View style={styles.verifiedRow}>
                   <Ionicons name="checkmark-circle" size={16} color="#166534" />
-                  <Text style={styles.verifiedText}>ID read successfully</Text>
+                  <Text style={styles.verifiedText}>{t("auth.idReadSuccessfully")}</Text>
                 </View>
 
-                <Text style={styles.readOnlyLabel}>Full Name</Text>
+                <Text style={styles.readOnlyLabel}>{t("auth.fullNameLabel")}</Text>
                 <TextInput
                   style={styles.readOnlyInput}
                   value={idResult.fullName || ""}
                   editable={false}
                 />
 
-                <Text style={styles.readOnlyLabel}>Birth Date</Text>
+                <Text style={styles.readOnlyLabel}>{t("auth.birthDateLabel")}</Text>
                 <TextInput
                   style={styles.readOnlyInput}
                   value={idResult.birthDate || ""}
                   editable={false}
                 />
 
-                <Text style={styles.readOnlyLabel}>Age</Text>
+                <Text style={styles.readOnlyLabel}>{t("auth.ageLabelShort")}</Text>
                 <TextInput
                   style={styles.readOnlyInput}
                   value={derivedAge !== null ? String(derivedAge) : ""}
@@ -405,10 +413,10 @@ export default function SignUpScreen() {
           {/* ---------------------------------------------------------- */}
           {/* Step 2 — Manual fields                                      */}
           {/* ---------------------------------------------------------- */}
-          <Text style={styles.label}>Email</Text>
+          <Text style={styles.label}>{t("auth.email")}</Text>
           <TextInput
             style={styles.input}
-            placeholder="Enter your email"
+            placeholder={t("auth.emailPlaceholder")}
             placeholderTextColor="#8b7b6b"
             keyboardType="email-address"
             autoCapitalize="none"
@@ -417,32 +425,32 @@ export default function SignUpScreen() {
           />
           {emailError ? <Text style={styles.fieldError}>{emailError}</Text> : null}
 
-          <Text style={styles.label}>Phone Number</Text>
+          <Text style={styles.label}>{t("auth.phoneNumberLabel")}</Text>
           <TextInput
             style={styles.input}
-            placeholder="Phone number"
+            placeholder={t("auth.phoneNumberPlaceholder")}
             placeholderTextColor="#8b7b6b"
             keyboardType="phone-pad"
             value={phone}
             onChangeText={(text) => setPhone(getDigitsOnly(text))}
           />
 
-          <Text style={styles.label}>Password</Text>
+          <Text style={styles.label}>{t("auth.password")}</Text>
           <View style={styles.passwordRow}>
             <TextInput
               style={styles.passwordInput}
-              placeholder="Password"
+              placeholder={t("auth.passwordPlaceholder")}
               placeholderTextColor="#8b7b6b"
               secureTextEntry={!showPw}
               value={password}
               onChangeText={setPassword}
             />
             <Pressable onPress={() => setShowPw(!showPw)}>
-              <Text style={styles.eye}>{showPw ? "Hide" : "Show"}</Text>
+              <Text style={styles.eye}>{showPw ? t("auth.hide") : t("auth.show")}</Text>
             </Pressable>
           </View>
 
-          <Text style={styles.label}>Gender</Text>
+          <Text style={styles.label}>{t("auth.genderLabel")}</Text>
           <View style={styles.optionRow}>
             {(["Male", "Female", "Other"] as Gender[]).map((option) => (
               <Pressable
@@ -459,7 +467,11 @@ export default function SignUpScreen() {
                     gender === option && styles.optionTextActive,
                   ]}
                 >
-                  {option === "Other" ? "Other / Prefer not to say" : option}
+                  {option === "Male"
+                    ? t("common.male")
+                    : option === "Female"
+                      ? t("common.female")
+                      : t("auth.otherPreferNotToSay")}
                 </Text>
               </Pressable>
             ))}
@@ -473,7 +485,7 @@ export default function SignUpScreen() {
             onPress={() => setIsDriver(!isDriver)}
           >
             <View style={[styles.circle, isDriver && styles.circleActive]} />
-            <Text style={styles.checkText}>Also register as a Driver</Text>
+            <Text style={styles.checkText}>{t("auth.alsoRegisterAsDriver")}</Text>
           </Pressable>
 
           {isDriver ? (
@@ -481,7 +493,7 @@ export default function SignUpScreen() {
               {/* ------------------------------------------------------ */}
               {/* Spoken languages                                        */}
               {/* ------------------------------------------------------ */}
-              <Text style={styles.label}>Languages you speak</Text>
+              <Text style={styles.label}>{t("driverCreate.languagesYouSpeak")}</Text>
               <View style={styles.languageRow}>
                 {SPOKEN_LANGUAGE_OPTIONS.map((lang) => {
                   const active = spokenLanguages.includes(lang);
@@ -501,7 +513,7 @@ export default function SignUpScreen() {
                           active && styles.languageTextActive,
                         ]}
                       >
-                        {lang}
+                        {SPOKEN_LANGUAGE_DISPLAY[lang] || lang}
                       </Text>
                     </Pressable>
                   );
@@ -515,13 +527,12 @@ export default function SignUpScreen() {
                 <View style={styles.sectionHeaderRow}>
                   <Ionicons name="car-outline" size={20} color="#F58220" />
                   <Text style={styles.sectionTitle}>
-                    Scan your driving license
+                    {t("driverCreate.scanLicenseTitle")}
                   </Text>
                 </View>
 
                 <Text style={styles.consentText}>
-                  Your document photo is used only to verify your account
-                  details.
+                  {t("driverCreate.licenseConsentText")}
                 </Text>
 
                 {licenseImageUri ? (
@@ -539,8 +550,8 @@ export default function SignUpScreen() {
                   <Ionicons name="camera-outline" size={18} color="#FFFFFF" />
                   <Text style={styles.scanButtonText}>
                     {licenseImageUri
-                      ? "Retake / Upload Again"
-                      : "Scan your driving license"}
+                      ? t("driverCreate.retakeUploadAgain")
+                      : t("driverCreate.scanLicenseTitle")}
                   </Text>
                 </Pressable>
 
@@ -548,7 +559,7 @@ export default function SignUpScreen() {
                   <View style={styles.analyzingRow}>
                     <ActivityIndicator color="#F58220" />
                     <Text style={styles.analyzingText}>
-                      Reading your license…
+                      {t("driverCreate.readingLicense")}
                     </Text>
                   </View>
                 ) : null}
@@ -584,13 +595,13 @@ export default function SignUpScreen() {
                           size={18}
                           color="#166534"
                         />
-                        <Text style={styles.validText}>License is valid</Text>
+                        <Text style={styles.validText}>{t("driverCreate.licenseIsValid")}</Text>
                       </View>
                     ) : licenseValidity === "expired" ? (
                       <View style={styles.expiredBox}>
                         <Ionicons name="close-circle" size={18} color="#B91C1C" />
                         <Text style={styles.expiredText}>
-                          License is expired
+                          {t("driverCreate.licenseIsExpired")}
                         </Text>
                       </View>
                     ) : (
@@ -601,28 +612,27 @@ export default function SignUpScreen() {
                           color="#B86115"
                         />
                         <Text style={styles.unknownText}>
-                          Could not read license expiry date. Please upload a
-                          clearer photo.
+                          {t("driverCreate.couldNotReadExpiryShort")}
                         </Text>
                       </View>
                     )}
 
                     <View style={styles.readOnlyBox}>
-                      <Text style={styles.readOnlyLabel}>License Number</Text>
+                      <Text style={styles.readOnlyLabel}>{t("driverCreate.licenseNumberLabel")}</Text>
                       <TextInput
                         style={styles.readOnlyInput}
                         value={licenseResult.licenseNumber || ""}
                         editable={false}
                       />
 
-                      <Text style={styles.readOnlyLabel}>Expiry Date</Text>
+                      <Text style={styles.readOnlyLabel}>{t("driverCreate.expiryDateLabel")}</Text>
                       <TextInput
                         style={styles.readOnlyInput}
                         value={licenseResult.expiryDate || ""}
                         editable={false}
                       />
 
-                      <Text style={styles.readOnlyLabel}>Categories</Text>
+                      <Text style={styles.readOnlyLabel}>{t("driverCreate.categoriesLabel")}</Text>
                       <TextInput
                         style={styles.readOnlyInput}
                         value={licenseResult.licenseCategories.join(", ")}
@@ -648,14 +658,14 @@ export default function SignUpScreen() {
             {submitting ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.signUpText}>Sign Up</Text>
+              <Text style={styles.signUpText}>{t("auth.signUp")}</Text>
             )}
           </Pressable>
 
           <Pressable onPress={() => router.replace("/")}>
             <Text style={styles.loginText}>
-              Already have an account?{" "}
-              <Text style={styles.loginLink}>Login</Text>
+              {t("auth.alreadyHaveAccount")}
+              <Text style={styles.loginLink}>{t("auth.loginButton")}</Text>
             </Text>
           </Pressable>
         </View>

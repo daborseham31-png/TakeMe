@@ -26,6 +26,8 @@ import {
   styles as weeklyStyles,
 } from "../driver/create/driverHelpers";
 import WeeklyDaysCard from "../driver/create/WeeklyDaysCard";
+import { useTranslation } from "react-i18next";
+import { useLanguage } from "../i18n/LanguageProvider";
 
 const LANGUAGES_LIST = [
   { key: "ar", label: "العربية" },
@@ -77,6 +79,8 @@ const isTimeAvailableForDate = (dateText: string, timeText: string) => {
 };
 
 export default function PersonalRideScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   // Manual matching field ("Nazareth") — this is what driver search compares
   // against driver.from/driver.to. It is NEVER auto-filled with an exact GPS
   // address, and using "Use my current location" below never touches it.
@@ -163,17 +167,17 @@ export default function PersonalRideScreen() {
 
   const handleSearch = () => {
     if (!fromLocation || !toLocation) {
-      Alert.alert("Missing details", "Please enter both From and To.");
+      Alert.alert(t("auth.missingDetails"), t("validation.enterFromAndTo"));
       return;
     }
 
     if (!fromPlace) {
-      setFromError("Please select a location from the list.");
+      setFromError(t("validation.selectLocationFromList"));
       return;
     }
 
     if (!toPlace) {
-      setToError("Please select a location from the list.");
+      setToError(t("validation.selectLocationFromList"));
       return;
     }
 
@@ -248,14 +252,14 @@ export default function PersonalRideScreen() {
 
     if (!cleanDate) {
       Alert.alert(
-        "Invalid date",
-        "Please choose a valid trip date (today or a future date).",
+        t("validation.invalidDateTitle"),
+        t("validation.chooseValidTripDate"),
       );
       return;
     }
 
     if (cleanDate < getTodayDate()) {
-      Alert.alert("Invalid date", "Please choose today or a future date.");
+      Alert.alert(t("validation.invalidDateTitle"), t("validation.chooseTodayOrFuture"));
       return;
     }
 
@@ -265,22 +269,22 @@ export default function PersonalRideScreen() {
 
     if (!cleanTime) {
       Alert.alert(
-        "Invalid time",
-        "Please choose a valid time between 00:00 and 23:59.",
+        t("validation.invalidTimeTitle"),
+        t("validation.chooseValidTimeRange"),
       );
       return;
     }
 
     if (!isTimeAvailableForDate(cleanDate, cleanTime)) {
       Alert.alert(
-        "Invalid time",
-        "You cannot book a time that already passed.",
+        t("validation.invalidTimeTitle"),
+        t("validation.cannotBookPastTime"),
       );
       return;
     }
 
     if (seats < 1 || seats > 8) {
-      Alert.alert("Invalid seats", "Seats must be between 1 and 8.");
+      Alert.alert(t("validation.invalidSeatsTitle"), t("validation.seatsRange"));
       return;
     }
 
@@ -305,52 +309,52 @@ export default function PersonalRideScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#7C5F46" />
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
         </Pressable>
 
         <View style={styles.header}>
           <Text style={styles.headerEmoji}>🚗</Text>
-          <Text style={styles.title}>Personal Ride</Text>
+          <Text style={styles.title}>{t("rideCategory.categories.personal.title")}</Text>
         </View>
-        <Text style={styles.subtitle}>Personal trips & visits</Text>
+        <Text style={styles.subtitle}>{t("rideCategory.categories.personal.desc")}</Text>
 
         <View style={styles.card}>
           <View style={styles.twoColumns}>
             <View style={styles.column}>
               <IsraelLocationAutocomplete
-                label="From"
+                label={t("booking.from")}
                 value={fromLocation}
                 onChangeText={handleFromChange}
                 onSelectLocation={(location) => {
                   setFromPlace(location);
                   setFromError("");
                 }}
-                placeholder="Enter departure city"
+                placeholder={t("booking.enterDepartureCity")}
                 error={fromError}
               />
             </View>
 
             <View style={styles.column}>
               <IsraelLocationAutocomplete
-                label="To"
+                label={t("booking.to")}
                 value={toLocation}
                 onChangeText={handleToChange}
                 onSelectLocation={(location) => {
                   setToPlace(location);
                   setToError("");
                 }}
-                placeholder="Enter destination city"
+                placeholder={t("booking.enterDestinationCity")}
                 error={toError}
               />
             </View>
           </View>
 
-          <Text style={styles.label}>Exact Destination </Text>
+          <Text style={styles.label}>{t("booking.exactDestination")} </Text>
           <View style={styles.inputRow}>
             <Ionicons name="flag-outline" size={18} color="#8B7B6B" />
             <TextInput
               style={styles.rowInput}
-              placeholder="Enter the exact building, university, or landmark"
+              placeholder={t("booking.enterExactBuildingHint")}
               placeholderTextColor="#8B7B6B"
               value={destinationDetails}
               onChangeText={setDestinationDetails}
@@ -358,10 +362,9 @@ export default function PersonalRideScreen() {
           </View>
 
           <View style={styles.navPickupBox}>
-            <Text style={styles.label}>Pickup location for driver navigation</Text>
+            <Text style={styles.label}>{t("booking.pickupLocationForDriverNav")}</Text>
             <Text style={styles.navPickupHint}>
-              Optional — used only to guide your driver to your exact spot.
-              Does not affect which drivers you see.
+              {t("booking.pickupOptionalHint")}
             </Text>
 
             <CurrentLocationButton onLocated={handleUseCurrentLocation} />
@@ -369,7 +372,7 @@ export default function PersonalRideScreen() {
             {navAddress ? (
               <View style={styles.navPickupResult}>
                 <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
-                <Text style={styles.navPickupSavedText}>Location saved</Text>
+                <Text style={styles.navPickupSavedText}>{t("booking.locationSaved")}</Text>
               </View>
             ) : null}
           </View>
@@ -377,7 +380,7 @@ export default function PersonalRideScreen() {
           {!weeklyBooking && (
             <>
               <DateInput
-                label="Trip Date"
+                label={t("booking.tripDate")}
                 value={tripDate}
                 onChange={setTripDate}
                 showPicker={showTripDatePicker}
@@ -387,7 +390,7 @@ export default function PersonalRideScreen() {
               <View style={styles.twoColumns}>
                 <View style={styles.column}>
                   <TimeInput
-                    label="Trip Time"
+                    label={t("booking.tripTime")}
                     value={tripTime}
                     onChange={setTripTime}
                     showPicker={showTripTimePicker}
@@ -397,7 +400,7 @@ export default function PersonalRideScreen() {
                 </View>
 
                 <View style={styles.column}>
-                  <Text style={weeklyStyles.label}>Seats</Text>
+                  <Text style={weeklyStyles.label}>{t("booking.seats")}</Text>
                   <View style={styles.seatsRow}>
                     <Pressable style={styles.seatButton} onPress={decreaseSeats}>
                       <Ionicons name="remove" size={20} color="#111827" />
@@ -421,7 +424,7 @@ export default function PersonalRideScreen() {
               color={weeklyBooking ? "#F58220" : "#8B7B6B"}
             />
             <Ionicons name="calendar-outline" size={16} color="#7C5F46" />
-            <Text style={styles.weeklyText}>Book for the whole week</Text>
+            <Text style={styles.weeklyText}>{t("booking.bookForWholeWeek")}</Text>
           </Pressable>
 
           {weeklyBooking && (
@@ -439,10 +442,10 @@ export default function PersonalRideScreen() {
         <View style={styles.card}>
           <View style={styles.prefTitleRow}>
             <Ionicons name="person-outline" size={18} color="#F58220" />
-            <Text style={styles.sectionTitle}>Driver Preferences</Text>
+            <Text style={styles.sectionTitle}>{t("booking.driverPreferences")}</Text>
           </View>
 
-          <Text style={styles.label}>Driver Gender</Text>
+          <Text style={styles.label}>{t("booking.driverGender")}</Text>
           <View style={styles.optionRow}>
             <Pressable
               style={[
@@ -457,7 +460,7 @@ export default function PersonalRideScreen() {
                   genderPref === "any" && styles.optionTextActive,
                 ]}
               >
-                Any
+                {t("common.any")}
               </Text>
             </Pressable>
 
@@ -474,7 +477,7 @@ export default function PersonalRideScreen() {
                   genderPref === "male" && styles.optionTextActive,
                 ]}
               >
-                Male
+                {t("common.male")}
               </Text>
             </Pressable>
 
@@ -491,12 +494,12 @@ export default function PersonalRideScreen() {
                   genderPref === "female" && styles.optionTextActive,
                 ]}
               >
-                Female
+                {t("common.female")}
               </Text>
             </Pressable>
           </View>
 
-          <Text style={styles.label}>Driver speaks</Text>
+          <Text style={styles.label}>{t("booking.driverSpeaks")}</Text>
           <View style={styles.languageRow}>
             {LANGUAGES_LIST.map((lang) => {
               const active = selectedLanguages.includes(lang.key);
@@ -526,7 +529,7 @@ export default function PersonalRideScreen() {
 
         <Pressable style={styles.searchButton} onPress={handleSearch}>
           <Ionicons name="search-outline" size={20} color="#FFFFFF" />
-          <Text style={styles.searchText}>Search Drivers</Text>
+          <Text style={styles.searchText}>{t("booking.searchDrivers")}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>

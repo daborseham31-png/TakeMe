@@ -78,6 +78,10 @@ import {
   submitRoadsideRating,
 } from "../booking/roadside-help/roadsideLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+
+import { translateCategoryLabel, translateProblemType, translateStatus, translateStoredDayName } from "../i18n/formatters";
 
 type Tab = "passenger" | "driver";
 
@@ -91,8 +95,8 @@ const getLast3Digits = (value: string) => {
   return digits.length >= 3 ? digits.slice(-3) : digits;
 };
 
-const paymentMethodLabel = (method?: string | null) =>
-  method === "cash" ? "Cash" : method === "bit" ? "BIT" : "Card";
+const paymentMethodLabel = (method: string | null | undefined, t: TFunction) =>
+  method === "cash" ? t("common.cash") : method === "bit" ? "BIT" : t("common.card");
 
 const formatPhoneForDisplay = (phone?: string | null) => {
   const digits = String(phone || "").replace(/\D/g, "");
@@ -232,6 +236,7 @@ const isDriverRowBookedOrActive = (row: CombinedRow): boolean => {
 };
 
 export default function BookingsScreen() {
+  const { t } = useTranslation();
   const params = useLocalSearchParams<{
     tab?: string | string[];
     bookingId?: string | string[];
@@ -773,7 +778,7 @@ const bookedRouteIds = useMemo(() => {
       setBusyId(id);
       await fn();
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Something went wrong.");
+      Alert.alert(t("common.error"), error?.message || t("booking.somethingWentWrong"));
     } finally {
       setBusyId(null);
     }
@@ -783,12 +788,12 @@ const bookedRouteIds = useMemo(() => {
     const callNumber = formatPhoneForCall(phone);
 
     if (!callNumber) {
-      Alert.alert("No phone", "No phone number is saved for this driver.");
+      Alert.alert(t("booking.noPhoneTitle"), t("booking.noPhoneSavedMessage"));
       return;
     }
 
     Linking.openURL(`tel:${callNumber}`).catch(() =>
-      Alert.alert("Error", "Could not open the phone app."),
+      Alert.alert(t("common.error"), t("booking.couldNotOpenPhoneApp")),
     );
   };
 
@@ -821,22 +826,22 @@ const bookedRouteIds = useMemo(() => {
     const tripStatus = (b as any).tripStatus;
 
     if (b.status === "completed" || tripStatus === "completed") {
-      return "Completed";
+      return t("common.completed");
     }
 
     if (tripStatus === "driver_on_way") {
-      return "Driver on the way";
+      return t("rides.status.on_the_way");
     }
 
     if (tripStatus === "arrived_pickup") {
-      return "Driver arrived";
+      return t("rides.status.arrived");
     }
 
     if (tripStatus === "in_progress") {
-      return "In trip";
+      return t("booking.statusTripInProgress");
     }
 
-    return "Ongoing";
+    return t("booking.statusOngoing");
   };
 
   const renderBookingTripStatus = (b: BookingItem) => {
@@ -871,19 +876,16 @@ const bookedRouteIds = useMemo(() => {
   // never cancels/changes the booking itself (status/tripStatus/paymentStatus
   // are untouched). Active/upcoming items get an extra-explicit warning so
   // that's never mistaken for a cancellation.
-  const REMOVE_ACTIVE_MESSAGE =
-    "Removing this card will only hide it from your list. It will not cancel the booking.";
-
   const removeConfirmMessage = (item: any, label: string) =>
     isCompletedItem(item)
-      ? `Remove this ${label} from your list?`
-      : REMOVE_ACTIVE_MESSAGE;
+      ? t("booking.removeConfirmCompleted", { label })
+      : t("booking.removeActiveMessage");
 
   const confirmHideRideBooking = (ride: RideBooking, viewer: Tab) => {
-    Alert.alert("Remove booking", removeConfirmMessage(ride, "booking"), [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("booking.removeBookingTitle"), removeConfirmMessage(ride, t("booking.labelWord")), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Remove",
+        text: t("booking.removeButton"),
         style: "destructive",
         onPress: () =>
           runApp(ride.id, () => {
@@ -939,12 +941,12 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
   const confirmHideGeneralBooking = (
     booking: BookingItem,
     viewer: Tab,
-    label = "booking",
+    label = t("booking.labelWord"),
   ) => {
-    Alert.alert("Remove booking", removeConfirmMessage(booking, label), [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("booking.removeBookingTitle"), removeConfirmMessage(booking, label), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Remove",
+        text: t("booking.removeButton"),
         style: "destructive",
         onPress: () =>
           runApp(booking.id, () => hideGeneralBooking(booking.id, viewer)),
@@ -979,10 +981,10 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
   };
 
   const confirmHideApplication = (app: NormalizedApplication, viewer: Tab) => {
-    Alert.alert("Remove booking", removeConfirmMessage(app, "booking"), [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("booking.removeBookingTitle"), removeConfirmMessage(app, t("booking.labelWord")), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Remove",
+        text: t("booking.removeButton"),
         style: "destructive",
         onPress: () =>
           runApp(app.id, () => hideApplicationFromList(app, viewer)),
@@ -1020,7 +1022,12 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
 
   const handleAppStart = (a: NormalizedApplication) => {
     if (startState(a.date) === "future") {
-      Alert.alert("Not yet", "Start will be available on the job date.");
+      Alert.alert(
+        t("booking.notYetTitle"),
+        a.kind === "work"
+          ? t("booking.startAvailableOnJobDate")
+          : t("booking.startAvailableOnErrandDate"),
+      );
       return;
     }
 
@@ -1063,14 +1070,14 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     const blocked = cancelBlockedReason(a);
 
     if (blocked) {
-      Alert.alert("Cannot cancel", blocked);
+      Alert.alert(t("booking.cannotCancelTitle"), blocked);
       return;
     }
 
-    Alert.alert("Cancel booking", "Cancel this booking?", [
-      { text: "No", style: "cancel" },
+    Alert.alert(t("booking.cancelBookingTitle"), t("booking.cancelBookingConfirm"), [
+      { text: t("common.no"), style: "cancel" },
       {
-        text: "Yes, cancel",
+        text: t("common.yesCancel"),
         style: "destructive",
         onPress: () =>
           runApp(a.id, () => cancelApplication(a.kind, a.id, a, by)),
@@ -1082,10 +1089,10 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     runApp(a.id, () => acceptRequest(a.kind, a.id, a));
 
   const handleAppReject = (a: NormalizedApplication) =>
-    Alert.alert("Reject request", "Reject this request?", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("booking.rejectRequestTitle"), t("booking.rejectRequestConfirm"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Reject",
+        text: t("roadsideHelp.rejectButton"),
         style: "destructive",
         onPress: () => runApp(a.id, () => rejectRequest(a.kind, a.id, a)),
       },
@@ -1096,13 +1103,13 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     id: string,
     label: string,
   ) => {
-    Alert.alert("Mark as Completed", `Mark this ${label} as completed?`, [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("booking.markAsCompletedTitle"), t("booking.markAsCompletedConfirm", { label }), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Yes, complete",
+        text: t("common.yesComplete"),
         onPress: () =>
           markCompleted(collectionName, id).catch((e) =>
-            Alert.alert("Error", e?.message || "Could not update."),
+            Alert.alert(t("common.error"), e?.message || t("booking.couldNotUpdate")),
           ),
       },
     ]);
@@ -1111,28 +1118,28 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
   // A driver-owned listing (driverRoutes/workJobs/errandJobs) belongs only to
   // that driver — deleting it only ever hides it from their own list, the
   // same deletedForDriver convention as every other card.
-  const deleteTrip = async (t: DriverTripItem) => {
-    if (t.collectionName === "driverRoutes") {
-      setRoutes((prev) => prev.filter((r) => r.id !== t.id));
-    } else if (t.collectionName === "workJobs") {
-      setWorkJobs((prev) => prev.filter((r) => r.id !== t.id));
+  const deleteTrip = async (trip: DriverTripItem) => {
+    if (trip.collectionName === "driverRoutes") {
+      setRoutes((prev) => prev.filter((r) => r.id !== trip.id));
+    } else if (trip.collectionName === "workJobs") {
+      setWorkJobs((prev) => prev.filter((r) => r.id !== trip.id));
     } else {
-      setErrandJobs((prev) => prev.filter((r) => r.id !== t.id));
+      setErrandJobs((prev) => prev.filter((r) => r.id !== trip.id));
     }
 
-    await updateDoc(doc(db, t.collectionName, t.id), {
+    await updateDoc(doc(db, trip.collectionName, trip.id), {
       deletedForDriver: true,
       updatedAt: serverTimestamp(),
     });
   };
 
-  const confirmDeleteTrip = (t: DriverTripItem) => {
-    Alert.alert("Remove listing", removeConfirmMessage(t, "listing"), [
-      { text: "Cancel", style: "cancel" },
+  const confirmDeleteTrip = (trip: DriverTripItem) => {
+    Alert.alert(t("booking.removeListingTitle"), removeConfirmMessage(trip, t("booking.listingWord")), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Remove",
+        text: t("booking.removeButton"),
         style: "destructive",
-        onPress: () => runApp(t.id, () => deleteTrip(t)),
+        onPress: () => runApp(trip.id, () => deleteTrip(trip)),
       },
     ]);
   };
@@ -1254,7 +1261,7 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         await batch.commit();
       }
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not clear all.");
+      Alert.alert(t("common.error"), error?.message || t("roadsideHelp.couldNotClearAll"));
     } finally {
       setClearingAll(false);
     }
@@ -1265,12 +1272,12 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     if (rows.length === 0 || clearingAll) return;
 
     Alert.alert(
-      "Clear all",
-      "Clear all bookings from your list? Removing these cards will only hide them — it will not cancel any booking.",
+      t("roadsideHelp.clearAllTitle"),
+      t("booking.clearAllBookingsConfirm"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "Clear All",
+          text: t("roadsideHelp.clearAllButton"),
           style: "destructive",
           onPress: () => runClearAllBookings(rows, tab),
         },
@@ -1310,7 +1317,7 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     if (!rebook) return;
 
     if (!rebookDate || !rebookTime) {
-      Alert.alert("Missing details", "Please choose a new date and time.");
+      Alert.alert(t("auth.missingDetails"), t("booking.chooseNewDateTimeMessage"));
       return;
     }
 
@@ -1334,9 +1341,9 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
   const handleRideStart = (r: RideBooking) => {
     if (!canStartTrip(r)) {
       Alert.alert(
-        "Not available yet",
+        t("booking.notAvailableYetTitle"),
         getStartTripBlockedReason(r) ||
-          "You can start this trip only on the trip date.",
+          t("booking.startTripOnlyOnTripDate"),
       );
       return;
     }
@@ -1416,7 +1423,7 @@ const submitSchoolRating = async (
   const user = auth.currentUser;
 
   if (!user) {
-    throw new Error("Please login first.");
+    throw new Error(t("auth.pleaseLoginFirst"));
   }
 
   const item: any = booking;
@@ -1425,7 +1432,7 @@ const submitSchoolRating = async (
   // own id or its routeId — so the rating is never attributed to the wrong
   // profile.
   if (!item.driverId || item.driverId === booking.id || item.driverId === item.routeId) {
-    throw new Error("Missing driver id.");
+    throw new Error(t("roadsideHelp.missingDriverIdField"));
   }
 
   const bookingRef = doc(db, "bookings", booking.id);
@@ -1436,7 +1443,7 @@ const submitSchoolRating = async (
     const bookingSnap = await transaction.get(bookingRef);
 
     if (!bookingSnap.exists()) {
-      throw new Error("Booking not found.");
+      throw new Error(t("rides.bookingNotFound"));
     }
 
     const bookingData: any = bookingSnap.data();
@@ -1660,7 +1667,7 @@ const submitRating = async () => {
       await submitRideRating(bookingToRate.id, bookingToRate, stars, comment);
     }
   } catch (error: any) {
-    Alert.alert("Error", error?.message || "Could not submit your rating.");
+    Alert.alert(t("common.error"), error?.message || t("booking.couldNotSubmitRating"));
   } finally {
     setRatingBusy(false);
   }
@@ -1743,19 +1750,19 @@ useEffect(() => {
 
     return (
       <View style={styles.driverDetailsBox}>
-        <Text style={styles.driverDetailsTitle}>Driver details</Text>
+        <Text style={styles.driverDetailsTitle}>{t("booking.driverDetailsTitle")}</Text>
 
         {r.driverCar ? (
           <View style={styles.infoRow}>
             <Ionicons name="car-outline" size={15} color="#7C5F46" />
-            <Text style={styles.infoText}>Car: {r.driverCar}</Text>
+            <Text style={styles.infoText}>{t("rides.carLabel", { car: r.driverCar })}</Text>
           </View>
         ) : null}
 
         {r.driverCarColor ? (
           <View style={styles.infoRow}>
             <Ionicons name="color-palette-outline" size={15} color="#7C5F46" />
-            <Text style={styles.infoText}>Color: {r.driverCarColor}</Text>
+            <Text style={styles.infoText}>{t("rides.colorLabel", { color: r.driverCarColor })}</Text>
           </View>
         ) : null}
 
@@ -1763,7 +1770,7 @@ useEffect(() => {
           <View style={styles.infoRow}>
             <Ionicons name="barcode-outline" size={15} color="#7C5F46" />
             <Text style={styles.infoText}>
-              Plate: ***{r.driverCarPlateLast3}
+              {t("rides.plateLabel", { last3: r.driverCarPlateLast3 })}
             </Text>
           </View>
         ) : null}
@@ -1800,7 +1807,7 @@ useEffect(() => {
     return (
       <View style={[styles.statusPill, pillStyle]}>
         <Text style={[styles.statusText, textStyle]}>
-          {RIDE_STATUS_LABEL[status]}
+          {translateStatus(t, "rides", status) || RIDE_STATUS_LABEL[status]}
         </Text>
       </View>
     );
@@ -1824,7 +1831,7 @@ useEffect(() => {
           >
             <Ionicons name={meta.icon} size={15} color={meta.color} />
             <Text style={[styles.catText, { color: meta.color }]}>
-              {meta.label}
+              {translateCategoryLabel(RIDE_CATEGORY, meta.label, t)}
             </Text>
           </View>
 
@@ -1885,7 +1892,7 @@ useEffect(() => {
           {typeof r.seats === "number" ? (
             <View style={styles.metaItem}>
               <Ionicons name="people-outline" size={15} color="#F58220" />
-              <Text style={styles.metaText}>{r.seats} seats</Text>
+              <Text style={styles.metaText}>{t("booking.seatsCount", { count: r.seats })}</Text>
             </View>
           ) : null}
         </View>
@@ -1894,7 +1901,7 @@ useEffect(() => {
           <View style={styles.payRow}>
             <Ionicons name="card-outline" size={14} color="#7C5F46" />
             <Text style={styles.payText}>
-              {paymentMethodLabel(r.paymentMethod)}
+              {paymentMethodLabel(r.paymentMethod, t)}
               {r.cardLast4 ? ` (•••• ${r.cardLast4})` : ""}
             </Text>
           </View>
@@ -1928,7 +1935,7 @@ useEffect(() => {
                   onPress={() => openRatingModal(r)}
                 >
                   <Ionicons name="star-outline" size={17} color="#FFFFFF" />
-                  <Text style={styles.primaryButtonText}>Rate Driver</Text>
+                  <Text style={styles.primaryButtonText}>{t("passenger.rateDriver")}</Text>
                 </Pressable>
               ) : null}
 
@@ -1940,7 +1947,7 @@ useEffect(() => {
                 onPress={() => openRideRebook(r)}
               >
                 <Ionicons name="refresh" size={17} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>Book Again</Text>
+                <Text style={styles.primaryButtonText}>{t("booking.bookAgainTitle")}</Text>
               </Pressable>
             ) : null}
           </>
@@ -1957,7 +1964,7 @@ useEffect(() => {
                   disabled={busy || !rideCanStart}
                 >
                   <Ionicons name="play" size={16} color="#FFFFFF" />
-                  <Text style={styles.startButtonText}>Start Ride</Text>
+                  <Text style={styles.startButtonText}>{t("booking.startRideButton")}</Text>
                 </Pressable>
 
                 {!rideCanStart && rideBlockedReason ? (
@@ -1973,7 +1980,7 @@ useEffect(() => {
                   onPress={() => handleRideOpenMap(r)}
                 >
                   <Ionicons name="navigate-outline" size={16} color="#166534" />
-                  <Text style={styles.completeButtonText}>Open Map</Text>
+                  <Text style={styles.completeButtonText}>{t("booking.openMapButton")}</Text>
                 </Pressable>
 
                 <Pressable
@@ -1981,7 +1988,7 @@ useEffect(() => {
                   onPress={() => handleRideArrived(r)}
                   disabled={busy}
                 >
-                  <Text style={styles.startButtonText}>I arrived</Text>
+                  <Text style={styles.startButtonText}>{t("booking.iArrivedButton")}</Text>
                 </Pressable>
               </View>
             ) : null}
@@ -1993,7 +2000,7 @@ useEffect(() => {
                 disabled={busy}
               >
                 <Ionicons name="checkmark-done" size={17} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>Finish Trip</Text>
+                <Text style={styles.primaryButtonText}>{t("booking.finishTripButton")}</Text>
               </Pressable>
             ) : null}
           </>
@@ -2022,7 +2029,7 @@ useEffect(() => {
             : styles.statusTextOngoing,
         ]}
       >
-        {label || (status === "completed" ? "Completed" : "Ongoing")}
+        {label || (status === "completed" ? t("common.completed") : t("booking.statusOngoing"))}
       </Text>
     </View>
   );
@@ -2072,7 +2079,7 @@ useEffect(() => {
           >
             <Ionicons name={meta.icon} size={15} color={meta.color} />
             <Text style={[styles.catText, { color: meta.color }]}>
-              {meta.label}
+              {translateCategoryLabel(b.category, meta.label, t)}
             </Text>
           </View>
 
@@ -2118,7 +2125,7 @@ useEffect(() => {
           {typeof b.seats === "number" ? (
             <View style={styles.metaItem}>
               <Ionicons name="people-outline" size={15} color="#F58220" />
-              <Text style={styles.metaText}>{b.seats} seats</Text>
+              <Text style={styles.metaText}>{t("booking.seatsCount", { count: b.seats })}</Text>
             </View>
           ) : null}
         </View>
@@ -2129,7 +2136,7 @@ useEffect(() => {
               <View style={styles.waitBanner}>
                 <Ionicons name="car-outline" size={16} color="#B86115" />
                 <Text style={styles.waitText}>
-                  Driver arrived. Please go to the car.
+                  {t("booking.driverArrivedGoToCar")}
                 </Text>
               </View>
             ) : null}
@@ -2140,7 +2147,7 @@ useEffect(() => {
                 onPress={() => openLiveTracking(b.id)}
               >
                 <Ionicons name="map-outline" size={17} color="#FFFFFF" />
-                <Text style={styles.liveTrackButtonText}>Live Tracking</Text>
+                <Text style={styles.liveTrackButtonText}>{t("rides.liveTracking")}</Text>
               </Pressable>
             ) : null}
 
@@ -2150,7 +2157,7 @@ useEffect(() => {
                 onPress={() => openSchoolRatingModal(b)}
               >
                 <Ionicons name="star-outline" size={17} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>Rate Driver</Text>
+                <Text style={styles.primaryButtonText}>{t("passenger.rateDriver")}</Text>
               </Pressable>
             ) : null}
 
@@ -2160,17 +2167,17 @@ useEffect(() => {
                 onPress={() => openRebook(b)}
               >
                 <Ionicons name="refresh" size={17} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>Book Again</Text>
+                <Text style={styles.primaryButtonText}>{t("booking.bookAgainTitle")}</Text>
               </Pressable>
             ) : null}
 
             {!done && !usesRideNavigation ? (
               <Pressable
                 style={styles.completeButton}
-                onPress={() => confirmComplete("bookings", b.id, "booking")}
+                onPress={() => confirmComplete("bookings", b.id, t("booking.labelWord"))}
               >
                 <Ionicons name="checkmark-done" size={17} color="#166534" />
-                <Text style={styles.completeButtonText}>Mark as Completed</Text>
+                <Text style={styles.completeButtonText}>{t("booking.markAsCompletedTitle")}</Text>
               </Pressable>
             ) : null}
           </>
@@ -2186,9 +2193,9 @@ useEffect(() => {
                   onPress={() => {
                     if (!canStartTrip(b)) {
                       Alert.alert(
-                        "Not available yet",
+                        t("booking.notAvailableYetTitle"),
                         getStartTripBlockedReason(b) ||
-                          "You can start this trip only on the trip date.",
+                          t("booking.startTripOnlyOnTripDate"),
                       );
                       return;
                     }
@@ -2198,7 +2205,7 @@ useEffect(() => {
                   disabled={!bookingCanStart}
                 >
                   <Ionicons name="play" size={16} color="#FFFFFF" />
-                  <Text style={styles.startButtonText}>Start Ride</Text>
+                  <Text style={styles.startButtonText}>{t("booking.startRideButton")}</Text>
                 </Pressable>
 
                 {!bookingCanStart && bookingBlockedReason ? (
@@ -2216,17 +2223,17 @@ useEffect(() => {
                 onPress={() => openSchoolRideNavigation(b.id)}
               >
                 <Ionicons name="navigate-outline" size={16} color="#FFFFFF" />
-                <Text style={styles.startButtonText}>Open Ride Navigation</Text>
+                <Text style={styles.startButtonText}>{t("booking.openRideNavigationButton")}</Text>
               </Pressable>
             ) : null}
 
             {!usesRideNavigation && !done ? (
               <Pressable
                 style={styles.completeButton}
-                onPress={() => confirmComplete("bookings", b.id, "booking")}
+                onPress={() => confirmComplete("bookings", b.id, t("booking.labelWord"))}
               >
                 <Ionicons name="checkmark-done" size={17} color="#166534" />
-                <Text style={styles.completeButtonText}>Mark as Completed</Text>
+                <Text style={styles.completeButtonText}>{t("booking.markAsCompletedTitle")}</Text>
               </Pressable>
             ) : null}
           </>
@@ -2235,15 +2242,15 @@ useEffect(() => {
     );
   };
 
-  const renderTripCard = (t: DriverTripItem) => {
-    const meta = getCategoryMeta(t.category);
-    const done = t.status === "completed";
-    const daysText = t.days.length > 0 ? t.days.join(", ") : "";
-    const waitingForBooking = !done && !isTripBookedOrActive(t);
+  const renderTripCard = (trip: DriverTripItem) => {
+    const meta = getCategoryMeta(trip.category);
+    const done = trip.status === "completed";
+    const daysText = trip.days.length > 0 ? trip.days.join(", ") : "";
+    const waitingForBooking = !done && !isTripBookedOrActive(trip);
 
     return (
       <View
-        key={`${t.collectionName}-${t.id}`}
+        key={`${trip.collectionName}-${trip.id}`}
         style={[styles.card, done && styles.cardDone]}
       >
         <View style={styles.cardTop}>
@@ -2252,27 +2259,27 @@ useEffect(() => {
           >
             <Ionicons name={meta.icon} size={15} color={meta.color} />
             <Text style={[styles.catText, { color: meta.color }]}>
-              {meta.label}
+              {translateCategoryLabel(trip.category, meta.label, t)}
             </Text>
           </View>
 
           <View style={styles.cardTopActions}>
             {renderStatus(
-              t.status,
-              waitingForBooking ? "Waiting for booking" : undefined,
+              trip.status,
+              waitingForBooking ? t("booking.waitingForBookingLabel") : undefined,
             )}
-            {renderDeleteButton(() => confirmDeleteTrip(t))}
+            {renderDeleteButton(() => confirmDeleteTrip(trip))}
           </View>
         </View>
 
-        {t.title ? <Text style={styles.tripTitle}>{t.title}</Text> : null}
+        {trip.title ? <Text style={styles.tripTitle}>{trip.title}</Text> : null}
 
-        {renderRouteLine(t.from, t.to, t.location)}
+        {renderRouteLine(trip.from, trip.to, trip.location)}
 
-        {t.date ? (
+        {trip.date ? (
           <View style={styles.infoRow}>
             <Ionicons name="calendar-outline" size={15} color="#7C5F46" />
-            <Text style={styles.infoText}>{t.date}</Text>
+            <Text style={styles.infoText}>{trip.date}</Text>
           </View>
         ) : null}
 
@@ -2283,43 +2290,43 @@ useEffect(() => {
           </View>
         ) : null}
 
-        {t.time ? (
+        {trip.time ? (
           <View style={styles.infoRow}>
             <Ionicons name="time-outline" size={15} color="#7C5F46" />
-            <Text style={styles.infoText}>{t.time}</Text>
+            <Text style={styles.infoText}>{trip.time}</Text>
           </View>
         ) : null}
 
         <View style={styles.metaRow}>
-          {typeof t.price === "number" ? (
+          {typeof trip.price === "number" ? (
             <View style={styles.metaItem}>
               <Ionicons name="cash-outline" size={15} color="#F58220" />
-              <Text style={styles.metaText}>{t.price} ₪</Text>
+              <Text style={styles.metaText}>{trip.price} ₪</Text>
             </View>
           ) : null}
 
-          {t.collectionName === "workJobs" ? (
+          {trip.collectionName === "workJobs" ? (
             <>
-              {typeof t.totalSeats === "number" ? (
+              {typeof trip.totalSeats === "number" ? (
                 <View style={styles.metaItem}>
                   <Ionicons name="people-outline" size={15} color="#F58220" />
                   <Text style={styles.metaText}>
-                    Workers needed: {t.totalSeats}
+                    {t("workErrand.workersNeededCount", { count: trip.totalSeats })}
                   </Text>
                 </View>
               ) : null}
 
-              {typeof t.acceptedWorkersCount === "number" &&
-              t.acceptedWorkersCount > 0 ? (
+              {typeof trip.acceptedWorkersCount === "number" &&
+              trip.acceptedWorkersCount > 0 ? (
                 <View style={styles.metaItem}>
                   <Ionicons name="person-add-outline" size={15} color="#F58220" />
                   <Text style={styles.metaText}>
-                    Accepted: {t.acceptedWorkersCount}
+                    {t("booking.acceptedColon", { count: trip.acceptedWorkersCount })}
                   </Text>
                 </View>
               ) : null}
 
-              {typeof t.remainingSeats === "number" ? (
+              {typeof trip.remainingSeats === "number" ? (
                 <View style={styles.metaItem}>
                   <Ionicons
                     name="checkmark-done-outline"
@@ -2327,26 +2334,26 @@ useEffect(() => {
                     color="#F58220"
                   />
                   <Text style={styles.metaText}>
-                    Places remaining: {t.remainingSeats}
+                    {t("workErrand.placesRemainingCount", { count: trip.remainingSeats })}
                   </Text>
                 </View>
               ) : null}
             </>
-          ) : typeof t.seats === "number" ? (
+          ) : typeof trip.seats === "number" ? (
             <View style={styles.metaItem}>
               <Ionicons name="people-outline" size={15} color="#F58220" />
-              <Text style={styles.metaText}>{t.seats}</Text>
+              <Text style={styles.metaText}>{trip.seats}</Text>
             </View>
           ) : null}
         </View>
 
-{!done && !(t.collectionName === "driverRoutes" && t.category === "school") ? (
+{!done && !(trip.collectionName === "driverRoutes" && trip.category === "school") ? (
   <Pressable
     style={styles.completeButton}
-    onPress={() => confirmComplete(t.collectionName, t.id, "trip")}
+    onPress={() => confirmComplete(trip.collectionName, trip.id, t("booking.tripWord"))}
   >
     <Ionicons name="checkmark-done" size={17} color="#166534" />
-    <Text style={styles.completeButtonText}>Mark as Completed</Text>
+    <Text style={styles.completeButtonText}>{t("booking.markAsCompletedTitle")}</Text>
   </Pressable>
 ) : null}
       </View>
@@ -2390,7 +2397,7 @@ useEffect(() => {
           >
             <Ionicons name={meta.icon} size={15} color={meta.color} />
             <Text style={[styles.catText, { color: meta.color }]}>
-              Roadside Help
+              {t("rideCategory.categories.help.title")}
             </Text>
           </View>
 
@@ -2399,26 +2406,26 @@ useEffect(() => {
               <View style={[styles.statusPill, styles.statusDone]}>
                 <Ionicons name="cash" size={13} color="#166534" />
                 <Text style={[styles.statusText, styles.statusTextDone]}>
-                  Payment received
+                  {t("booking.paymentReceivedLabel")}
                 </Text>
               </View>
             ) : isCompletedUnpaid ? (
               <View style={[styles.statusPill, styles.statusOngoing]}>
                 <Ionicons name="time" size={13} color="#B86115" />
                 <Text style={[styles.statusText, styles.statusTextOngoing]}>
-                  Waiting for payment
+                  {t("booking.waitingForPaymentLabel")}
                 </Text>
               </View>
             ) : (
               <View style={[styles.statusPill, styles.statusOngoing]}>
                 <Ionicons name="checkmark-circle" size={13} color="#B86115" />
                 <Text style={[styles.statusText, styles.statusTextOngoing]}>
-                  Accepted
+                  {t("roadsideHelp.badgeAccepted")}
                 </Text>
               </View>
             )}
             {renderDeleteButton(() =>
-              confirmHideGeneralBooking(b, viewer, "roadside help"),
+              confirmHideGeneralBooking(b, viewer, t("booking.roadsideHelpLowercase")),
             )}
           </View>
         </View>
@@ -2427,7 +2434,7 @@ useEffect(() => {
           <View style={styles.chipRow}>
             {b.problemTypes.map((p) => (
               <View key={p} style={styles.problemChip}>
-                <Text style={styles.problemChipText}>{p}</Text>
+                <Text style={styles.problemChipText}>{translateProblemType(p, t)}</Text>
               </View>
             ))}
           </View>
@@ -2467,7 +2474,7 @@ useEffect(() => {
           {typeof b.etaMinutes === "number" ? (
             <View style={styles.metaItem}>
               <Ionicons name="time-outline" size={15} color="#F58220" />
-              <Text style={styles.metaText}>{b.etaMinutes} min</Text>
+              <Text style={styles.metaText}>{t("booking.minutesShort", { count: b.etaMinutes })}</Text>
             </View>
           ) : null}
         </View>
@@ -2478,7 +2485,7 @@ useEffect(() => {
             onPress={() => goToRoadsidePayment(b)}
           >
             <Ionicons name="card" size={18} color="#FFFFFF" />
-            <Text style={styles.primaryButtonText}>Pay Now</Text>
+            <Text style={styles.primaryButtonText}>{t("booking.payNowButton")}</Text>
           </Pressable>
         ) : null}
 
@@ -2507,7 +2514,7 @@ useEffect(() => {
             onPress={() => openRoadsideRatingModal(b)}
           >
             <Ionicons name="star-outline" size={17} color="#FFFFFF" />
-            <Text style={styles.primaryButtonText}>Rate Helper</Text>
+            <Text style={styles.primaryButtonText}>{t("booking.rateHelperButton")}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -2523,7 +2530,9 @@ useEffect(() => {
     );
 
     const dayLabels = sorted
-      .map((item) => item.dayName || item.date)
+      .map((item) =>
+        item.dayName ? translateStoredDayName(item.dayName, t) : item.date,
+      )
       .filter(Boolean)
       .join(", ");
 
@@ -2535,7 +2544,7 @@ useEffect(() => {
         <View style={styles.weeklyGroupHeader}>
           <Ionicons name="calendar-outline" size={15} color="#F58220" />
           <Text style={styles.weeklyGroupHeaderText}>
-            Weekly booking{dayLabels ? ` · ${dayLabels}` : ""}
+            {t("booking.weeklyBookingLabel")}{dayLabels ? ` · ${dayLabels}` : ""}
           </Text>
         </View>
 
@@ -2592,7 +2601,7 @@ useEffect(() => {
               key={`live-${row.id}`}
               request={liveRequest}
               onDelete={() =>
-                confirmHideGeneralBooking(row, viewer, "roadside help")
+                confirmHideGeneralBooking(row, viewer, t("booking.roadsideHelpLowercase"))
               }
             />,
           );
@@ -2654,14 +2663,14 @@ useEffect(() => {
           >
             <Ionicons name={meta.icon} size={15} color={meta.color} />
             <Text style={[styles.catText, { color: meta.color }]}>
-              {meta.label}
+              {translateCategoryLabel(a.category, meta.label, t)}
             </Text>
           </View>
 
           <View style={styles.cardTopActions}>
             <View style={[styles.statusPill, statusStyle]}>
               <Text style={[styles.statusText, statusTextStyle]}>
-                {STATUS_LABEL[a.status]}
+                {translateStatus(t, "bookings", a.status) || STATUS_LABEL[a.status]}
               </Text>
             </View>
 
@@ -2707,8 +2716,8 @@ useEffect(() => {
               <Ionicons name="person-outline" size={15} color="#F58220" />
               <Text style={styles.metaText}>
                 {a.customerAge !== null
-                  ? `Passenger age: ${a.customerAge} years`
-                  : "Passenger age not available"}
+                  ? t("booking.passengerAgeYears", { age: a.customerAge })
+                  : t("booking.passengerAgeNotAvailable")}
               </Text>
             </View>
           </View>
@@ -2739,19 +2748,19 @@ useEffect(() => {
                 // generic "paymentStatus" wording, which means the opposite
                 // thing for every other booking type.
                 a.driverPaymentStatus === "paid"
-                ? `Paid to worker${
+                ? `${t("booking.paidToWorkerLabel")}${
                     a.paymentMethod
-                      ? ` · ${paymentMethodLabel(a.paymentMethod)}`
+                      ? ` · ${paymentMethodLabel(a.paymentMethod, t)}`
                       : ""
                   }${a.cardLast4 ? ` (•••• ${a.cardLast4})` : ""}`
                 : a.status === "completed"
-                  ? "Payment to worker: pending"
-                  : "Payment to worker: due after Finish Work"
+                  ? t("booking.paymentToWorkerPending")
+                  : t("booking.paymentToWorkerDueAfterFinish")
               : a.paymentMethod
-                ? `${paymentMethodLabel(a.paymentMethod)} · ${
-                    a.paymentStatus
+                ? `${paymentMethodLabel(a.paymentMethod, t)} · ${
+                    a.paymentStatus === "paid" ? t("common.paid") : t("common.unpaid")
                   }${a.cardLast4 ? ` (•••• ${a.cardLast4})` : ""}`
-                : "Payment: unpaid"}
+                : t("booking.paymentUnpaidLabel")}
           </Text>
         </View>
 
@@ -2764,7 +2773,7 @@ useEffect(() => {
               >
                 <Ionicons name="card" size={16} color="#FFFFFF" />
                 <Text style={styles.primaryButtonText}>
-                  Continue to Payment
+                  {t("rides.continueToPayment")}
                 </Text>
               </Pressable>
             ) : null}
@@ -2775,7 +2784,7 @@ useEffect(() => {
               <View style={styles.waitBanner}>
                 <Ionicons name="time-outline" size={16} color="#B86115" />
                 <Text style={styles.waitText}>
-                  Waiting for employer payment
+                  {t("booking.waitingForEmployerPayment")}
                 </Text>
               </View>
             ) : null}
@@ -2786,7 +2795,7 @@ useEffect(() => {
                 onPress={() => openAppRatingModal(a)}
               >
                 <Ionicons name="star-outline" size={17} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>Rate Driver</Text>
+                <Text style={styles.primaryButtonText}>{t("passenger.rateDriver")}</Text>
               </Pressable>
             ) : null}
 
@@ -2796,7 +2805,7 @@ useEffect(() => {
                 style={styles.cancelLink}
                 onPress={() => handleAppCancel(a, "passenger")}
               >
-                <Text style={styles.cancelLinkText}>Cancel booking</Text>
+                <Text style={styles.cancelLinkText}>{t("booking.cancelBookingLink")}</Text>
               </Pressable>
             ) : null}
           </>
@@ -2809,7 +2818,7 @@ useEffect(() => {
                   onPress={() => handleAppReject(a)}
                   disabled={busy}
                 >
-                  <Text style={styles.rejectButtonText}>Reject</Text>
+                  <Text style={styles.rejectButtonText}>{t("roadsideHelp.rejectButton")}</Text>
                 </Pressable>
 
                 <Pressable
@@ -2817,7 +2826,7 @@ useEffect(() => {
                   onPress={() => handleAppAccept(a)}
                   disabled={busy}
                 >
-                  <Text style={styles.startButtonText}>Accept</Text>
+                  <Text style={styles.startButtonText}>{t("booking.acceptButton")}</Text>
                 </Pressable>
               </View>
             ) : null}
@@ -2826,7 +2835,7 @@ useEffect(() => {
               <View style={styles.waitBanner}>
                 <Ionicons name="time-outline" size={16} color="#B86115" />
                 <Text style={styles.waitText}>
-                  Waiting for customer payment
+                  {t("booking.waitingForCustomerPayment")}
                 </Text>
               </View>
             ) : null}
@@ -2839,13 +2848,14 @@ useEffect(() => {
                   disabled={future || busy}
                 >
                   <Ionicons name="play" size={16} color="#FFFFFF" />
-                  <Text style={styles.startButtonText}>Start</Text>
+                  <Text style={styles.startButtonText}>{t("booking.startButton")}</Text>
                 </Pressable>
 
                 {future ? (
                   <Text style={styles.appHint}>
-                    Start will be available on the{" "}
-                    {a.kind === "work" ? "job" : "errand"} date.
+                    {a.kind === "work"
+                      ? t("booking.startAvailableOnJobDate")
+                      : t("booking.startAvailableOnErrandDate")}
                   </Text>
                 ) : null}
               </>
@@ -2858,7 +2868,7 @@ useEffect(() => {
                   onPress={() => openNavigation(a)}
                 >
                   <Ionicons name="navigate-outline" size={16} color="#166534" />
-                  <Text style={styles.completeButtonText}>Open Map</Text>
+                  <Text style={styles.completeButtonText}>{t("booking.openMapButton")}</Text>
                 </Pressable>
 
                 <Pressable
@@ -2866,7 +2876,7 @@ useEffect(() => {
                   onPress={() => handleAppArrive(a)}
                   disabled={busy}
                 >
-                  <Text style={styles.startButtonText}>I arrived</Text>
+                  <Text style={styles.startButtonText}>{t("booking.iArrivedButton")}</Text>
                 </Pressable>
               </View>
             ) : null}
@@ -2879,7 +2889,7 @@ useEffect(() => {
               >
                 <Ionicons name="checkmark-done" size={16} color="#FFFFFF" />
                 <Text style={styles.startButtonText}>
-                  {a.kind === "work" ? "Finish Work" : "Finish Errand"}
+                  {a.kind === "work" ? t("booking.finishWork") : t("booking.finishErrand")}
                 </Text>
               </Pressable>
             ) : null}
@@ -2894,7 +2904,7 @@ useEffect(() => {
                 onPress={() => goToWorkPayment(a)}
               >
                 <Ionicons name="cash-outline" size={16} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>Pay Worker</Text>
+                <Text style={styles.primaryButtonText}>{t("workErrand.payWorkerTitle")}</Text>
               </Pressable>
             ) : null}
 
@@ -2907,7 +2917,7 @@ useEffect(() => {
                   size={16}
                   color="#166534"
                 />
-                <Text style={styles.waitText}>Worker paid</Text>
+                <Text style={styles.waitText}>{t("booking.workerPaidLabel")}</Text>
               </View>
             ) : null}
 
@@ -2917,7 +2927,7 @@ useEffect(() => {
                 style={styles.cancelLink}
                 onPress={() => handleAppCancel(a, "driver")}
               >
-                <Text style={styles.cancelLinkText}>Cancel booking</Text>
+                <Text style={styles.cancelLinkText}>{t("booking.cancelBookingLink")}</Text>
               </Pressable>
             ) : null}
           </>
@@ -2942,7 +2952,7 @@ useEffect(() => {
         scrollEventThrottle={16}
       >
         <View style={styles.titleRow}>
-          <Text style={styles.title}>My Bookings</Text>
+          <Text style={styles.title}>{t("bookings.title")}</Text>
 
           {!isEmpty ? (
             <Pressable
@@ -2951,7 +2961,7 @@ useEffect(() => {
               hitSlop={8}
             >
               <Text style={styles.clearAllText}>
-                {clearingAll ? "Clearing..." : "Clear All"}
+                {clearingAll ? t("roadsideHelp.clearingButton") : t("roadsideHelp.clearAllButton")}
               </Text>
             </Pressable>
           ) : null}
@@ -2976,7 +2986,7 @@ useEffect(() => {
                 tab === "passenger" && styles.toggleTextActive,
               ]}
             >
-              Passenger
+              {t("booking.passengerTab")}
             </Text>
           </Pressable>
 
@@ -2998,7 +3008,7 @@ useEffect(() => {
                 tab === "driver" && styles.toggleTextActive,
               ]}
             >
-              Driver
+              {t("booking.driverTab")}
             </Text>
           </Pressable>
         </View>
@@ -3009,8 +3019,8 @@ useEffect(() => {
             style={styles.searchInput}
             placeholder={
               tab === "passenger"
-                ? "Search date, category, place, driver…"
-                : "Search date, category, place…"
+                ? t("booking.searchPassengerPlaceholder")
+                : t("booking.searchDriverPlaceholder")
             }
             placeholderTextColor="#8B7B6B"
             value={search}
@@ -3037,15 +3047,15 @@ useEffect(() => {
             />
             <Text style={styles.emptyTitle}>
               {search
-                ? "No matches"
+                ? t("booking.noMatches")
                 : tab === "passenger"
-                  ? "No bookings yet"
-                  : "No trips yet"}
+                  ? t("booking.noBookingsYet")
+                  : t("booking.noTripsYet")}
             </Text>
             <Text style={styles.emptyText}>
               {tab === "passenger"
-                ? "When you book a driver, it will appear here."
-                : "Trips and jobs you create as a driver will appear here."}
+                ? t("booking.bookingsEmptyHintPassenger")
+                : t("booking.bookingsEmptyHintDriver")}
             </Text>
           </View>
         ) : tab === "passenger" ? (
@@ -3056,7 +3066,7 @@ useEffect(() => {
           <>
             <View style={styles.sectionHeaderRow}>
               <Ionicons name="flash" size={16} color="#166534" />
-              <Text style={styles.sectionHeaderText}>Booked &amp; Active</Text>
+              <Text style={styles.sectionHeaderText}>{t("booking.bookedActiveSection")}</Text>
             </View>
 
             {driverActiveRows.length > 0 ? (
@@ -3065,7 +3075,7 @@ useEffect(() => {
               </View>
             ) : (
               <Text style={styles.sectionEmptyText}>
-                No booked or active trips yet.
+                {t("booking.noBookedActiveTrips")}
               </Text>
             )}
 
@@ -3074,7 +3084,7 @@ useEffect(() => {
             <View style={styles.sectionHeaderRow}>
               <Ionicons name="create-outline" size={16} color="#B86115" />
               <Text style={styles.sectionHeaderText}>
-                Created — Waiting for Booking
+                {t("booking.createdWaitingSection")}
               </Text>
             </View>
 
@@ -3084,7 +3094,7 @@ useEffect(() => {
               </View>
             ) : (
               <Text style={styles.sectionEmptyText}>
-                Nothing you&apos;ve created is waiting for a booking right now.
+                {t("booking.nothingWaitingForBooking")}
               </Text>
             )}
           </>
@@ -3102,9 +3112,9 @@ useEffect(() => {
 
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Book Again</Text>
+            <Text style={styles.modalTitle}>{t("booking.bookAgainTitle")}</Text>
             <Text style={styles.modalSub}>
-              Same trip, new date & time. You&apos;ll pick a driver again.
+              {t("booking.bookAgainSubtitle")}
             </Text>
 
             {rebook ? (
@@ -3124,7 +3134,7 @@ useEffect(() => {
                     >
                       <Ionicons name={meta.icon} size={15} color={meta.color} />
                       <Text style={[styles.catText, { color: meta.color }]}>
-                        {meta.label}
+                        {translateCategoryLabel(rebook.category, meta.label, t)}
                       </Text>
                     </View>
                   );
@@ -3140,14 +3150,14 @@ useEffect(() => {
                 {typeof rebook.seats === "number" ? (
                   <View style={styles.infoRow}>
                     <Ionicons name="people-outline" size={15} color="#7C5F46" />
-                    <Text style={styles.infoText}>{rebook.seats} seats</Text>
+                    <Text style={styles.infoText}>{t("booking.seatsCount", { count: rebook.seats })}</Text>
                   </View>
                 ) : null}
               </View>
             ) : null}
 
             <DateInput
-              label="New Date"
+              label={t("booking.newDateLabel")}
               value={rebookDate}
               onChange={setRebookDate}
               showPicker={showDatePicker}
@@ -3155,7 +3165,7 @@ useEffect(() => {
             />
 
             <TimeInput
-              label="New Time"
+              label={t("booking.newTimeLabel")}
               value={rebookTime}
               onChange={setRebookTime}
               showPicker={showTimePicker}
@@ -3167,12 +3177,12 @@ useEffect(() => {
                 style={styles.modalCancel}
                 onPress={() => setRebook(null)}
               >
-                <Text style={styles.modalCancelText}>Cancel</Text>
+                <Text style={styles.modalCancelText}>{t("common.cancel")}</Text>
               </Pressable>
 
               <Pressable style={styles.modalSearch} onPress={submitRebook}>
                 <Ionicons name="search-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.modalSearchText}>Search Drivers</Text>
+                <Text style={styles.modalSearchText}>{t("booking.searchDrivers")}</Text>
               </Pressable>
             </View>
           </View>
@@ -3213,16 +3223,15 @@ useEffect(() => {
 
             {roadsideRatingBooking ? (
               <>
-                <Text style={styles.ratingTitle}>Rate your helper</Text>
+                <Text style={styles.ratingTitle}>{t("booking.rateYourHelperTitle")}</Text>
                 <Text style={styles.ratingSubtitle}>
-                  How was your Roadside Help experience with{" "}
-                  {roadsideRatingBooking.driverName}?
+                  {t("booking.roadsideRatingQuestion", { name: roadsideRatingBooking.driverName })}
                 </Text>
               </>
             ) : (
               <>
-                <Text style={styles.ratingTitle}>You have arrived safely!</Text>
-                <Text style={styles.ratingSubtitle}>Rate Your Driver</Text>
+                <Text style={styles.ratingTitle}>{t("booking.arrivedSafelyTitle")}</Text>
+                <Text style={styles.ratingSubtitle}>{t("booking.rateYourDriverSubtitle")}</Text>
               </>
             )}
 
@@ -3251,7 +3260,7 @@ useEffect(() => {
               style={styles.ratingInput}
               value={ratingComment}
               onChangeText={setRatingComment}
-              placeholder="Leave a comment (optional)"
+              placeholder={t("booking.leaveCommentOptional")}
               placeholderTextColor="#9B7A68"
               multiline
               textAlignVertical="top"
@@ -3268,7 +3277,7 @@ useEffect(() => {
               {ratingBusy ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.ratingSubmitText}>Submit Rating</Text>
+                <Text style={styles.ratingSubmitText}>{t("booking.submitRatingButton")}</Text>
               )}
             </Pressable>
           </View>

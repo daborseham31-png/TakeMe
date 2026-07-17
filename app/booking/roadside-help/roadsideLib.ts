@@ -42,6 +42,7 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../../firebase";
+import i18n from "../../i18n";
 import { notify } from "../work-errand/workErrandLib";
 
 export type LatLng = { latitude: number; longitude: number };
@@ -286,7 +287,7 @@ export const createRoadsideRequest = async (
   input: CreateRequestInput,
 ): Promise<{ requestId: string; matchedCount: number }> => {
   const passenger = await getCurrentPassenger();
-  if (!passenger) throw new Error("You must be logged in to request help.");
+  if (!passenger) throw new Error(i18n.t("roadsideHelp.mustBeLoggedInToRequestHelp"));
 
   const location = {
     latitude: input.location.latitude,
@@ -364,7 +365,7 @@ export type SendOfferInput = {
 
 export const sendDriverOffer = async (input: SendOfferInput) => {
   const user = auth.currentUser;
-  if (!user) throw new Error("You must be logged in.");
+  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
 
   let driverName = user.displayName || "Driver";
   let driverGender = "";
@@ -475,7 +476,7 @@ export const acceptOffer = async (
   offer: AcceptableOffer,
 ): Promise<string> => {
   const user = auth.currentUser;
-  if (!user) throw new Error("You must be logged in.");
+  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
 
   const reqRef = doc(db, "roadsideRequests", requestId);
 
@@ -490,17 +491,17 @@ export const acceptOffer = async (
   await runTransaction(db, async (transaction) => {
     const reqSnap = await transaction.get(reqRef);
 
-    if (!reqSnap.exists()) throw new Error("This request no longer exists.");
+    if (!reqSnap.exists()) throw new Error(i18n.t("roadsideHelp.requestNoLongerExists"));
 
     const req: any = reqSnap.data();
     passengerName = req.passengerName || passengerName;
 
     if (req.passengerId !== user.uid) {
-      throw new Error("Only the passenger who sent this request can accept.");
+      throw new Error(i18n.t("roadsideHelp.onlyPassengerCanAccept"));
     }
 
     if (req.status && req.status !== "pending") {
-      throw new Error("This request has already been handled.");
+      throw new Error(i18n.t("workErrand.requestAlreadyHandled"));
     }
 
     offerRefs.forEach((ref) => {
@@ -691,17 +692,17 @@ export const markDriverOnTheWay = async (params: {
   requestId: string;
 }) => {
   const user = auth.currentUser;
-  if (!user) throw new Error("You must be logged in.");
+  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
 
   const reqRef = doc(db, "roadsideRequests", params.requestId);
   const reqSnap = await getDoc(reqRef);
 
-  if (!reqSnap.exists()) throw new Error("This request no longer exists.");
+  if (!reqSnap.exists()) throw new Error(i18n.t("roadsideHelp.requestNoLongerExists"));
 
   const req: any = reqSnap.data();
 
   if (req.selectedDriverId !== user.uid) {
-    throw new Error("Only the accepted driver can do this.");
+    throw new Error(i18n.t("roadsideHelp.onlyAcceptedDriverCanDoThis"));
   }
 
   const driverName = req.selectedDriverName || "The driver";
@@ -738,7 +739,7 @@ export const markDriverOnTheWay = async (params: {
 
 export const finishRoadsideHelp = async (bookingId: string) => {
   const user = auth.currentUser;
-  if (!user) throw new Error("You must be logged in.");
+  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
 
   const bookingRef = doc(db, "bookings", bookingId);
 
@@ -752,17 +753,17 @@ export const finishRoadsideHelp = async (bookingId: string) => {
     const bookingSnap = await transaction.get(bookingRef);
 
     if (!bookingSnap.exists()) {
-      throw new Error("Booking not found.");
+      throw new Error(i18n.t("rides.bookingNotFound"));
     }
 
     const booking: any = bookingSnap.data();
 
     if (booking.driverId !== user.uid) {
-      throw new Error("Only the accepted driver can finish this help.");
+      throw new Error(i18n.t("roadsideHelp.onlyAcceptedDriverCanFinish"));
     }
 
     if (booking.helpCompleted === true || booking.status === "completed") {
-      throw new Error("This help was already marked finished.");
+      throw new Error(i18n.t("roadsideHelp.helpAlreadyFinished"));
     }
 
     requestId = booking.requestId || "";
@@ -841,7 +842,7 @@ export const payRoadsideHelp = async (
   method: RoadsidePaymentMethod,
 ): Promise<{ amount: number; driverId: string }> => {
   const user = auth.currentUser;
-  if (!user) throw new Error("You must be logged in.");
+  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
 
   const bookingRef = doc(db, "bookings", bookingId);
 
@@ -857,13 +858,13 @@ export const payRoadsideHelp = async (
     const bookingSnap = await transaction.get(bookingRef);
 
     if (!bookingSnap.exists()) {
-      throw new Error("Booking not found.");
+      throw new Error(i18n.t("rides.bookingNotFound"));
     }
 
     const booking: any = bookingSnap.data();
 
     if (booking.passengerId !== user.uid) {
-      throw new Error("Only the passenger can pay for this help.");
+      throw new Error(i18n.t("roadsideHelp.onlyPassengerCanPay"));
     }
 
     requestId = booking.requestId || "";
@@ -879,13 +880,13 @@ export const payRoadsideHelp = async (
     const reqSnap = await transaction.get(reqRef);
 
     if (!reqSnap.exists()) {
-      throw new Error("This request no longer exists.");
+      throw new Error(i18n.t("roadsideHelp.requestNoLongerExists"));
     }
 
     const req: any = reqSnap.data();
 
     if (req.status !== "completed" || req.paymentStatus !== "pending") {
-      throw new Error("This help is not ready for payment.");
+      throw new Error(i18n.t("roadsideHelp.helpNotReadyForPayment"));
     }
 
     amount = typeof req.agreedPrice === "number" ? req.agreedPrice : 0;
@@ -979,10 +980,10 @@ export const submitRoadsideRating = async (
   comment: string,
 ) => {
   const user = auth.currentUser;
-  if (!user) throw new Error("Please login first.");
+  if (!user) throw new Error(i18n.t("auth.pleaseLoginFirst"));
 
   if (!booking.driverId) {
-    throw new Error("Missing driver id.");
+    throw new Error(i18n.t("roadsideHelp.missingDriverIdField"));
   }
 
   const cleanComment = comment.trim();
@@ -998,7 +999,7 @@ export const submitRoadsideRating = async (
     const bookingSnap = await transaction.get(bookingRef);
 
     if (!bookingSnap.exists()) {
-      throw new Error("Booking not found.");
+      throw new Error(i18n.t("rides.bookingNotFound"));
     }
 
     const bookingData: any = bookingSnap.data();

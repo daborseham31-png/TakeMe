@@ -22,6 +22,7 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
+import i18n from "../i18n";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -196,11 +197,11 @@ export const getStartTripBlockedReason = (booking: any): string | null => {
 
   switch (getTripDateState(booking)) {
     case "future":
-      return "You can start this trip only on the trip date.";
+      return i18n.t("booking.startTripOnlyOnTripDate");
     case "past":
-      return "This trip date has passed.";
+      return i18n.t("booking.tripDatePassed");
     case "missing":
-      return "Trip date is unavailable.";
+      return i18n.t("booking.tripDateUnavailable");
     default:
       return null;
   }
@@ -319,7 +320,7 @@ export type CreateBookingInput = {
 
 export const createPassengerBooking = async (input: CreateBookingInput) => {
   const me = await getCurrentUserInfo();
-  if (!me) throw new Error("You must be logged in to book.");
+  if (!me) throw new Error(i18n.t("validation.mustBeLoggedInToBook"));
 
   await addDoc(collection(db, "bookings"), {
     passengerId: me.id,
@@ -392,7 +393,7 @@ export const updatePassengerBookingTripStatus = async (
     if (!canStartTrip(data)) {
       throw new Error(
         getStartTripBlockedReason(data) ||
-          "You can start this trip only on the trip date.",
+          i18n.t("booking.startTripOnlyOnTripDate"),
       );
     }
   }

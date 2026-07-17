@@ -9,6 +9,10 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
+
+import { translateProblemTypesList } from "../../i18n/formatters";
+import { useLanguage } from "../../i18n/LanguageProvider";
 
 type Review = {
   user: string;
@@ -69,9 +73,13 @@ const HELPERS: Helper[] = [
 ];
 
 export default function RoadsideHelpResultsScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
 
-  const problemLabel = String(params.problemLabel || "Roadside Help");
+  const rawProblemLabel = String(params.problemLabel || "Roadside Help");
+  const problemLabel =
+    translateProblemTypesList(rawProblemLabel.split(", "), t) || rawProblemLabel;
   const description = String(params.description || "");
   const address = String(params.address || "");
   const lat = String(params.lat || "");
@@ -101,13 +109,13 @@ export default function RoadsideHelpResultsScreen() {
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
-          <Text style={styles.backText}>Back</Text>
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
+          <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
 
         <View style={styles.header}>
           <Text style={styles.headerEmoji}>🔧</Text>
-          <Text style={styles.title}>Available Helpers ({HELPERS.length})</Text>
+          <Text style={styles.title}>{t("roadsideHelp.availableHelpersTitle", { count: HELPERS.length })}</Text>
         </View>
 
         <Text style={styles.routeText}>
@@ -162,7 +170,7 @@ export default function RoadsideHelpResultsScreen() {
                       color="#F58220"
                     />
                     <Text style={styles.reviewsButtonText}>
-                      Reviews ({helper.reviews.length})
+                      {t("roadsideHelp.reviewsCountLabel", { count: helper.reviews.length })}
                     </Text>
                   </View>
                   <Ionicons
@@ -199,7 +207,7 @@ export default function RoadsideHelpResultsScreen() {
                   style={styles.chooseButton}
                   onPress={() => handleChoose(helper)}
                 >
-                  <Text style={styles.chooseButtonText}>Choose This Helper</Text>
+                  <Text style={styles.chooseButtonText}>{t("roadsideHelp.chooseThisHelper")}</Text>
                 </Pressable>
               </View>
             );

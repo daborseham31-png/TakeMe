@@ -11,6 +11,10 @@ import {
   View,
 } from "react-native";
 import MapView, { Marker, Polyline, Region } from "react-native-maps";
+import { useTranslation } from "react-i18next";
+
+import { translateProblemTypesList } from "../../i18n/formatters";
+import { useLanguage } from "../../i18n/LanguageProvider";
 
 // The passenger only watches the helper come/work. Completing the roadside
 // help is the driver's responsibility (from their Help Requests page).
@@ -21,10 +25,14 @@ type LatLng = { latitude: number; longitude: number };
 const FALLBACK: LatLng = { latitude: 32.6996, longitude: 35.3035 };
 
 export default function RoadsideHelpMapScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
 
-  const problemLabel = String(params.problemLabel || "Roadside Help");
-  const helperName = String(params.helperName || "Your helper");
+  const rawProblemLabel = String(params.problemLabel || "Roadside Help");
+  const problemLabel =
+    translateProblemTypesList(rawProblemLabel.split(", "), t) || rawProblemLabel;
+  const helperName = String(params.helperName || t("roadsideHelp.yourHelperFallback"));
   const helperEta = Number(params.helperEta) || null;
 
   const userPos: LatLng = {
@@ -110,14 +118,14 @@ export default function RoadsideHelpMapScreen() {
       `📍 I need roadside help, here is my location:\n${mapsUrl}`,
     );
     Linking.openURL(`https://wa.me/?text=${text}`).catch(() =>
-      Alert.alert("Error", "Could not open WhatsApp."),
+      Alert.alert(t("common.error"), t("roadsideHelp.couldNotOpenWhatsApp")),
     );
   };
 
   const handleSOS = () => {
-    Alert.alert("Emergency", "Call emergency services (100)?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Call", onPress: () => Linking.openURL("tel:100") },
+    Alert.alert(t("roadsideHelp.emergencyTitle"), t("roadsideHelp.emergencyMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
+      { text: t("common.call"), onPress: () => Linking.openURL("tel:100") },
     ]);
   };
 
@@ -126,14 +134,14 @@ export default function RoadsideHelpMapScreen() {
       {/* Top info bar */}
       <View style={styles.topBar}>
         <Pressable style={styles.topBack} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
         </Pressable>
 
         <View style={styles.topInfo}>
           <Ionicons name="construct" size={20} color="#F58220" />
           <View style={{ flex: 1 }}>
             <Text style={styles.topTitle}>
-              {phase === "waiting" ? "Helper on the way" : "Helper is working"}
+              {phase === "waiting" ? t("roadsideHelp.helperOnTheWay") : t("roadsideHelp.helperIsWorking")}
             </Text>
             <Text style={styles.topSubtitle}>
               {helperName} • {problemLabel}
@@ -145,10 +153,10 @@ export default function RoadsideHelpMapScreen() {
       {/* Map */}
       <View style={styles.mapContainer}>
         <MapView style={styles.map} initialRegion={initialRegion}>
-          <Marker coordinate={userPos} title="You" pinColor="#EF4444" />
+          <Marker coordinate={userPos} title={t("roadsideHelp.youMapLabel")} pinColor="#EF4444" />
           <Marker
             coordinate={helperPos}
-            title="Helper"
+            title={t("roadsideHelp.helperMapLabel")}
             pinColor="#2563EB"
           />
           <Polyline
@@ -196,14 +204,13 @@ export default function RoadsideHelpMapScreen() {
               onPress={() => setPhase("arrived")}
             >
               <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
-              <Text style={styles.primaryButtonText}>Helper arrived</Text>
+              <Text style={styles.primaryButtonText}>{t("roadsideHelp.helperArrivedButton")}</Text>
             </Pressable>
           ) : (
             <View style={styles.infoNote}>
               <Ionicons name="construct" size={18} color="#B86115" />
               <Text style={styles.infoNoteText}>
-                Your helper is assisting you. It will appear in My Bookings once
-                the driver marks it finished.
+                {t("roadsideHelp.helperAssistingNote")}
               </Text>
             </View>
           )}

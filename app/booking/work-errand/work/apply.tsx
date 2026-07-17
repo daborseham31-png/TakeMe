@@ -13,7 +13,9 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
+import { useLanguage } from "../../../i18n/LanguageProvider";
 import IsraelLocationAutocomplete from "../../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../israelLocations";
 import {
@@ -65,6 +67,8 @@ const defaultJob: JobListing = {
 };
 
 export default function WorkApplyScreen() {
+  const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
 
   const job = useMemo(() => {
@@ -103,8 +107,8 @@ export default function WorkApplyScreen() {
       setLocation(loc);
     } catch (error: any) {
       Alert.alert(
-        "Location",
-        error?.message || "Could not detect your location.",
+        t("workErrand.locationTitle"),
+        error?.message || t("workErrand.couldNotDetectLocation"),
       );
     } finally {
       setLocating(false);
@@ -116,19 +120,19 @@ export default function WorkApplyScreen() {
     const cleanNeighborhood = neighborhood.trim();
 
     if (!cleanCity || !cleanNeighborhood) {
-      Alert.alert("Missing details", "Please fill City / Village and Neighborhood.");
+      Alert.alert(t("auth.missingDetails"), t("workErrand.fillCityNeighborhood"));
       return;
     }
 
     if (!cityPlace) {
-      setCityError("Please select a location from the list.");
+      setCityError(t("validation.selectLocationFromList"));
       return;
     }
 
     if (!location || location.latitude === null || location.longitude === null) {
       Alert.alert(
-        "Location needed",
-        "Please detect your current location so the employer can reach you.",
+        t("workErrand.locationNeededTitle"),
+        t("workErrand.detectLocationMessage"),
       );
       return;
     }
@@ -165,7 +169,7 @@ export default function WorkApplyScreen() {
 
       setSent(true);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not send the request.");
+      Alert.alert(t("common.error"), error?.message || t("workErrand.couldNotSendRequest"));
     } finally {
       setSubmitting(false);
     }
@@ -177,18 +181,17 @@ export default function WorkApplyScreen() {
         <View style={styles.successContainer}>
           <Ionicons name="checkmark-circle-outline" size={96} color="#F58220" />
 
-          <Text style={styles.successTitle}>Request Sent!</Text>
+          <Text style={styles.successTitle}>{t("workErrand.requestSentTitle")}</Text>
 
           <Text style={styles.successText}>
-            {job.name} will review your request. Once accepted, you&apos;ll
-            continue to payment. Track it under My Bookings.
+            {t("workErrand.requestSentMessage", { name: job.name })}
           </Text>
 
           <Pressable
             style={styles.successButton}
             onPress={() => router.replace("/(tabs)/bookings" as any)}
           >
-            <Text style={styles.successButtonText}>Go to My Bookings</Text>
+            <Text style={styles.successButtonText}>{t("rides.goToMyBookings")}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -206,7 +209,11 @@ export default function WorkApplyScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#7A665C" />
+            <Ionicons
+              name={isRTL ? "arrow-forward" : "arrow-back"}
+              size={24}
+              color="#7A665C"
+            />
           </Pressable>
 
           <View style={styles.jobCard}>
@@ -229,7 +236,7 @@ export default function WorkApplyScreen() {
                     <Text style={styles.ratingText}>({job.ratingCount})</Text>
                   </>
                 ) : (
-                  <Text style={styles.ratingText}>New driver</Text>
+                  <Text style={styles.ratingText}>{t("workErrand.newEmployer")}</Text>
                 )}
               </View>
             </View>
@@ -264,7 +271,7 @@ export default function WorkApplyScreen() {
                 <View style={styles.detail}>
                   <Ionicons name="people-outline" size={15} color="#7A665C" />
                   <Text style={styles.detailText}>
-                    Workers needed: {job.workersNeeded}
+                    {t("workErrand.workersNeededCount", { count: job.workersNeeded })}
                   </Text>
                 </View>
               ) : null}
@@ -277,22 +284,22 @@ export default function WorkApplyScreen() {
                     color="#7A665C"
                   />
                   <Text style={styles.detailText}>
-                    Places remaining: {job.remainingSeats}
+                    {t("workErrand.placesRemainingCount", { count: job.remainingSeats })}
                   </Text>
                 </View>
               ) : null}
             </View>
 
-            <Text style={styles.price}>₪{job.hourlyRate}/hr</Text>
+            <Text style={styles.price}>
+              ₪{job.hourlyRate}{t("booking.perHourShort")}
+            </Text>
           </View>
 
-          <Text style={styles.sectionTitle}>Your Details</Text>
+          <Text style={styles.sectionTitle}>{t("workErrand.yourDetails")}</Text>
 
-          <Text style={styles.hint}>
-            Your name, age and phone are taken from your profile automatically.
-          </Text>
+          <Text style={styles.hint}>{t("workErrand.autoProfileHint")}</Text>
 
-          <Text style={styles.label}>Your Location</Text>
+          <Text style={styles.label}>{t("workErrand.yourLocation")}</Text>
           <Pressable
             style={styles.locationBox}
             onPress={detectLocation}
@@ -305,10 +312,10 @@ export default function WorkApplyScreen() {
             />
             <Text style={styles.locationText} numberOfLines={2}>
               {locating
-                ? "Detecting your location..."
+                ? t("booking.findingLocation")
                 : location
-                  ? location.address || "Current location detected"
-                  : "Tap to detect my current location"}
+                  ? location.address || t("workErrand.currentLocationDetected")
+                  : t("workErrand.tapToDetectLocation")}
             </Text>
             {location ? (
               <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
@@ -318,36 +325,36 @@ export default function WorkApplyScreen() {
           <View style={styles.row}>
             <View style={styles.halfField}>
               <IsraelLocationAutocomplete
-                label="City / Village"
+                label={t("workErrand.cityVillageLabel")}
                 value={city}
                 onChangeText={handleCityChange}
                 onSelectLocation={(location) => {
                   setCityPlace(location);
                   setCityError("");
                 }}
-                placeholder="Enter city or village"
+                placeholder={t("workErrand.enterCityVillage")}
                 error={cityError}
               />
             </View>
 
             <View style={styles.halfField}>
-              <Text style={styles.label}>Neighborhood</Text>
+              <Text style={styles.label}>{t("workErrand.neighborhoodLabel")}</Text>
               <TextInput
                 style={styles.input}
                 value={neighborhood}
                 onChangeText={setNeighborhood}
-                placeholder="Enter neighborhood"
+                placeholder={t("workErrand.enterNeighborhood")}
                 placeholderTextColor="#9B7A68"
               />
             </View>
           </View>
 
-          <Text style={styles.label}>Notes (optional)</Text>
+          <Text style={styles.label}>{t("workErrand.notesLabel")}</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             value={notes}
             onChangeText={setNotes}
-            placeholder="Anything the employer should know"
+            placeholder={t("workErrand.notesPlaceholder")}
             placeholderTextColor="#9B7A68"
             multiline
           />
@@ -358,7 +365,7 @@ export default function WorkApplyScreen() {
             disabled={submitting}
           >
             <Text style={styles.submitText}>
-              {submitting ? "Sending..." : "Send Request"}
+              {submitting ? t("workErrand.sending") : t("workErrand.sendRequest")}
             </Text>
           </Pressable>
         </ScrollView>

@@ -25,6 +25,7 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
+import i18n from "../i18n";
 import { notify } from "../booking/work-errand/workErrandLib";
 import { writeAuditLog } from "./adminAuditLib";
 import { NotificationAudience } from "./adminTypes";
@@ -84,14 +85,14 @@ const broadcastTo = async (userIds: string[], title: string, message: string) =>
 
 export const sendAdminNotification = async (input: SendNotificationInput): Promise<number> => {
   if (!input.title.trim() || !input.message.trim()) {
-    throw new Error("Please enter a title and a message.");
+    throw new Error(i18n.t("admin.enterTitleAndMessage"));
   }
 
   let recipientCount = 0;
 
   if (input.audience === "single_user" || input.audience === "single_driver") {
     if (!input.targetUserId) {
-      throw new Error("Please choose a recipient.");
+      throw new Error(i18n.t("admin.chooseRecipient"));
     }
 
     await notify({

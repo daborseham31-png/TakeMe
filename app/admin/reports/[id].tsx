@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
 import { updateReportStatus } from "../adminReportsLib";
@@ -20,6 +21,7 @@ import { AdminReportRow, ReportStatus } from "../adminTypes";
 import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 import AdminScreen from "../components/AdminScreen";
 import { LoadingState } from "../components/AdminStates";
+import { translateReportCategory } from "../../i18n/formatters";
 
 const toSeconds = (value: unknown): number => {
   const timestamp = value as { seconds?: number } | undefined;
@@ -29,6 +31,7 @@ const toSeconds = (value: unknown): number => {
 const STATUS_FLOW: ReportStatus[] = ["open", "under_review", "resolved", "rejected"];
 
 export default function AdminReportDetailScreen() {
+  const { t } = useTranslation();
   const params = useLocalSearchParams();
   const reportId = String(params.id || "");
 
@@ -57,7 +60,7 @@ export default function AdminReportDetailScreen() {
           const normalized: AdminReportRow = {
             id: snap.id,
             reporterId: data.reporterId || "",
-            reporterName: data.reporterName || "User",
+            reporterName: data.reporterName || t("common.user"),
             targetType: data.targetType || "",
             targetId: data.targetId || "",
             category: data.category || "other",
@@ -81,6 +84,7 @@ export default function AdminReportDetailScreen() {
     );
 
     return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId]);
 
   const handleUpdate = async (status: ReportStatus) => {
@@ -89,9 +93,9 @@ export default function AdminReportDetailScreen() {
     try {
       setBusy(true);
       await updateReportStatus(reportId, status, response.trim(), note.trim());
-      Alert.alert("Saved", "The report was updated.");
+      Alert.alert(t("admin.savedTitle"), t("admin.reportUpdatedMessage"));
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Could not update this report.");
+      Alert.alert(t("common.error"), error?.message || t("admin.couldNotUpdateReport"));
     } finally {
       setBusy(false);
     }
@@ -99,24 +103,24 @@ export default function AdminReportDetailScreen() {
 
   if (loading) {
     return (
-      <AdminScreen title="Report Details">
-        <LoadingState label="Loading report..." />
+      <AdminScreen title={t("admin.reportDetailsTitle")}>
+        <LoadingState label={t("admin.loadingReportLabel")} />
       </AdminScreen>
     );
   }
 
   if (notFound || !report) {
     return (
-      <AdminScreen title="Report Details">
+      <AdminScreen title={t("admin.reportDetailsTitle")}>
         <View style={styles.center}>
-          <Text style={styles.notFoundText}>This report could not be found.</Text>
+          <Text style={styles.notFoundText}>{t("admin.reportNotFound")}</Text>
         </View>
       </AdminScreen>
     );
   }
 
   return (
-    <AdminScreen title="Report Details">
+    <AdminScreen title={t("admin.reportDetailsTitle")}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -124,10 +128,10 @@ export default function AdminReportDetailScreen() {
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.headerCard}>
             <View style={styles.pill}>
-              <Text style={styles.pillText}>{report.category}</Text>
+              <Text style={styles.pillText}>{translateReportCategory(report.category, t)}</Text>
             </View>
             <Text style={styles.description}>{report.description}</Text>
-            <Text style={styles.reporter}>Reported by {report.reporterName}</Text>
+            <Text style={styles.reporter}>{t("admin.reportedByLabel", { name: report.reporterName })}</Text>
           </View>
 
           {report.targetType && report.targetId ? (
@@ -145,31 +149,33 @@ export default function AdminReportDetailScreen() {
             >
               <Ionicons name="link-outline" size={16} color={adminColors.textMuted} />
               <Text style={styles.linkLabel}>
-                Open reported {report.targetType}
+                {t("admin.openReportedTarget", {
+                  target: t(`admin.targetType.${report.targetType}`, { defaultValue: report.targetType }),
+                })}
               </Text>
               <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
             </Pressable>
           ) : null}
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Admin response (visible to reporter)</Text>
+            <Text style={styles.sectionTitle}>{t("admin.adminResponseTitle")}</Text>
             <TextInput
               style={styles.input}
               value={response}
               onChangeText={setResponse}
-              placeholder="Write a response to the reporter"
+              placeholder={t("admin.writeResponsePlaceholder")}
               placeholderTextColor={adminColors.placeholder}
               multiline
             />
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Internal note (admins only)</Text>
+            <Text style={styles.sectionTitle}>{t("admin.internalNoteAdminsOnlyTitle")}</Text>
             <TextInput
               style={styles.input}
               value={note}
               onChangeText={setNote}
-              placeholder="Private note for other admins"
+              placeholder={t("admin.privateNoteAdminsPlaceholder")}
               placeholderTextColor={adminColors.placeholder}
               multiline
             />
@@ -192,7 +198,7 @@ export default function AdminReportDetailScreen() {
                     report.status === status && styles.statusButtonTextActive,
                   ]}
                 >
-                  {status.replace("_", " ")}
+                  {t(`admin.reportStatusLabel.${status}`, { defaultValue: status.replace("_", " ") })}
                 </Text>
               </Pressable>
             ))}
