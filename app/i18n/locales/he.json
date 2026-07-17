@@ -134,7 +134,11 @@
     "alsoRegisterAsDriver": "הירשם גם כנהג",
     "vehicleNumberLabel": "מספר רכב",
     "vehicleNumberPlaceholder": "מספר רכב (7-9 ספרות)",
-    "alreadyHaveAccount": "כבר יש לך חשבון? "
+    "alreadyHaveAccount": "כבר יש לך חשבון? ",
+    "invalidEmailError": "יש להזין כתובת אימייל תקינה.",
+    "resetTooManyRequests": "יותר מדי ניסיונות. יש לנסות שוב מאוחר יותר.",
+    "resetNetworkError": "שגיאת רשת. יש לבדוק את החיבור ולנסות שוב.",
+    "resetGenericError": "משהו השתבש. יש לנסות שוב."
   },
   "home": {
     "tabTitle": "בית",

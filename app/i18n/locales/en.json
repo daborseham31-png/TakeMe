@@ -134,7 +134,11 @@
     "alsoRegisterAsDriver": "Also register as a Driver",
     "vehicleNumberLabel": "Vehicle Number",
     "vehicleNumberPlaceholder": "Vehicle number (7-9 digits)",
-    "alreadyHaveAccount": "Already have an account? "
+    "alreadyHaveAccount": "Already have an account? ",
+    "invalidEmailError": "Please enter a valid email address.",
+    "resetTooManyRequests": "Too many attempts. Please try again later.",
+    "resetNetworkError": "Network error. Please check your connection and try again.",
+    "resetGenericError": "Something went wrong. Please try again."
   },
   "home": {
     "tabTitle": "Home",
