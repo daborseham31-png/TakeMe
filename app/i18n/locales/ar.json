@@ -134,7 +134,11 @@
     "alsoRegisterAsDriver": "التسجيل أيضًا كسائق",
     "vehicleNumberLabel": "رقم المركبة",
     "vehicleNumberPlaceholder": "رقم المركبة (7-9 أرقام)",
-    "alreadyHaveAccount": "لديك حساب بالفعل؟ "
+    "alreadyHaveAccount": "لديك حساب بالفعل؟ ",
+    "invalidEmailError": "يرجى إدخال بريد إلكتروني صالح.",
+    "resetTooManyRequests": "محاولات كثيرة جدًا. يرجى المحاولة لاحقًا.",
+    "resetNetworkError": "خطأ في الشبكة. يرجى التحقق من الاتصال والمحاولة مرة أخرى.",
+    "resetGenericError": "حدث خطأ ما. يرجى المحاولة مرة أخرى."
   },
   "home": {
     "tabTitle": "الرئيسية",

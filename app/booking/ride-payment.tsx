@@ -51,6 +51,7 @@ const getLast3 = (value: string) => {
 
 export default function RidePaymentScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
 
   const category = String(params.category || "personal");

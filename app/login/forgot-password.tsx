@@ -13,10 +13,6 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
-import { auth } from "../../firebase";
-
-export default function ForgotPasswordScreen() {
-  const { t } = useTranslation();
 import { auth, firebaseAuthDomain } from "../../firebase";
 import { useLanguage } from "../i18n/LanguageProvider";
 
@@ -59,22 +55,18 @@ export default function ForgotPasswordScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const handleReset = async () => {
-    if (!email) {
-      alert(t("auth.pleaseEnterYourEmail"));
     const trimmedEmail = email.trim();
 
     if (!trimmedEmail) {
-      Alert.alert(t("common.error"), t("auth.missingEmail"));
+      Alert.alert(t("common.error"), t("auth.pleaseEnterYourEmail"));
       return;
     }
 
     if (submitting) return;
 
-    try {
-      await sendPasswordResetEmail(auth, email.trim());
-      alert(t("auth.resetEmailSentMessage"));
-      setSubmitting(true);
+    setSubmitting(true);
 
+    try {
       // Best-effort — affects which language Firebase's own default email
       // template renders in, if a custom template hasn't been set up yet.
       auth.languageCode = language;
@@ -84,7 +76,7 @@ export default function ForgotPasswordScreen() {
         handleCodeInApp: true,
       });
 
-      Alert.alert(t("auth.resetEmailSentTitle"), t("auth.resetEmailSentMessage"), [
+      Alert.alert(t("common.success"), t("auth.resetEmailSentMessage"), [
         { text: t("common.ok"), onPress: () => router.replace("/") },
       ]);
     } catch (error: any) {
@@ -92,7 +84,7 @@ export default function ForgotPasswordScreen() {
       // success above — never surfaced as an error, so this screen can't be
       // used to check whether an email is registered.
       if (error?.code === "auth/user-not-found") {
-        Alert.alert(t("auth.resetEmailSentTitle"), t("auth.resetEmailSentMessage"), [
+        Alert.alert(t("common.success"), t("auth.resetEmailSentMessage"), [
           { text: t("common.ok"), onPress: () => router.replace("/") },
         ]);
         return;
@@ -107,19 +99,11 @@ export default function ForgotPasswordScreen() {
   return (
     <SafeAreaView style={styles.page}>
       <View style={styles.card}>
-        <Text style={styles.title}>{t("auth.resetPasswordTitle")}</Text>
-        <Text style={styles.subtitle}>
-          {t("auth.enterEmailToReceiveLink")}
-        </Text>
-
-        <Text style={styles.label}>{t("auth.email")}</Text>
-        <TextInput
-          style={styles.input}
         <Text style={[styles.title, isRTL && styles.textRTL]}>
-          {t("auth.forgotPasswordTitle")}
+          {t("auth.resetPasswordTitle")}
         </Text>
         <Text style={[styles.subtitle, isRTL && styles.textRTL]}>
-          {t("auth.forgotPasswordSubtitle")}
+          {t("auth.enterEmailToReceiveLink")}
         </Text>
 
         <Text style={[styles.label, isRTL && styles.textRTL]}>
@@ -136,12 +120,6 @@ export default function ForgotPasswordScreen() {
           editable={!submitting}
         />
 
-        <Pressable style={styles.button} onPress={handleReset}>
-          <Text style={styles.buttonText}>{t("auth.sendResetLinkButton")}</Text>
-        </Pressable>
-
-        <Pressable onPress={() => router.replace("/")}>
-          <Text style={styles.backText}>{t("auth.backToLoginButton")}</Text>
         <Pressable
           style={[styles.button, submitting && styles.buttonDisabled]}
           onPress={handleReset}
@@ -150,12 +128,12 @@ export default function ForgotPasswordScreen() {
           {submitting ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={styles.buttonText}>{t("auth.sendResetLink")}</Text>
+            <Text style={styles.buttonText}>{t("auth.sendResetLinkButton")}</Text>
           )}
         </Pressable>
 
         <Pressable onPress={() => router.replace("/")}>
-          <Text style={styles.backText}>{t("auth.backToLogin")}</Text>
+          <Text style={styles.backText}>{t("auth.backToLoginButton")}</Text>
         </Pressable>
       </View>
     </SafeAreaView>
