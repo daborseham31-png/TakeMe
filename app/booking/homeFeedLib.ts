@@ -32,7 +32,13 @@ import { db } from "../../firebase";
 import { LocationNames } from "./locationSearch";
 import { getDriverDayTrips, WeeklyDriverDay } from "./weeklyBookingLib";
 
-export type FeedCategory = "personal" | "school" | "work" | "errand";
+// "school" = the legacy driverRoutes-based school category (still shown for
+// backward compatibility with existing listings). "schoolTrip" = the NEW
+// dedicated schoolTrips collection (AGENTS.md's school-ride system) — kept
+// as its own category rather than merged into "school" since the two live
+// in different collections with different booking flows (trip-confirm.tsx
+// + ride-payment.tsx, not ride-payment.tsx directly).
+export type FeedCategory = "personal" | "school" | "work" | "errand" | "schoolTrip";
 
 export type FeedItem = {
   id: string;
@@ -393,6 +399,66 @@ const normalizeErrandJobItem = (id: string, data: any): FeedItem | null => {
   };
 };
 
+// The NEW schoolTrips collection (AGENTS.md's school-ride system) — mirrors
+// the exact same active/seats/expiry filtering findMatchingSchoolTrips
+// already applies in schoolTripsLib.ts, so the feed never shows a trip the
+// dedicated search screen would have hidden.
+const normalizeSchoolTripItem = (id: string, data: any): FeedItem | null => {
+  if (data.status !== "active") return null;
+  if (typeof data.availableSeats === "number" && data.availableSeats <= 0) return null;
+  if (isDateTimeExpired(data.date, data.departureTime)) return null;
+
+  return {
+    id,
+    category: "schoolTrip",
+    providerId: data.driverId || "",
+    providerName: data.driverName || "Driver",
+    providerPhone: data.driverPhone || "",
+    ratingAverage: 0,
+    ratingCount: 0,
+    languages: [],
+    gender: "",
+
+    from: data.fromAddress || data.fromArea || "",
+    to: data.toAddress || data.toArea || "",
+    schoolName: data.schoolName || "",
+    title: "",
+    location: "",
+
+    date: data.date || "",
+    day: "",
+    time: data.departureTime || "",
+    startTime: "",
+    endTime: "",
+
+    price: typeof data.pricePerSeat === "number" ? data.pricePerSeat : null,
+    isHourly: false,
+    seats: typeof data.availableSeats === "number" ? data.availableSeats : null,
+
+    car: "",
+    carColor: "",
+    carPlateLast3: "",
+
+    fromLocationId: "",
+    toLocationId: "",
+    locationId: "",
+
+    originLatitude:
+      typeof data.fromLocation?.latitude === "number" ? data.fromLocation.latitude : null,
+    originLongitude:
+      typeof data.fromLocation?.longitude === "number" ? data.fromLocation.longitude : null,
+
+    isWeekly: false,
+    availableWeeklyDays: [],
+
+    createdAtSeconds: data.createdAt?.seconds || 0,
+
+    // trip-confirm.tsx only needs the tripId — everything else it reads
+    // live from subscribeSchoolTrip, so `raw` just needs to carry the id.
+    raw: { id },
+  };
+};
+
 // Attaches the SAME users/{providerId}.ratingAverage/ratingCount every other
 // screen reads — never a value cached on the listing itself.
 const withProviderRating = async (item: FeedItem): Promise<FeedItem> => {
@@ -530,11 +596,12 @@ export const subscribeHomeFeed = (
   let routesItems: FeedItem[] = [];
   let workItems: FeedItem[] = [];
   let errandItems: FeedItem[] = [];
+  let schoolTripItems: FeedItem[] = [];
   let cancelled = false;
 
   const emit = () => {
     if (cancelled) return;
-    onUpdate([...routesItems, ...workItems, ...errandItems]);
+    onUpdate([...routesItems, ...workItems, ...errandItems, ...schoolTripItems]);
   };
 
   const attachRatings = async (items: FeedItem[]) => {
@@ -581,11 +648,25 @@ export const subscribeHomeFeed = (
     (error) => onError?.(error),
   );
 
+  const unsubSchoolTrips = onSnapshot(
+    query(collection(db, "schoolTrips"), where("status", "==", "active")),
+    async (snap) => {
+      const items = snap.docs
+        .map((d) => normalizeSchoolTripItem(d.id, d.data()))
+        .filter((item): item is FeedItem => !!item);
+
+      schoolTripItems = await attachRatings(items);
+      emit();
+    },
+    (error) => onError?.(error),
+  );
+
   return () => {
     cancelled = true;
     unsubRoutes();
     unsubWork();
     unsubErrands();
+    unsubSchoolTrips();
   };
 };
 
@@ -706,5 +787,18 @@ export const buildErrandBookNav = (item: FeedItem): FeedNavTarget => ({
   params: {
     driver: JSON.stringify(item.raw),
     source: "home_feed",
+  },
+});
+
+// New schoolTrips system — the passenger already sees this exact trip's
+// driver/route/price/seats on the card, so this jumps straight to
+// trip-confirm.tsx (the same review screen the dedicated search results
+// list uses) rather than re-running a search.
+export const buildSchoolTripNav = (item: FeedItem): FeedNavTarget => ({
+  pathname: "/booking/school/trip-confirm",
+  params: {
+    tripId: item.id,
+    seats: "1",
+    roundTrip: "false",
   },
 });

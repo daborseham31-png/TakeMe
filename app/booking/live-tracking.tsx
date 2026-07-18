@@ -50,6 +50,13 @@ export default function LiveTrackingScreen() {
   const params = useLocalSearchParams();
   const id = typeof params.id === "string" ? params.id : "";
 
+  // A school trip's live location lives on the schoolTrips/{id} doc itself
+  // (one car, shared by every passenger booked on it — see
+  // app/driver/ride-navigation.tsx's top-of-file comment), so `id` here is
+  // the tripId, not a booking id, whenever source=schoolTrips.
+  const isSchoolTripsSource = String(params.source || "") === "schoolTrips";
+  const bookingCollection = isSchoolTripsSource ? "schoolTrips" : "bookings";
+
   const mapRef = useRef<MapView | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -62,12 +69,20 @@ export default function LiveTrackingScreen() {
     }
 
     const unsub = onSnapshot(
-      doc(db, "bookings", id),
+      doc(db, bookingCollection, id),
       (snap) => {
         if (snap.exists()) {
+          const data = snap.data();
+
           setBooking({
             id: snap.id,
-            ...snap.data(),
+            ...data,
+            // Field-name aliases (SchoolTrip uses fromAddress/toAddress/
+            // departureTime — every other read below, shared with Personal
+            // Ride, expects from/to/time).
+            ...(isSchoolTripsSource
+              ? { from: data.fromAddress, to: data.toAddress, time: data.departureTime }
+              : {}),
           });
         } else {
           setBooking(null);
@@ -90,7 +105,10 @@ export default function LiveTrackingScreen() {
     return (
       toLatLng(booking?.pickupCoords) ||
       toLatLng(booking?.pickup) ||
-      toLatLng(booking?.passengerPickupLocation)
+      toLatLng(booking?.passengerPickupLocation) ||
+      // A school trip's own "From" GPS point (see ride-navigation.tsx's
+      // matching fallback).
+      toLatLng(booking?.fromLocation)
     );
   }, [booking]);
 

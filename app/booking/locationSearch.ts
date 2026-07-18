@@ -129,6 +129,11 @@ const APP_LANGUAGE_TO_INPUT_LANGUAGE: Record<SupportedLanguage, InputLanguage> =
   ar: "arabic",
   en: "english",
   he: "hebrew",
+  // IsraelLocation only carries english/arabic/hebrew names (no Russian
+  // translation exists in this dataset) — English is the closest
+  // Latin-script fallback for Russian-speaking users until a real Russian
+  // name column is added to israelLocations.ts.
+  ru: "english",
 };
 
 // Same dataset, same stable IDs/coordinates — this only picks which of the

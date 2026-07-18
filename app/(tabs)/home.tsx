@@ -28,6 +28,7 @@ import {
   attachDistances,
   buildErrandBookNav,
   buildQuickRideNav,
+  buildSchoolTripNav,
   buildWeeklyRideNav,
   buildWorkApplyNav,
   FEED_PAGE_SIZE,
@@ -55,12 +56,13 @@ const logoImg = require("../../assets/images/logo.jpeg");
 
 type FilterKey = "all" | FeedCategory;
 
-const FILTER_KEYS: FilterKey[] = ["all", "personal", "school", "work", "errand"];
+const FILTER_KEYS: FilterKey[] = ["all", "personal", "school", "schoolTrip", "work", "errand"];
 
 const FILTER_ICONS: Record<FilterKey, keyof typeof Ionicons.glyphMap> = {
   all: "apps-outline",
   personal: "person-outline",
   school: "school-outline",
+  schoolTrip: "school-outline",
   work: "briefcase-outline",
   errand: "location-outline",
 };
@@ -381,6 +383,11 @@ export default function HomeScreen() {
 
     if (item.category === "errand") {
       router.push(buildErrandBookNav(item) as any);
+      return;
+    }
+
+    if (item.category === "schoolTrip") {
+      router.push(buildSchoolTripNav(item) as any);
       return;
     }
 

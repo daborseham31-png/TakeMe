@@ -19,6 +19,7 @@ import {
 import ar from "./locales/ar.json";
 import en from "./locales/en.json";
 import he from "./locales/he.json";
+import ru from "./locales/ru.json";
 
 // Local-only preference. Deliberately NOT sensitive information (just a
 // 2-letter language code) — safe to keep in plain AsyncStorage.
@@ -28,6 +29,7 @@ const resources = {
   ar: { translation: ar },
   en: { translation: en },
   he: { translation: he },
+  ru: { translation: ru },
 };
 
 // Any phone language TakeMe doesn't ship a translation for falls back to
@@ -39,6 +41,7 @@ function detectPhoneLanguage(): SupportedLanguage {
     if (code === "ar") return "ar";
     if (code === "he" || code === "iw") return "he";
     if (code === "en") return "en";
+    if (code === "ru") return "ru";
     return DEFAULT_LANGUAGE;
   } catch {
     return DEFAULT_LANGUAGE;

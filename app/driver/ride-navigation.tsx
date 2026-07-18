@@ -1,7 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { router, useLocalSearchParams } from "expo-router";
-import { doc, onSnapshot, serverTimestamp, updateDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+  writeBatch,
+} from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -21,6 +31,12 @@ import { useTranslation } from "react-i18next";
 import { db } from "../../firebase";
 import { canStartTrip, getStartTripBlockedReason } from "../booking/bookingsLib";
 import { normalizeRideBooking, RideBooking } from "../booking/rideBookingLib";
+import {
+  normalizeSchoolBooking,
+  normalizeSchoolTrip,
+  SCHOOL_BOOKINGS_COLLECTION,
+  SCHOOL_TRIPS_COLLECTION,
+} from "../booking/schoolTripsLib";
 import { notify } from "../booking/work-errand/workErrandLib";
 import { useLanguage } from "../i18n/LanguageProvider";
 
@@ -59,6 +75,15 @@ export default function RideNavigationScreen() {
   const params = useLocalSearchParams();
   const id = typeof params.id === "string" ? params.id : "";
 
+  // A school trip (AGENTS.md's trip-lifecycle feature) is one car shared by
+  // several independent SchoolBooking docs, so this screen operates on the
+  // schoolTrips/{id} doc itself here (id = tripId, not a booking id) rather
+  // than a single passenger's booking — see updateTripStatus's batch sync
+  // below for how each passenger's own booking stays in step.
+  const source = String(params.source || "");
+  const isSchoolTripsSource = source === "schoolTrips";
+  const bookingCollection = isSchoolTripsSource ? SCHOOL_TRIPS_COLLECTION : "bookings";
+
   const [booking, setBooking] = useState<RideBooking | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -70,13 +95,25 @@ export default function RideNavigationScreen() {
     }
 
     const unsub = onSnapshot(
-      doc(db, "bookings", id),
+      doc(db, bookingCollection, id),
       (snap) => {
         if (snap.exists()) {
           const rawData = snap.data();
 
+          const normalized = isSchoolTripsSource
+            ? {
+                ...(normalizeSchoolTrip(snap.id, rawData) as any),
+                // Field-name aliases so every generic (booking as any).xxx
+                // read below (from/to/time, shared with Personal Ride)
+                // resolves correctly against a SchoolTrip's own field names.
+                from: rawData.fromAddress,
+                to: rawData.toAddress,
+                time: rawData.departureTime,
+              }
+            : (normalizeRideBooking(snap.id, rawData) as any);
+
           setBooking({
-            ...(normalizeRideBooking(snap.id, rawData) as any),
+            ...normalized,
             ...rawData,
             id: snap.id,
           } as RideBooking);
@@ -99,13 +136,18 @@ export default function RideNavigationScreen() {
       b?.pickup?.latitude ??
       b?.pickupCoords?.latitude ??
       b?.pickupLocation?.latitude ??
-      b?.passengerPickupLocation?.latitude;
+      b?.passengerPickupLocation?.latitude ??
+      // A school trip's own "From" GPS point — the pickup spot for this
+      // trip (child's home for an outbound trip, the school itself for a
+      // return trip — see SchoolTrip.fromLocation's own comment).
+      b?.fromLocation?.latitude;
     const lng =
       b?.pickupLongitude ??
       b?.pickup?.longitude ??
       b?.pickupCoords?.longitude ??
       b?.pickupLocation?.longitude ??
-      b?.passengerPickupLocation?.longitude;
+      b?.passengerPickupLocation?.longitude ??
+      b?.fromLocation?.longitude;
 
     if (typeof lat !== "number" || typeof lng !== "number") return null;
 
@@ -155,7 +197,7 @@ export default function RideNavigationScreen() {
       accuracy: Location.Accuracy.High,
     });
 
-    await updateDoc(doc(db, "bookings", id), {
+    await updateDoc(doc(db, bookingCollection, id), {
       driverLocation: {
         latitude: current.coords.latitude,
         longitude: current.coords.longitude,
@@ -201,7 +243,7 @@ useEffect(() => {
         if (cancelled) return;
 
         try {
-          await updateDoc(doc(db, "bookings", id), {
+          await updateDoc(doc(db, bookingCollection, id), {
             driverLocation: {
               latitude: location.coords.latitude,
               longitude: location.coords.longitude,
@@ -245,6 +287,11 @@ useEffect(() => {
         getStartTripBlockedReason(booking) ||
           t("booking.startTripOnlyOnTripDate"),
       );
+      return;
+    }
+
+    if (isSchoolTripsSource) {
+      await updateSchoolTripStatus(nextStatus);
       return;
     }
 
@@ -342,6 +389,129 @@ useEffect(() => {
         targetTab: "passenger",
       });
     }
+  };
+
+  // A school trip's own tripStatus/trackingEnabled/driverLocation live on
+  // the schoolTrips/{id} doc (see the top-of-file comment — one car, shared
+  // by several independent SchoolBooking docs), so this both (a) writes the
+  // trip doc itself and (b) batch-syncs every still-booked schoolBookings
+  // doc for this trip so each passenger's own card reflects the same
+  // progress from a single subscription, without a second live read. Never
+  // a second start/arrive/finish implementation — same transitions,
+  // same notify() calls, just fanned out to N passengers instead of 1.
+  const updateSchoolTripStatus = async (nextStatus: TripStatus) => {
+    const tripPayload: any = {
+      tripStatus: nextStatus,
+      updatedAt: serverTimestamp(),
+    };
+
+    if (nextStatus === "driver_on_way") {
+      tripPayload.trackingEnabled = false;
+      tripPayload.driverOnWayAt = serverTimestamp();
+    }
+
+    if (nextStatus === "arrived_pickup") {
+      tripPayload.trackingEnabled = true;
+      tripPayload.arrivedPickupAt = serverTimestamp();
+    }
+
+    if (nextStatus === "completed") {
+      tripPayload.trackingEnabled = false;
+      tripPayload.finishedByDriver = true;
+      tripPayload.completedAt = serverTimestamp();
+      // Hides it from future searches/matching the same way a driver's own
+      // Cancel does (findMatchingSchoolTrips filters status=="active").
+      tripPayload.status = "completed";
+    }
+
+    await updateDoc(doc(db, SCHOOL_TRIPS_COLLECTION, id), tripPayload);
+
+    if (nextStatus === "arrived_pickup") {
+      await updateDriverLocationOnce();
+    }
+
+    const bookingsSnap = await getDocs(
+      query(
+        collection(db, SCHOOL_BOOKINGS_COLLECTION),
+        where("tripId", "==", id),
+        where("status", "==", "booked"),
+      ),
+    );
+
+    if (!bookingsSnap.empty) {
+      const batch = writeBatch(db);
+
+      bookingsSnap.docs.forEach((bookingSnap) => {
+        const bookingPayload: any = {
+          tripStatus: nextStatus,
+          updatedAt: serverTimestamp(),
+        };
+
+        if (nextStatus === "completed") {
+          bookingPayload.status = "completed";
+          bookingPayload.finishedByDriver = true;
+          bookingPayload.needsPassengerRating = true;
+          bookingPayload.ratingSubmitted = false;
+          bookingPayload.rating = null;
+        }
+
+        batch.update(bookingSnap.ref, bookingPayload);
+      });
+
+      await batch.commit();
+    }
+
+    // One notification per BOOKING (not per unique passenger) — a parent
+    // with several children on this trip gets one message per child, each
+    // naming that child, exactly like every other school notification in
+    // this app (see schoolTripsLib.ts's tripMatchFoundForChildMessage).
+    const notifyType =
+      nextStatus === "driver_on_way"
+        ? "ride_on_the_way"
+        : nextStatus === "arrived_pickup"
+          ? "ride_arrived"
+          : nextStatus === "completed"
+            ? "ride_trip_completed"
+            : null;
+
+    if (!notifyType) return;
+
+    await Promise.all(
+      bookingsSnap.docs.map(async (bookingSnap) => {
+        const passengerBooking = normalizeSchoolBooking(bookingSnap.id, bookingSnap.data());
+        if (!passengerBooking.passengerId) return;
+
+        const childSuffix = passengerBooking.childName ? ` (${passengerBooking.childName})` : "";
+        const message =
+          nextStatus === "driver_on_way"
+            ? `Your driver is on the way${childSuffix}`
+            : nextStatus === "arrived_pickup"
+              ? `Your driver has arrived${childSuffix}`
+              : `Your trip is completed. Please rate your driver.${childSuffix}`;
+
+        await notify({
+          receiverId: passengerBooking.passengerId,
+          type: notifyType,
+          title:
+            nextStatus === "driver_on_way"
+              ? "Driver on the way"
+              : nextStatus === "arrived_pickup"
+                ? "Driver arrived"
+                : "Trip completed",
+          message,
+          applicationId: id,
+          bookingId: bookingSnap.id,
+          category: "school",
+          status:
+            nextStatus === "driver_on_way"
+              ? "on_the_way"
+              : nextStatus === "arrived_pickup"
+                ? "arrived"
+                : "completed",
+          targetTab: "passenger",
+        });
+      }),
+    );
   };
 
   const openMaps = (b: RideBooking) => {
@@ -531,7 +701,11 @@ useEffect(() => {
               {c ? (
                 <Marker
                   coordinate={{ latitude: c.lat, longitude: c.lng }}
-                  title={(booking as any).passengerName}
+                  title={
+                    isSchoolTripsSource
+                      ? (booking as any).schoolName
+                      : (booking as any).passengerName
+                  }
                   description={t("booking.pickupLocationLabel")}
                   pinColor="#F58220"
                 />
@@ -560,26 +734,40 @@ useEffect(() => {
         )}
 
         <View style={styles.card}>
-          <View style={styles.infoRow}>
-            <Ionicons name="person-outline" size={16} color="#7C5F46" />
-            <Text style={styles.infoText}>{(booking as any).passengerName}</Text>
-          </View>
+          {isSchoolTripsSource ? (
+            // A school trip is shared by several independent passengers
+            // (see the top-of-file comment) — showing one passenger's name
+            // here would be misleading, so this shows the school instead.
+            (booking as any).schoolName ? (
+              <View style={styles.infoRow}>
+                <Ionicons name="school-outline" size={16} color="#7C5F46" />
+                <Text style={styles.infoText}>{(booking as any).schoolName}</Text>
+              </View>
+            ) : null
+          ) : (
+            <>
+              <View style={styles.infoRow}>
+                <Ionicons name="person-outline" size={16} color="#7C5F46" />
+                <Text style={styles.infoText}>{(booking as any).passengerName}</Text>
+              </View>
 
-          {(booking as any).passengerPhone ? (
-            <Pressable
-              style={styles.infoRow}
-              onPress={() =>
-                Linking.openURL(`tel:${(booking as any).passengerPhone}`).catch(
-                  () => {},
-                )
-              }
-            >
-              <Ionicons name="call-outline" size={16} color="#F58220" />
-              <Text style={[styles.infoText, styles.phone]}>
-                {(booking as any).passengerPhone}
-              </Text>
-            </Pressable>
-          ) : null}
+              {(booking as any).passengerPhone ? (
+                <Pressable
+                  style={styles.infoRow}
+                  onPress={() =>
+                    Linking.openURL(`tel:${(booking as any).passengerPhone}`).catch(
+                      () => {},
+                    )
+                  }
+                >
+                  <Ionicons name="call-outline" size={16} color="#F58220" />
+                  <Text style={[styles.infoText, styles.phone]}>
+                    {(booking as any).passengerPhone}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </>
+          )}
 
           <View style={styles.infoRow}>
             <Ionicons name="location-outline" size={16} color="#7C5F46" />

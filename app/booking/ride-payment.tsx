@@ -7,7 +7,7 @@ import {
   runTransaction,
   serverTimestamp,
 } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -29,6 +29,15 @@ import BitBadge from "./BitBadge";
 import { openBitPayment } from "./bitPayment";
 import { isDateTimeExpired } from "./homeFeedLib";
 import { RIDE_CATEGORY, RidePayment } from "./rideBookingLib";
+import {
+  bookOutboundForChildren,
+  bookReturnForChild,
+  bookSchoolTripSingle,
+  generateBookingGroupId,
+  SchoolBookingChildEntry,
+  SchoolBookingPaymentMethod,
+  SchoolTripDirection,
+} from "./schoolTripsLib";
 import {
   computeWeeklyTotal,
   createWeeklyBookings,
@@ -83,6 +92,43 @@ export default function RidePaymentScreen() {
   const price = num(params.price);
   const maxSeatsParam = num(params.maxSeats);
   const unitPriceParam = num(params.unitPrice);
+
+  // School Trips booking (AGENTS.md's dedicated schoolTrips/schoolBookings
+  // system — separate from the legacy driverRoutes/bookings path this
+  // screen already serves for Personal Ride and old-style School rides
+  // below). isSchoolTripsSource routes payment straight into
+  // schoolTripsLib's own atomic per-seat transaction instead of writing to
+  // driverRoutes/bookings; every other booking source on this screen is
+  // completely unaffected by everything in this block.
+  const isSchoolTripsSource = String(params.bookingSource || "") === "schoolTrips";
+  const schoolTripId = String(params.schoolTripId || "");
+  const schoolDirection = (
+    params.direction === "from_school" ? "from_school" : "to_school"
+  ) as SchoolTripDirection;
+  const schoolBookingGroupIdParam = String(params.bookingGroupId || "");
+  const schoolRoundTrip = params.roundTrip === "true";
+
+  // One entry per child riding this trip (AGENTS.md #3) — set by
+  // trip-confirm.tsx. Empty for any booking with no per-child data (legacy
+  // bookings, or a plain seats-only school booking), which keeps that path
+  // fully intact below.
+  const schoolChildEntries = useMemo<SchoolBookingChildEntry[]>(() => {
+    const raw = String(params.childEntries || "");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((entry: any) => entry && typeof entry.localId === "string")
+        .map((entry: any) => ({ localId: entry.localId, childName: entry.childName || undefined }));
+    } catch {
+      return [];
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.childEntries]);
+
+  const [schoolAskReturn, setSchoolAskReturn] = useState(false);
+  const [schoolBookedGroupId, setSchoolBookedGroupId] = useState<string | null>(null);
 
   // "Pickup location for driver navigation" — a SEPARATE, optional GPS point
   // from the booking form. Never used for driver matching (that already
@@ -143,7 +189,14 @@ export default function RidePaymentScreen() {
   // their own per-day seat counts from the day picker.
   const maxSeatsValue = Math.max(1, maxSeatsParam ?? seats ?? 1);
   const unitPrice = unitPriceParam ?? price ?? 0;
-  const [selectedSeats, setSelectedSeats] = useState(1);
+  // A schoolTrips booking's seat count was already fixed on trip-confirm.tsx
+  // (the child roster's size, or the passenger's own stepper choice there —
+  // AGENTS.md's "one seat = one child") BEFORE reaching this screen, so it
+  // starts (and, since the stepper card below is hidden for this source,
+  // stays) at that exact count rather than the generic default of 1.
+  const [selectedSeats, setSelectedSeats] = useState(
+    isSchoolTripsSource ? maxSeatsValue : 1,
+  );
 
   const decreaseSeats = () =>
     setSelectedSeats((prev) => Math.max(1, prev - 1));
@@ -169,6 +222,82 @@ export default function RidePaymentScreen() {
 
   const handleOpenBitAndCopy = () => {
     openBitPayment(driverPhone, amountDue);
+  };
+
+  // Books a schoolTrips/schoolBookings trip AFTER the passenger has chosen a
+  // payment method on this screen — reusing the exact same atomic booking
+  // primitives already used everywhere else in the school-ride system
+  // (bookOutboundForChildren/bookReturnForChild/bookSchoolTripSingle, all of
+  // which funnel into one shared, seat-decrementing Firestore transaction —
+  // never a second booking system). Which one runs depends only on whether
+  // a child roster is known and which direction this trip is:
+  //   - outbound + a known roster → one multi-seat booking tagging every
+  //     child riding together (AGENTS.md #3's childEntries array).
+  //   - return + exactly one known child → that child individually
+  //     (childEntryId/childName — the same shape every other return
+  //     booking uses).
+  //   - anything else (no child data at all) → the original plain
+  //     seats-only booking, unchanged.
+  const createSchoolTripsBookingAfterPayment = async (
+    paymentMethod: SchoolBookingPaymentMethod,
+  ): Promise<{ bookingGroupId: string }> => {
+    if (!schoolTripId) {
+      throw new Error(t("rides.missingTripId"));
+    }
+
+    const groupId = schoolBookingGroupIdParam || generateBookingGroupId();
+
+    if (schoolChildEntries.length > 0 && schoolDirection === "to_school") {
+      await bookOutboundForChildren(schoolTripId, schoolChildEntries, paymentMethod, groupId);
+    } else if (schoolChildEntries.length === 1 && schoolDirection === "from_school") {
+      await bookReturnForChild(schoolTripId, schoolChildEntries[0], paymentMethod, groupId);
+    } else {
+      await bookSchoolTripSingle(schoolTripId, selectedSeats, paymentMethod, groupId);
+    }
+
+    return { bookingGroupId: groupId };
+  };
+
+  // Mirrors trip-confirm.tsx's former "book a return too?" prompt — now
+  // shown here since it only makes sense once the outbound leg is actually
+  // booked, which now happens on THIS screen (AGENTS.md: do not create the
+  // booking before payment).
+  const handleContinueToSchoolReturn = () => {
+    setSchoolAskReturn(false);
+
+    router.push({
+      pathname: "/booking/school/trip-results",
+      params: {
+        direction: "from_school",
+        schoolId: String(params.schoolId || ""),
+        schoolName,
+        schoolAddress: String(params.schoolAddress || ""),
+        schoolLat: String(params.schoolLat || ""),
+        schoolLng: String(params.schoolLng || ""),
+        // Return "From" = the just-booked outbound trip's own "To" area,
+        // with the real pickup point being the school itself (AGENTS.md:
+        // "Return From area = outbound To area", "... location =
+        // schoolLocation").
+        fromArea: String(params.outboundToArea || to || ""),
+        fromLat: String(params.schoolLat || ""),
+        fromLng: String(params.schoolLng || ""),
+        toArea: String(params.returnToArea || ""),
+        toLat: String(params.returnToLat || ""),
+        toLng: String(params.returnToLng || ""),
+        date,
+        requestedTime: String(params.returnRequestedTime || ""),
+        seats: String(selectedSeats),
+        roundTrip: "false",
+        bookingGroupId: schoolBookedGroupId || "",
+        childEntries: String(params.returnChildEntries || ""),
+      },
+    } as any);
+  };
+
+  const handleSkipSchoolReturn = () => {
+    setSchoolAskReturn(false);
+    Alert.alert(t("common.success"), t("validation.bookingCompleted"));
+    router.replace("/(tabs)/bookings" as any);
   };
 
   // Pickup GPS is optional — if the passenger never pressed "Use my current
@@ -410,6 +539,47 @@ const createBookingAfterPayment = async (
     const payment: RidePayment =
       method === "cash" ? { method: "cash" } : { method: "bit" };
 
+    if (isSchoolTripsSource) {
+      try {
+        setProcessing(true);
+
+        const { bookingGroupId: newGroupId } = await createSchoolTripsBookingAfterPayment(
+          method === "bit" ? "bit" : "cash",
+        );
+
+        if (schoolBookingGroupIdParam) {
+          // This WAS the return leg of a round trip already in progress.
+          Alert.alert(t("common.success"), t("schoolTrip.roundTripBookedMessage"));
+          router.replace("/(tabs)/bookings" as any);
+          return;
+        }
+
+        if (schoolRoundTrip && schoolDirection === "to_school") {
+          setSchoolBookedGroupId(newGroupId);
+          setSchoolAskReturn(true);
+          return;
+        }
+
+        Alert.alert(t("common.success"), t("validation.bookingCompleted"));
+        router.replace("/(tabs)/bookings" as any);
+      } catch (error: any) {
+        // AGENTS.md #9's exact scenario: outbound already booked, and THIS
+        // (return-leg) booking just failed — never hide that the outbound
+        // booking still went through.
+        if (schoolBookingGroupIdParam) {
+          Alert.alert(t("common.error"), t("schoolTrip.outboundBookedReturnUnavailable"));
+          router.replace("/(tabs)/bookings" as any);
+          return;
+        }
+
+        Alert.alert(t("common.error"), error?.message || t("rides.couldNotConfirmBooking"));
+      } finally {
+        setProcessing(false);
+      }
+
+      return;
+    }
+
     if (isWeekly) {
       try {
         setProcessing(true);
@@ -489,6 +659,26 @@ const createBookingAfterPayment = async (
       setProcessing(false);
     }
   };
+
+  if (schoolAskReturn) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.askReturnBox}>
+          <Ionicons name="help-circle-outline" size={48} color="#F58220" />
+          <Text style={styles.askReturnTitle}>{t("schoolTrip.bookReturnQuestion")}</Text>
+          <Text style={styles.askReturnSubtitle}>{t("schoolTrip.bookReturnQuestionHint")}</Text>
+
+          <Pressable style={styles.continueButton} onPress={handleContinueToSchoolReturn}>
+            <Text style={styles.continueText}>{t("schoolTrip.bookReturn")}</Text>
+          </Pressable>
+
+          <Pressable style={styles.askReturnSkipButton} onPress={handleSkipSchoolReturn}>
+            <Text style={styles.askReturnSkipText}>{t("common.no")}</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -635,45 +825,57 @@ const createBookingAfterPayment = async (
             <View style={styles.summaryCard}>
               <Text style={styles.summaryTitle}>{t("rides.numberOfSeats")}</Text>
 
-              <View style={styles.seatStepperRow}>
-                <Pressable
-                  style={[
-                    styles.seatButton,
-                    selectedSeats <= 1 && styles.seatButtonDisabled,
-                  ]}
-                  onPress={decreaseSeats}
-                  disabled={selectedSeats <= 1}
-                  hitSlop={8}
-                >
-                  <Ionicons
-                    name="remove"
-                    size={20}
-                    color={selectedSeats <= 1 ? "#C9BBAE" : "#111827"}
-                  />
-                </Pressable>
+              {isSchoolTripsSource ? (
+                // Locked — this count was already fixed on trip-confirm.tsx
+                // (the child roster's size, or the passenger's own choice
+                // there — AGENTS.md's "one seat = one child" invariant must
+                // never be broken by a second, independent stepper here).
+                <Text style={styles.seatAvailableHint}>
+                  {t("schoolTrip.oneSeatPerChild", { count: selectedSeats })}
+                </Text>
+              ) : (
+                <>
+                  <View style={styles.seatStepperRow}>
+                    <Pressable
+                      style={[
+                        styles.seatButton,
+                        selectedSeats <= 1 && styles.seatButtonDisabled,
+                      ]}
+                      onPress={decreaseSeats}
+                      disabled={selectedSeats <= 1}
+                      hitSlop={8}
+                    >
+                      <Ionicons
+                        name="remove"
+                        size={20}
+                        color={selectedSeats <= 1 ? "#C9BBAE" : "#111827"}
+                      />
+                    </Pressable>
 
-                <Text style={styles.seatCountText}>{selectedSeats}</Text>
+                    <Text style={styles.seatCountText}>{selectedSeats}</Text>
 
-                <Pressable
-                  style={[
-                    styles.seatButton,
-                    selectedSeats >= maxSeatsValue && styles.seatButtonDisabled,
-                  ]}
-                  onPress={increaseSeats}
-                  disabled={selectedSeats >= maxSeatsValue}
-                  hitSlop={8}
-                >
-                  <Ionicons
-                    name="add"
-                    size={20}
-                    color={selectedSeats >= maxSeatsValue ? "#C9BBAE" : "#111827"}
-                  />
-                </Pressable>
-              </View>
+                    <Pressable
+                      style={[
+                        styles.seatButton,
+                        selectedSeats >= maxSeatsValue && styles.seatButtonDisabled,
+                      ]}
+                      onPress={increaseSeats}
+                      disabled={selectedSeats >= maxSeatsValue}
+                      hitSlop={8}
+                    >
+                      <Ionicons
+                        name="add"
+                        size={20}
+                        color={selectedSeats >= maxSeatsValue ? "#C9BBAE" : "#111827"}
+                      />
+                    </Pressable>
+                  </View>
 
-              <Text style={styles.seatAvailableHint}>
-                {t("rides.seatsAvailableCount", { count: maxSeatsValue })}
-              </Text>
+                  <Text style={styles.seatAvailableHint}>
+                    {t("rides.seatsAvailableCount", { count: maxSeatsValue })}
+                  </Text>
+                </>
+              )}
 
               <View style={styles.priceSummaryBox}>
                 <Text style={styles.priceSummaryTitle}>
@@ -1091,4 +1293,33 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     fontSize: 16,
   },
+  askReturnBox: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 30,
+    gap: 8,
+  },
+  askReturnTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#111827",
+    textAlign: "center",
+    marginTop: 8,
+  },
+  askReturnSubtitle: {
+    fontSize: 14,
+    color: "#7C5F46",
+    textAlign: "center",
+    marginBottom: 18,
+  },
+  askReturnSkipButton: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    padding: 15,
+    alignItems: "center",
+  },
+  askReturnSkipText: { color: "#7C5F46", fontWeight: "800" },
 });

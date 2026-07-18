@@ -183,6 +183,13 @@ export type NotifyInput = {
   // (Roadside Help spec) — in addition to receiverId/senderId above.
   driverId?: string;
   passengerId?: string;
+
+  // School rides only — which child a "school_trip_match" notification is
+  // for (a family can have several children each waiting on a different
+  // return trip; the notification and the screen it opens must identify
+  // the right one). Left null/omitted for every other notification type.
+  childEntryId?: string;
+  childName?: string;
 };
 
 export const notify = async (input: NotifyInput) => {
@@ -216,6 +223,8 @@ export const notify = async (input: NotifyInput) => {
       amount: typeof input.amount === "number" ? input.amount : null,
       driverId: input.driverId || null,
       passengerId: input.passengerId || null,
+      childEntryId: input.childEntryId || null,
+      childName: input.childName || null,
       read: false,
       readAt: null,
       deleted: false,

@@ -42,6 +42,12 @@ const CATEGORY_META: Record<
     color: "#3B82F6",
     bookLabelKey: "rides.requestSchoolRide",
   },
+  schoolTrip: {
+    labelKey: "rides.schoolRide",
+    icon: "school-outline",
+    color: "#3B82F6",
+    bookLabelKey: "schoolTrip.viewDetails",
+  },
   work: {
     labelKey: "rides.work",
     icon: "briefcase-outline",
@@ -123,7 +129,7 @@ export default function TripFeedCard({
             </Text>
           </View>
         </View>
-      ) : item.category === "school" ? (
+      ) : item.category === "school" || item.category === "schoolTrip" ? (
         <>
           {item.schoolName ? (
             <Text style={styles.routeText}>{item.schoolName}</Text>
@@ -204,7 +210,9 @@ export default function TripFeedCard({
             <Ionicons name="cash-outline" size={14} color="#F58220" />
             <Text style={styles.priceText}>
               ₪{item.price}
-              {item.category === "personal" || item.category === "school"
+              {item.category === "personal" ||
+              item.category === "school" ||
+              item.category === "schoolTrip"
                 ? ` ${t("rides.perSeat")}`
                 : ""}
             </Text>

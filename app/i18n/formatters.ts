@@ -13,6 +13,7 @@ const INTL_LOCALE: Record<SupportedLanguage, string> = {
   ar: "ar",
   en: "en-US",
   he: "he-IL",
+  ru: "ru-RU",
 };
 
 // Forces the Gregorian calendar regardless of language — some ICU builds
