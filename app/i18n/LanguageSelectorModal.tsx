@@ -2,7 +2,9 @@
 // The ONE language-selection UI in the app — used from both the user
 // Profile screen and the Admin Settings screen (same global app language,
 // per spec: no separate admin language system). Never a text input: always
-// a tappable list of the three supported languages.
+// a tappable list of the supported languages (see SUPPORTED_LANGUAGES in
+// ./languages.ts — this list renders however many there are, no hardcoded
+// count here).
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";

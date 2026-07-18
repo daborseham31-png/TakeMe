@@ -29,6 +29,7 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../firebase";
+import MySchoolTripsSection from "../booking/school/MySchoolTripsSection";
 import {
   BookingItem,
   canStartTrip,
@@ -3033,6 +3034,8 @@ useEffect(() => {
             </Pressable>
           ) : null}
         </View>
+
+        <MySchoolTripsSection tab={tab} uid={uid} />
 
         {loading ? (
           <View style={styles.loadingBox}>

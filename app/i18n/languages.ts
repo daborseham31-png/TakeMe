@@ -4,7 +4,7 @@
 // imports from here — never redeclare this list elsewhere.
 // ---------------------------------------------------------------------------
 
-export type SupportedLanguage = "ar" | "en" | "he";
+export type SupportedLanguage = "ar" | "en" | "he" | "ru";
 
 export type LanguageDirection = "rtl" | "ltr";
 
@@ -18,6 +18,7 @@ export const SUPPORTED_LANGUAGES: LanguageDefinition[] = [
   { code: "ar", nativeName: "العربية", direction: "rtl" },
   { code: "en", nativeName: "English", direction: "ltr" },
   { code: "he", nativeName: "עברית", direction: "rtl" },
+  { code: "ru", nativeName: "Русский", direction: "ltr" },
 ];
 
 export const DEFAULT_LANGUAGE: SupportedLanguage = "en";

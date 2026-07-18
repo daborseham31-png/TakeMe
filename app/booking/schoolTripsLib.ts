@@ -1,0 +1,1881 @@
+// ---------------------------------------------------------------------------
+// School Trips — outbound/return school ride system.
+//
+// This is a NEW, dedicated data model living in its own collections
+// (schoolTrips / schoolBookings / rideRequests), separate from the generic
+// driverRoutes/bookings collections used by Personal Ride / Work / Errand /
+// legacy weekly School rides (see app/driver/create/RideForm.tsx and
+// app/booking/weeklyBookingLib.ts, both untouched by this file).
+//
+// Why a separate collection instead of extending driverRoutes: driverRoutes
+// is shared by four very different categories and books a route "all or
+// nothing" (isBooked/available flip once, no per-seat transaction — see
+// weeklyBookingLib.ts's comments). A school outbound/return trip needs its
+// own independent per-seat `availableSeats` transaction, a `direction`, and
+// a `linkedTripId` between two independently-bookable documents — bolting
+// that onto driverRoutes would risk regressing Personal/Work/Errand booking.
+// See AGENTS.md for the full spec this file implements.
+// ---------------------------------------------------------------------------
+
+import {
+  addDoc,
+  arrayUnion,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  query,
+  runTransaction,
+  serverTimestamp,
+  updateDoc,
+  where,
+  writeBatch,
+} from "firebase/firestore";
+
+import { auth, db } from "../../firebase";
+import i18n from "../i18n";
+import { DriverLiveLocation, TripTrackingStatus } from "./bookingsLib";
+import { normalizeTime, timeToMinutes } from "../driver/create/driverHelpers";
+import { calculateDistanceKm } from "./homeFeedLib";
+import { notify } from "./work-errand/workErrandLib";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type SchoolTripDirection = "to_school" | "from_school";
+
+export type SchoolTripStatus = "active" | "full" | "cancelled" | "completed";
+
+export type LatLng = { latitude: number; longitude: number };
+
+export const SCHOOL_TRIPS_COLLECTION = "schoolTrips";
+export const SCHOOL_BOOKINGS_COLLECTION = "schoolBookings";
+export const RIDE_REQUESTS_COLLECTION = "rideRequests";
+
+// Driver-side creation mode — a return leg is now creatable completely on
+// its own, never forced to be attached to an outbound trip. "linkedTripId"
+// (set on both docs in the outbound_and_return case) is purely informational
+// everywhere it's read — see AGENTS.md's #2 "every return trip must be
+// independent": it must never gate search visibility, booking eligibility,
+// price, seats, cancellation, status, payment, matching, or waiting
+// requests. A return_only trip is created with linkedTripId: null and is
+// otherwise indistinguishable from a linked one to every consumer.
+export type DriverSchoolTripMode =
+  | "outbound_only"
+  | "return_only"
+  | "outbound_and_return";
+
+// One passenger "seat" = one child, since each child may finish school (and
+// therefore need a return ride) at a different time — see AGENTS.md's
+// per-child return system. localId is a client-generated, stable-within-one
+// booking-session id (not a Firestore id); childId only exists if this
+// project ever grows a real child-profile system — it doesn't today, so
+// every entry is a lightweight "Child 1"/"Child 2"-style temporary entry
+// unless the parent types a real name.
+export type SchoolPassengerEntry = {
+  localId: string;
+  childId?: string;
+  childName?: string;
+
+  outboundRequired: boolean;
+  returnRequired: boolean;
+
+  outboundRequestedTime?: string;
+  returnRequestedTime?: string;
+
+  selectedOutboundTripId?: string;
+  selectedReturnTripId?: string;
+};
+
+export interface SchoolTrip {
+  id: string;
+  driverId: string;
+  driverName: string;
+  driverPhone: string;
+  tripType: "school";
+  direction: SchoolTripDirection;
+
+  // The general trip areas (e.g. "Nazareth" / "Mashhad") — NEVER the school
+  // itself. Kept fully separate from schoolName/schoolAddress/schoolLocation
+  // below: a driver picks From, To, AND School as three independent fields
+  // (see AGENTS.md correction — the school is one specific building inside
+  // the "To" area for an outbound trip, not the same thing as the area).
+  // fromArea/toArea are the plain locality display name; fromAddress/
+  // toAddress mirror them today (this app has no separate street-address
+  // geocoding step beyond the locality dataset — see
+  // IsraelLocationAutocomplete.tsx) but are kept as distinct fields for a
+  // future finer-grained address.
+  fromArea: string;
+  fromAddress: string;
+  fromLocation: LatLng | null;
+
+  toArea: string;
+  toAddress: string;
+  toLocation: LatLng | null;
+
+  // The specific school — always present regardless of direction, always
+  // independent of fromArea/toArea above.
+  schoolId: string;
+  schoolName: string;
+  schoolAddress: string;
+  schoolLocation: LatLng | null;
+
+  date: string;
+  departureTime: string;
+
+  pricePerSeat: number;
+  totalSeats: number;
+  availableSeats: number;
+
+  linkedTripId: string | null;
+
+  status: SchoolTripStatus;
+
+  // Trip-lifecycle tracking — one car, one set of GPS updates, shared by
+  // every passenger booked on this trip (unlike a personal ride's 1
+  // driver:1 passenger `bookings` doc, a school trip can carry several
+  // independent SchoolBooking docs, so live location/tripStatus live HERE
+  // on the trip itself rather than being duplicated — and re-written on
+  // every 3-second GPS tick — once per passenger). Reuses the exact same
+  // TripTrackingStatus spelling ("driver_on_way"/"arrived_pickup"/...) as
+  // Personal Ride's `bookings` collection so this trip doc can flow
+  // through the SAME app/driver/ride-navigation.tsx and
+  // app/booking/live-tracking.tsx screens unmodified (see their new
+  // `source=schoolTrips` branch) — never a second navigation/tracking
+  // screen. SchoolBooking.tripStatus (below) is a synced READ-ONLY mirror
+  // of this field, updated in the same write, so each passenger's own
+  // booking doc still reflects trip progress without a second live
+  // subscription.
+  tripStatus: TripTrackingStatus;
+  trackingEnabled: boolean;
+  driverLocation: DriverLiveLocation | null;
+  driverLocationUpdatedAtSeconds: number;
+  finishedByDriver: boolean;
+
+  createdAtSeconds: number;
+  updatedAtSeconds: number;
+}
+
+export type RideRequestStatus =
+  | "waiting"
+  | "matched"
+  | "booked"
+  | "cancelled"
+  | "expired";
+
+export interface RideRequest {
+  id: string;
+  parentId: string;
+  // Same value as parentId — kept as its own field because every other
+  // notification-adjacent document in this app (see `notifications`'s own
+  // `userId`) is keyed that way; some matching/read code paths key off
+  // `userId` specifically for consistency with that pattern.
+  userId: string;
+
+  // Which child this waiting request is for — one request always represents
+  // exactly one child and one requested time (AGENTS.md's per-child waiting
+  // requests: never reuse Child 1's time for Child 2). localId matches the
+  // SchoolPassengerEntry.localId this request was created from, so the
+  // passenger-side UI can re-associate a matched/notified request with the
+  // right child card.
+  childEntryId: string;
+  childId?: string;
+  childName?: string;
+
+  tripType: "school";
+  direction: "from_school";
+
+  schoolId: string;
+  schoolName: string;
+  schoolAddress: string;
+  schoolLocation: LatLng | null;
+
+  // The return trip's own "From" (the school's area — e.g. "Mashhad") and
+  // "To" (the parent's home/destination — e.g. "Nazareth"), matching the
+  // same fromArea/toArea vocabulary as SchoolTrip. fromLocation is
+  // informational (the school's own area, not a distinct GPS point from
+  // schoolLocation above); destinationLocation is what matching actually
+  // runs against (see isDestinationNearRoute call sites below).
+  fromArea: string;
+  fromLocation: LatLng | null;
+
+  toArea: string;
+  destinationLocation: LatLng | null;
+
+  requestedDate: string;
+  requestedTime: string;
+  // Always 1 — one request is always exactly one child, one seat.
+  seats: number;
+
+  maxTimeDifferenceMinutes: number;
+
+  status: RideRequestStatus;
+
+  matchedTripId: string | null;
+  matchedTripIds: string[];
+  notifiedTripIds: string[];
+  lastNotifiedAtSeconds: number;
+
+  createdAtSeconds: number;
+  updatedAtSeconds: number;
+}
+
+export type SchoolBookingStatus = "booked" | "cancelled" | "completed";
+
+// A single child on an outbound (usually multi-seat) booking — see
+// SchoolBooking.childEntries. Deliberately just localId + an optional
+// display name (no full child-profile system in this project today).
+export type SchoolBookingChildEntry = { localId: string; childName?: string };
+
+export interface SchoolBooking {
+  id: string;
+  bookingGroupId: string;
+  tripId: string;
+  bookingDirection: SchoolTripDirection;
+
+  passengerId: string;
+  passengerName: string;
+  passengerPhone: string;
+
+  driverId: string;
+  driverName: string;
+  driverPhone: string;
+
+  schoolId: string;
+  schoolName: string;
+
+  fromAddress: string;
+  toAddress: string;
+  // GPS pins for the driver's navigation + the passenger's live-tracking map
+  // (AGENTS.md's trip-lifecycle feature) — copied from the trip at booking
+  // time, since a booking can outlive edits to the trip itself. Null for any
+  // booking predating this feature.
+  fromLocation: LatLng | null;
+  toLocation: LatLng | null;
+  schoolLocation: LatLng | null;
+  date: string;
+  departureTime: string;
+
+  seats: number;
+  pricePerSeat: number;
+  totalPrice: number;
+
+  // Return bookings (AGENTS.md's per-child return system): always exactly
+  // one child, seats === 1. Outbound bookings instead carry the full
+  // childEntries list (one outbound booking can cover every child riding
+  // the same trip, per AGENTS.md's "Outbound ride behavior"). Both are
+  // optional/absent on any booking predating this feature — see the
+  // backward-compatibility fallbacks in normalizeSchoolBooking below.
+  childEntryId?: string;
+  childName?: string;
+  childEntries?: SchoolBookingChildEntry[];
+
+  paymentMethod: "cash" | "bit";
+  paymentStatus: "cash_pending" | "mock_paid";
+
+  status: SchoolBookingStatus;
+  // Mirrors the owning SchoolTrip's own tripStatus/trackingEnabled (see
+  // SchoolTrip's comment) — kept on the booking too so each passenger's own
+  // card can show trip progress/rating-eligibility from ONE subscription,
+  // without a second read of the trip doc. The driver's live GPS itself
+  // stays on the trip only (see SchoolTrip.driverLocation).
+  tripStatus: TripTrackingStatus;
+  trackingEnabled: boolean;
+  finishedByDriver: boolean;
+
+  needsPassengerRating: boolean;
+  ratingSubmitted: boolean;
+  rating: number | null;
+
+  deletedForPassenger: boolean;
+  deletedForDriver: boolean;
+
+  createdAtSeconds: number;
+  updatedAtSeconds: number;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — time difference, distance, "is destination near this trip's
+// route" — reusable, spec-named helpers (see AGENTS.md section 5).
+// calculateDistanceKm is re-exported from homeFeedLib rather than
+// duplicated — that is the one haversine implementation in the app.
+// ---------------------------------------------------------------------------
+
+export { calculateDistanceKm };
+
+// Minutes between two "HH:MM" times, always >= 0. Returns null if either
+// time is invalid/empty.
+export function getTimeDifferenceInMinutes(
+  timeA: string,
+  timeB: string,
+): number | null {
+  const a = timeToMinutes(timeA);
+  const b = timeToMinutes(timeB);
+  if (a === null || b === null) return null;
+  return Math.abs(a - b);
+}
+
+// Signed minutes (positive = timeB is after timeA) — used to prioritize
+// "after the requested time" alternatives over "before" ones (AGENTS.md #6).
+function getSignedTimeDifferenceInMinutes(
+  timeA: string,
+  timeB: string,
+): number | null {
+  const a = timeToMinutes(timeA);
+  const b = timeToMinutes(timeB);
+  if (a === null || b === null) return null;
+  return b - a;
+}
+
+export const NEARBY_ROUTE_RADIUS_KM = 6;
+
+// True when `destination` is within radiusKm of the route's end point, OR
+// within radiusKm of the straight line between routeStart and routeEnd (a
+// simple, honest approximation of "the driver route passes close to the
+// parent's destination" — good enough at city/town scale in Israel; not a
+// real road-network routing distance).
+export function isDestinationNearRoute(
+  destination: LatLng | null,
+  routeStart: LatLng | null,
+  routeEnd: LatLng | null,
+  radiusKm: number = NEARBY_ROUTE_RADIUS_KM,
+): boolean {
+  if (!destination) return false;
+
+  if (
+    routeEnd &&
+    calculateDistanceKm(
+      destination.latitude,
+      destination.longitude,
+      routeEnd.latitude,
+      routeEnd.longitude,
+    ) <= radiusKm
+  ) {
+    return true;
+  }
+
+  if (!routeStart || !routeEnd) return false;
+
+  // Flat-earth (equirectangular) projection to km around routeStart — fine
+  // at the scale of a single trip's route, never used for global distances.
+  const kmPerDegLat = 110.574;
+  const kmPerDegLng =
+    111.32 * Math.cos((routeStart.latitude * Math.PI) / 180);
+
+  const toXY = (point: LatLng) => ({
+    x: (point.longitude - routeStart.longitude) * kmPerDegLng,
+    y: (point.latitude - routeStart.latitude) * kmPerDegLat,
+  });
+
+  const end = toXY(routeEnd);
+  const point = toXY(destination);
+
+  const segLenSq = end.x ** 2 + end.y ** 2;
+
+  if (segLenSq === 0) return false;
+
+  let t = (point.x * end.x + point.y * end.y) / segLenSq;
+  t = Math.max(0, Math.min(1, t));
+
+  const closest = { x: end.x * t, y: end.y * t };
+  const distKm = Math.sqrt((point.x - closest.x) ** 2 + (point.y - closest.y) ** 2);
+
+  return distKm <= radiusKm;
+}
+
+// ---------------------------------------------------------------------------
+// Current user info (name/phone) — same pattern as bookingsLib/workErrandLib.
+// ---------------------------------------------------------------------------
+
+const getCurrentUserInfo = async (): Promise<{
+  id: string;
+  name: string;
+  phone: string;
+}> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("validation.mustBeLoggedInToBook"));
+
+  let name = user.displayName || i18n.t("common.passenger");
+  let phone = "";
+
+  try {
+    const snap = await getDoc(doc(db, "users", user.uid));
+    if (snap.exists()) {
+      const data = snap.data();
+      name = data.name || name;
+      phone = data.phone || "";
+    }
+  } catch {
+    // Fall back to the auth profile values.
+  }
+
+  return { id: user.uid, name, phone };
+};
+
+// ---------------------------------------------------------------------------
+// Normalizer
+// ---------------------------------------------------------------------------
+
+const toLatLng = (raw: any): LatLng | null => {
+  const latitude = Number(raw?.latitude);
+  const longitude = Number(raw?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return { latitude, longitude };
+};
+
+const toDriverLocation = (raw: any): DriverLiveLocation | null => {
+  const latitude = Number(raw?.latitude);
+  const longitude = Number(raw?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return {
+    latitude,
+    longitude,
+    accuracy: raw?.accuracy ?? null,
+    heading: raw?.heading ?? null,
+    speed: raw?.speed ?? null,
+  };
+};
+
+const toTripTrackingStatus = (value: any): TripTrackingStatus => {
+  if (
+    value === "driver_on_way" ||
+    value === "arrived_pickup" ||
+    value === "in_progress" ||
+    value === "completed"
+  ) {
+    return value;
+  }
+  return "booked";
+};
+
+export const normalizeSchoolTrip = (id: string, data: any): SchoolTrip => ({
+  id,
+  driverId: data.driverId || "",
+  driverName: data.driverName || "Driver",
+  driverPhone: data.driverPhone || "",
+  tripType: "school",
+  direction: data.direction === "from_school" ? "from_school" : "to_school",
+
+  fromArea: data.fromArea || data.fromAddress || "",
+  fromAddress: data.fromAddress || data.fromArea || "",
+  fromLocation: toLatLng(data.fromLocation),
+
+  toArea: data.toArea || data.toAddress || "",
+  toAddress: data.toAddress || data.toArea || "",
+  toLocation: toLatLng(data.toLocation),
+
+  schoolId: data.schoolId || "",
+  schoolName: data.schoolName || "",
+  schoolAddress: data.schoolAddress || "",
+  schoolLocation: toLatLng(data.schoolLocation),
+
+  date: data.date || "",
+  departureTime: data.departureTime || "",
+
+  pricePerSeat: Number(data.pricePerSeat) || 0,
+  totalSeats: Number(data.totalSeats) || 0,
+  availableSeats: Number(data.availableSeats) || 0,
+
+  linkedTripId: data.linkedTripId || null,
+
+  status: (data.status || "active") as SchoolTripStatus,
+
+  tripStatus: toTripTrackingStatus(data.tripStatus),
+  trackingEnabled: !!data.trackingEnabled,
+  driverLocation: toDriverLocation(data.driverLocation),
+  driverLocationUpdatedAtSeconds: data.driverLocationUpdatedAt?.seconds || 0,
+  finishedByDriver: data.finishedByDriver === true,
+
+  createdAtSeconds: data.createdAt?.seconds || 0,
+  updatedAtSeconds: data.updatedAt?.seconds || 0,
+});
+
+export const normalizeRideRequest = (id: string, data: any): RideRequest => ({
+  id,
+  parentId: data.parentId || "",
+  userId: data.userId || data.parentId || "",
+
+  // Backward compatibility: a request created before per-child requests
+  // existed has no childEntryId — fall back to the request's own id so it
+  // still behaves as "one distinct child slot" rather than colliding with
+  // every other childless legacy request.
+  childEntryId: data.childEntryId || id,
+  childId: data.childId || undefined,
+  childName: data.childName || undefined,
+
+  tripType: "school",
+  direction: "from_school",
+
+  schoolId: data.schoolId || "",
+  schoolName: data.schoolName || "",
+  schoolAddress: data.schoolAddress || "",
+  schoolLocation: toLatLng(data.schoolLocation),
+
+  fromArea: data.fromArea || "",
+  fromLocation: toLatLng(data.fromLocation),
+
+  // toArea is the current field name; destinationAddress is read as a
+  // fallback for any request document written before this field was
+  // renamed, so older waiting requests keep matching/displaying correctly.
+  toArea: data.toArea || data.destinationAddress || "",
+  destinationLocation: toLatLng(data.destinationLocation),
+
+  requestedDate: data.requestedDate || "",
+  requestedTime: data.requestedTime || "",
+  seats: Number(data.seats) || 1,
+
+  maxTimeDifferenceMinutes:
+    Number(data.maxTimeDifferenceMinutes) || MAX_ALTERNATIVE_MINUTES,
+
+  status: (data.status || "waiting") as RideRequestStatus,
+
+  matchedTripId: data.matchedTripId || null,
+  matchedTripIds: Array.isArray(data.matchedTripIds) ? data.matchedTripIds : [],
+  notifiedTripIds: Array.isArray(data.notifiedTripIds) ? data.notifiedTripIds : [],
+  lastNotifiedAtSeconds: data.lastNotifiedAt?.seconds || 0,
+
+  createdAtSeconds: data.createdAt?.seconds || 0,
+  updatedAtSeconds: data.updatedAt?.seconds || 0,
+});
+
+export const normalizeSchoolBooking = (id: string, data: any): SchoolBooking => ({
+  id,
+  bookingGroupId: data.bookingGroupId || "",
+  tripId: data.tripId || "",
+  bookingDirection: data.bookingDirection === "from_school" ? "from_school" : "to_school",
+
+  passengerId: data.passengerId || "",
+  passengerName: data.passengerName || "Passenger",
+  passengerPhone: data.passengerPhone || "",
+
+  driverId: data.driverId || "",
+  driverName: data.driverName || "Driver",
+  driverPhone: data.driverPhone || "",
+
+  schoolId: data.schoolId || "",
+  schoolName: data.schoolName || "",
+
+  fromAddress: data.fromAddress || "",
+  toAddress: data.toAddress || "",
+  fromLocation: toLatLng(data.fromLocation),
+  toLocation: toLatLng(data.toLocation),
+  schoolLocation: toLatLng(data.schoolLocation),
+  date: data.date || "",
+  departureTime: data.departureTime || "",
+
+  seats: Number(data.seats) || 1,
+  pricePerSeat: Number(data.pricePerSeat) || 0,
+  totalPrice: Number(data.totalPrice) || 0,
+
+  // Backward compatible: an old booking (or a non-school one that somehow
+  // flowed through here) simply has none of these — every reader must fall
+  // back to plain `seats` rather than assume childEntries exists.
+  childEntryId: data.childEntryId || undefined,
+  childName: data.childName || undefined,
+  childEntries: Array.isArray(data.childEntries) ? data.childEntries : undefined,
+
+  paymentMethod: data.paymentMethod === "bit" ? "bit" : "cash",
+  paymentStatus: data.paymentStatus === "mock_paid" ? "mock_paid" : "cash_pending",
+
+  status: (data.status || "booked") as SchoolBookingStatus,
+  tripStatus: toTripTrackingStatus(data.tripStatus),
+  trackingEnabled: !!data.trackingEnabled,
+  finishedByDriver: data.finishedByDriver === true,
+
+  needsPassengerRating: data.needsPassengerRating === true,
+  ratingSubmitted: data.ratingSubmitted === true,
+  rating: typeof data.rating === "number" ? data.rating : null,
+
+  deletedForPassenger: data.deletedForPassenger === true,
+  deletedForDriver: data.deletedForDriver === true,
+
+  createdAtSeconds: data.createdAt?.seconds || 0,
+  updatedAtSeconds: data.updatedAt?.seconds || 0,
+});
+
+// ---------------------------------------------------------------------------
+// Creation — outbound only, or outbound + return as one atomic batch write
+// (AGENTS.md #3: "the application does not save only one trip if the second
+// write fails").
+// ---------------------------------------------------------------------------
+
+export type CreateSchoolTripInput = {
+  fromArea: string;
+  fromAddress: string;
+  fromLocation: LatLng | null;
+  toArea: string;
+  toAddress: string;
+  toLocation: LatLng | null;
+  schoolId: string;
+  schoolName: string;
+  schoolAddress: string;
+  schoolLocation: LatLng | null;
+  date: string;
+  departureTime: string;
+  pricePerSeat: number;
+  totalSeats: number;
+};
+
+type DriverIdentity = { driverId: string; driverName: string; driverPhone: string };
+
+const buildTripDoc = (
+  input: CreateSchoolTripInput,
+  direction: SchoolTripDirection,
+  linkedTripId: string | null,
+  driver: DriverIdentity,
+) => ({
+  driverId: driver.driverId,
+  driverName: driver.driverName,
+  driverPhone: driver.driverPhone,
+  tripType: "school",
+  direction,
+
+  fromArea: input.fromArea,
+  fromAddress: input.fromAddress,
+  fromLocation: input.fromLocation,
+
+  toArea: input.toArea,
+  toAddress: input.toAddress,
+  toLocation: input.toLocation,
+
+  schoolId: input.schoolId,
+  schoolName: input.schoolName,
+  schoolAddress: input.schoolAddress,
+  schoolLocation: input.schoolLocation,
+
+  date: input.date,
+  departureTime: input.departureTime,
+
+  pricePerSeat: input.pricePerSeat,
+  totalSeats: input.totalSeats,
+  availableSeats: input.totalSeats,
+
+  linkedTripId,
+
+  status: "active" as SchoolTripStatus,
+
+  tripStatus: "booked" as TripTrackingStatus,
+  trackingEnabled: false,
+  driverLocation: null,
+  finishedByDriver: false,
+
+  createdAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+});
+
+// Fire-and-forget: notify any parent already waiting for a return trip like
+// this one (AGENTS.md #8). Never awaited by a create* function's own
+// return, and never allowed to throw into the caller — a matching failure
+// must not make trip publishing look like it failed.
+const triggerMatchingIfReturn = (
+  id: string,
+  input: CreateSchoolTripInput,
+  direction: SchoolTripDirection,
+  linkedTripId: string | null,
+  driver: DriverIdentity,
+) => {
+  if (direction !== "from_school") return;
+
+  matchRideRequestsForNewTrip({
+    id,
+    driverId: driver.driverId,
+    driverName: driver.driverName,
+    driverPhone: driver.driverPhone,
+    tripType: "school",
+    direction: "from_school",
+    fromArea: input.fromArea,
+    fromAddress: input.fromAddress,
+    fromLocation: input.fromLocation,
+    toArea: input.toArea,
+    toAddress: input.toAddress,
+    toLocation: input.toLocation,
+    schoolId: input.schoolId,
+    schoolName: input.schoolName,
+    schoolAddress: input.schoolAddress,
+    schoolLocation: input.schoolLocation,
+    date: input.date,
+    departureTime: input.departureTime,
+    pricePerSeat: input.pricePerSeat,
+    totalSeats: input.totalSeats,
+    availableSeats: input.totalSeats,
+    linkedTripId,
+    status: "active",
+    tripStatus: "booked",
+    trackingEnabled: false,
+    driverLocation: null,
+    driverLocationUpdatedAtSeconds: 0,
+    finishedByDriver: false,
+    createdAtSeconds: 0,
+    updatedAtSeconds: 0,
+  }).catch((error) => {
+    console.log("triggerMatchingIfReturn: matching the new trip failed", error);
+  });
+};
+
+// The one general single-leg creator — used directly by all three
+// DriverSchoolTripMode cases ("outbound_only" and "return_only" call this
+// once; "outbound_and_return" instead uses createSchoolRoundTrip below so
+// both legs share a batch write). linkedTripId defaults to null: a
+// return_only trip is a fully independent document from the moment it's
+// created (AGENTS.md #1's "linkedTripId must be optional").
+export const createSchoolSingleTrip = async (
+  input: CreateSchoolTripInput,
+  direction: SchoolTripDirection,
+  driver: DriverIdentity,
+  linkedTripId: string | null = null,
+): Promise<string> => {
+  const ref = doc(collection(db, SCHOOL_TRIPS_COLLECTION));
+  const batch = writeBatch(db);
+  batch.set(ref, buildTripDoc(input, direction, linkedTripId, driver));
+  await batch.commit();
+
+  triggerMatchingIfReturn(ref.id, input, direction, linkedTripId, driver);
+
+  return ref.id;
+};
+
+export const createSchoolOutboundTrip = async (
+  input: CreateSchoolTripInput,
+  driver: DriverIdentity,
+): Promise<string> => createSchoolSingleTrip(input, "to_school", driver);
+
+// Return-only creation (AGENTS.md #1's "Return only" mode) — a driver who
+// only wants to take students home after school, never having created (or
+// wanting to create) a matching outbound trip. Appears to searching parents
+// exactly like any other from_school trip; see findMatchingSchoolTrips,
+// which never filters on linkedTripId.
+export const createSchoolReturnOnlyTrip = async (
+  input: CreateSchoolTripInput,
+  driver: DriverIdentity,
+): Promise<string> => createSchoolSingleTrip(input, "from_school", driver);
+
+export const createSchoolRoundTrip = async (
+  outboundInput: CreateSchoolTripInput,
+  returnInput: CreateSchoolTripInput,
+  driver: DriverIdentity,
+): Promise<{ outboundId: string; returnId: string }> => {
+  const outboundRef = doc(collection(db, SCHOOL_TRIPS_COLLECTION));
+  const returnRef = doc(collection(db, SCHOOL_TRIPS_COLLECTION));
+
+  const batch = writeBatch(db);
+  batch.set(outboundRef, buildTripDoc(outboundInput, "to_school", returnRef.id, driver));
+  batch.set(returnRef, buildTripDoc(returnInput, "from_school", outboundRef.id, driver));
+  await batch.commit();
+
+  // linkedTripId is informational only (AGENTS.md #2) — matching, search,
+  // and every other consumer treat this return leg exactly like a
+  // return_only trip, so it uses the exact same trigger helper.
+  triggerMatchingIfReturn(returnRef.id, returnInput, "from_school", outboundRef.id, driver);
+
+  return { outboundId: outboundRef.id, returnId: returnRef.id };
+};
+
+// ---------------------------------------------------------------------------
+// Driver: cancel a single leg (AGENTS.md #12: cancelling one direction must
+// never touch the other linked trip).
+// ---------------------------------------------------------------------------
+
+export const cancelSchoolTrip = async (tripId: string) => {
+  await updateDoc(doc(db, SCHOOL_TRIPS_COLLECTION, tripId), {
+    status: "cancelled" as SchoolTripStatus,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+// Cancels a trip AND its linked trip (if any) — an explicit driver choice,
+// never automatic (AGENTS.md #2: "cancelling the outbound trip does not
+// automatically cancel the return trip unless the driver explicitly
+// chooses to cancel both"). Reads linkedTripId fresh from the document
+// rather than trusting a stale value the caller might be holding.
+export const cancelSchoolTripAndLinked = async (tripId: string) => {
+  const snap = await getDoc(doc(db, SCHOOL_TRIPS_COLLECTION, tripId));
+  const linkedTripId: string | null = snap.exists() ? snap.data()?.linkedTripId || null : null;
+
+  await cancelSchoolTrip(tripId);
+  if (linkedTripId) {
+    await cancelSchoolTrip(linkedTripId);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Search / matching
+// ---------------------------------------------------------------------------
+
+export type SchoolTripSearchCriteria = {
+  direction: SchoolTripDirection;
+  schoolId: string;
+  date: string;
+  seats: number;
+  requestedTime: string;
+  // The parent's home/pickup (outbound) or drop-off destination (return) —
+  // used for isDestinationNearRoute, never for the schoolId/date filter.
+  destination: LatLng | null;
+};
+
+const fetchActiveSchoolTrips = async (
+  direction: SchoolTripDirection,
+  schoolId: string,
+  date: string,
+): Promise<SchoolTrip[]> => {
+  const q = query(
+    collection(db, SCHOOL_TRIPS_COLLECTION),
+    where("tripType", "==", "school"),
+    where("direction", "==", direction),
+    where("schoolId", "==", schoolId),
+    where("date", "==", date),
+    where("status", "==", "active"),
+  );
+
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => normalizeSchoolTrip(d.id, d.data()));
+};
+
+const passesCapacityAndRoute = (
+  trip: SchoolTrip,
+  criteria: SchoolTripSearchCriteria,
+): boolean => {
+  if (trip.availableSeats < criteria.seats) return false;
+
+  if (!criteria.destination) return true;
+
+  // Outbound (to_school): the parent's home/pickup should be near where the
+  // driver STARTS (fromLocation) or along the route to school. Return
+  // (from_school): the parent's destination should be near where the driver
+  // ENDS (toLocation) or along the route from school.
+  const routeStart = trip.direction === "to_school" ? trip.fromLocation : trip.schoolLocation;
+  const routeEnd = trip.direction === "to_school" ? trip.schoolLocation : trip.toLocation;
+
+  return isDestinationNearRoute(criteria.destination, routeStart, routeEnd);
+};
+
+const EXACT_MATCH_WINDOW_MINUTES = 15;
+
+// "Exact-ish" matches — small time tolerance, sorted closest-first. This is
+// the primary result set; see findAlternativeTrips for the wider fallback.
+export const findMatchingSchoolTrips = async (
+  criteria: SchoolTripSearchCriteria,
+): Promise<SchoolTrip[]> => {
+  const trips = await fetchActiveSchoolTrips(
+    criteria.direction,
+    criteria.schoolId,
+    criteria.date,
+  );
+
+  return trips
+    .filter((trip) => passesCapacityAndRoute(trip, criteria))
+    .map((trip) => ({
+      trip,
+      diff: getTimeDifferenceInMinutes(trip.departureTime, criteria.requestedTime),
+    }))
+    .filter(
+      (entry): entry is { trip: SchoolTrip; diff: number } =>
+        entry.diff !== null && entry.diff <= EXACT_MATCH_WINDOW_MINUTES,
+    )
+    .sort((a, b) => a.diff - b.diff)
+    .map((entry) => entry.trip);
+};
+
+export const MAX_ALTERNATIVE_MINUTES = 60;
+
+export type AlternativeTrip = {
+  trip: SchoolTrip;
+  diffMinutes: number;
+  isAfterRequestedTime: boolean;
+};
+
+// Wider fallback used when findMatchingSchoolTrips returns nothing — closest
+// suitable trips within MAX_ALTERNATIVE_MINUTES, prioritizing trips AFTER
+// the requested time (AGENTS.md #6: "a student may be able to wait after
+// school, but usually cannot leave before school finishes").
+export const findAlternativeTrips = async (
+  criteria: SchoolTripSearchCriteria,
+  excludeTripIds: string[] = [],
+): Promise<AlternativeTrip[]> => {
+  const trips = await fetchActiveSchoolTrips(
+    criteria.direction,
+    criteria.schoolId,
+    criteria.date,
+  );
+
+  const alternatives: AlternativeTrip[] = [];
+
+  for (const trip of trips) {
+    if (excludeTripIds.includes(trip.id)) continue;
+    if (!passesCapacityAndRoute(trip, criteria)) continue;
+
+    const signedDiff = getSignedTimeDifferenceInMinutes(
+      criteria.requestedTime,
+      trip.departureTime,
+    );
+    if (signedDiff === null) continue;
+
+    const absDiff = Math.abs(signedDiff);
+    if (absDiff > MAX_ALTERNATIVE_MINUTES) continue;
+
+    alternatives.push({
+      trip,
+      diffMinutes: absDiff,
+      isAfterRequestedTime: signedDiff >= 0,
+    });
+  }
+
+  // Priority: trips after the requested time (closest first), then trips
+  // before it (closest first) — never mixed by raw absolute difference
+  // alone, per AGENTS.md #6's sort priority.
+  return alternatives.sort((a, b) => {
+    if (a.isAfterRequestedTime !== b.isAfterRequestedTime) {
+      return a.isAfterRequestedTime ? -1 : 1;
+    }
+    return a.diffMinutes - b.diffMinutes;
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Per-child return search — each child on the booking may finish school (and
+// so need a return ride) at a different time, so every child is searched
+// independently, always for exactly 1 seat. Thin wrappers around
+// findMatchingSchoolTrips/findAlternativeTrips so the exact same matching
+// rule (schoolId + date + time window + seat + destination proximity)
+// governs both the "search once for the whole family" and "search once per
+// child" cases — never a second, divergent matching implementation.
+// ---------------------------------------------------------------------------
+
+export type ChildReturnSearchCriteria = {
+  schoolId: string;
+  date: string;
+  requestedTime: string;
+  destinationLocation: LatLng | null;
+};
+
+export const findReturnTripsForChild = (
+  criteria: ChildReturnSearchCriteria,
+): Promise<SchoolTrip[]> =>
+  findMatchingSchoolTrips({
+    direction: "from_school",
+    schoolId: criteria.schoolId,
+    date: criteria.date,
+    seats: 1,
+    requestedTime: criteria.requestedTime,
+    destination: criteria.destinationLocation,
+  });
+
+export const findAlternativeTripsForChild = (
+  criteria: ChildReturnSearchCriteria,
+  excludeTripIds: string[] = [],
+): Promise<AlternativeTrip[]> =>
+  findAlternativeTrips(
+    {
+      direction: "from_school",
+      schoolId: criteria.schoolId,
+      date: criteria.date,
+      seats: 1,
+      requestedTime: criteria.requestedTime,
+      destination: criteria.destinationLocation,
+    },
+    excludeTripIds,
+  );
+
+// ---------------------------------------------------------------------------
+// Booking (transaction-based, per-seat) — AGENTS.md #9
+//
+// Firestore rejects ANY undefined value passed to transaction.set()/set(),
+// including ones nested inside arrays/objects (e.g. a childEntries[].
+// childName that was never typed in — see DirectionSearchForm/trip-confirm's
+// `childName: x || undefined` mappings). deepRemoveUndefined strips those
+// before every school-booking write; a plain object walk (not JSON
+// round-tripping) so Firestore sentinels like serverTimestamp() — which are
+// class instances, not plain objects — pass through untouched.
+// ---------------------------------------------------------------------------
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (value === null || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
+
+export function deepRemoveUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => deepRemoveUndefined(item))
+      .filter((item) => item !== undefined) as unknown as T;
+  }
+
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, child]) => child !== undefined)
+        .map(([key, child]) => [key, deepRemoveUndefined(child)]),
+    ) as unknown as T;
+  }
+
+  return value;
+}
+
+// Dotted/indexed paths (e.g. "childEntries[1].childName") of every undefined
+// value in `value` — dev-only diagnostics, never the values themselves (no
+// private user data logged).
+function collectUndefinedPaths(value: unknown, path = ""): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => collectUndefinedPaths(item, `${path}[${index}]`));
+  }
+
+  if (isPlainObject(value)) {
+    return Object.entries(value).flatMap(([key, child]) => {
+      const childPath = path ? `${path}.${key}` : key;
+      return child === undefined ? [childPath] : collectUndefinedPaths(child, childPath);
+    });
+  }
+
+  return [];
+}
+
+type RequiredSchoolBookingFields = {
+  tripId: string;
+  passengerId: string;
+  driverId: string;
+  direction: string;
+  date: string;
+  departureTime: string;
+  seats: number;
+  pricePerSeat: number;
+  totalPrice: number;
+  status: string;
+  fromArea: string;
+  toArea: string;
+  schoolId: string;
+  schoolName: string;
+};
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0;
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+// Required-field guard, run BEFORE transaction.set() (AGENTS.md's booking
+// payload must never silently save a missing required value as "") — throws
+// a single clear, translated error naming every missing field so the
+// passenger/driver sees an actionable message instead of a raw Firestore
+// error.
+const validateRequiredBookingFields = (fields: RequiredSchoolBookingFields) => {
+  const missing: string[] = [];
+
+  (
+    [
+      "tripId",
+      "passengerId",
+      "driverId",
+      "direction",
+      "date",
+      "departureTime",
+      "status",
+      "fromArea",
+      "toArea",
+      "schoolId",
+      "schoolName",
+    ] as const
+  ).forEach((key) => {
+    if (!isNonEmptyString(fields[key])) missing.push(key);
+  });
+
+  if (!isFiniteNumber(fields.seats) || fields.seats <= 0) missing.push("seats");
+  if (!isFiniteNumber(fields.pricePerSeat) || fields.pricePerSeat < 0) missing.push("pricePerSeat");
+  if (!isFiniteNumber(fields.totalPrice) || fields.totalPrice < 0) missing.push("totalPrice");
+
+  if (missing.length > 0) {
+    throw new Error(i18n.t("schoolTrip.missingRequiredBookingFields", { fields: missing.join(", ") }));
+  }
+};
+
+export const generateBookingGroupId = () =>
+  `school_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+export type SchoolBookingPaymentMethod = "cash" | "bit";
+
+// A single child on this booking (return legs), or the whole family riding
+// the same outbound trip together — see SchoolBooking.childEntryId/
+// childEntries. Omitted entirely for a plain, pre-existing seats-only
+// booking (backward compatible with every booking created before this
+// feature).
+export type SchoolBookingChildInfo = {
+  childEntryId?: string;
+  childName?: string;
+  childEntries?: SchoolBookingChildEntry[];
+};
+
+const bookSingleSchoolTrip = async (
+  tripId: string,
+  seats: number,
+  bookingGroupId: string,
+  paymentMethod: SchoolBookingPaymentMethod = "cash",
+  childInfo?: SchoolBookingChildInfo,
+): Promise<string> => {
+  const me = await getCurrentUserInfo();
+  const tripRef = doc(db, SCHOOL_TRIPS_COLLECTION, tripId);
+  const bookingRef = doc(collection(db, SCHOOL_BOOKINGS_COLLECTION));
+
+  // Prevent duplicate booking for the same child and trip (AGENTS.md's
+  // return-booking requirement) — a Firestore transaction can only read
+  // specific document refs, not run a `where` query, so this check runs
+  // just before it as a best-effort guard (the same trust boundary already
+  // accepted throughout this booking system — see AGENTS.md #13's note on
+  // client-run transactions).
+  if (childInfo?.childEntryId) {
+    const existing = await getDocs(
+      query(
+        collection(db, SCHOOL_BOOKINGS_COLLECTION),
+        where("tripId", "==", tripId),
+        where("childEntryId", "==", childInfo.childEntryId),
+        where("status", "==", "booked"),
+      ),
+    );
+    if (!existing.empty) {
+      throw new Error(i18n.t("schoolTrip.duplicateChildBooking"));
+    }
+  }
+
+  let notifyDriverId = "";
+  let notifyMessage = "";
+
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(tripRef);
+
+    if (!snap.exists()) {
+      throw new Error(i18n.t("rides.tripNoLongerAvailable"));
+    }
+
+    const trip = normalizeSchoolTrip(snap.id, snap.data());
+
+    if (trip.status !== "active") {
+      throw new Error(i18n.t("rides.seatAvailabilityChanged"));
+    }
+
+    if (trip.availableSeats < seats) {
+      throw new Error(i18n.t("rides.notEnoughSeats"));
+    }
+
+    const remainingSeats = trip.availableSeats - seats;
+
+    transaction.update(tripRef, {
+      availableSeats: remainingSeats,
+      status: remainingSeats <= 0 ? "full" : "active",
+      updatedAt: serverTimestamp(),
+    });
+
+    const totalPrice = trip.pricePerSeat * seats;
+
+    // Required fields — checked BEFORE the write, not patched with silent
+    // empty-string fallbacks, so a bad trip doc/caller fails loudly here
+    // instead of as a raw Firestore SDK error.
+    validateRequiredBookingFields({
+      tripId,
+      passengerId: me.id,
+      driverId: trip.driverId,
+      direction: trip.direction,
+      date: trip.date,
+      departureTime: trip.departureTime,
+      seats,
+      pricePerSeat: trip.pricePerSeat,
+      totalPrice,
+      status: "booked",
+      fromArea: trip.fromAddress,
+      toArea: trip.toAddress,
+      schoolId: trip.schoolId,
+      schoolName: trip.schoolName,
+    });
+
+    // Optional fields (bookingGroupId/childEntryId/childId/childName/
+    // rideRequestId/linkedTripId/paymentReference/returnRequestedTime/
+    // childEntries) are included only when they actually have a value —
+    // childInfo?.childEntries especially, since each entry's own childName
+    // is optional and left as literal `undefined` by the search/confirm
+    // screens when the parent never typed a name (see DirectionSearchForm's
+    // `childName: child.name.trim() || undefined`). deepRemoveUndefined
+    // below strips those (and any other undefined, top-level or nested)
+    // right before the write — Firestore's transaction.set() throws
+    // "Unsupported field value: undefined" on any of them, including
+    // nested ones, which is exactly what raised this bug.
+    const rawBooking = {
+      bookingGroupId,
+      tripId,
+      bookingDirection: trip.direction,
+
+      passengerId: me.id,
+      passengerName: me.name,
+      passengerPhone: me.phone,
+
+      driverId: trip.driverId,
+      driverName: trip.driverName,
+      driverPhone: trip.driverPhone,
+
+      schoolId: trip.schoolId,
+      schoolName: trip.schoolName,
+
+      fromAddress: trip.fromAddress,
+      toAddress: trip.toAddress,
+      // GPS pins for driver navigation + passenger live-tracking — copied
+      // from the trip now so a later edit to the trip never moves a
+      // passenger's already-booked pickup point.
+      fromLocation: trip.fromLocation,
+      toLocation: trip.toLocation,
+      schoolLocation: trip.schoolLocation,
+      date: trip.date,
+      departureTime: trip.departureTime,
+
+      seats,
+      pricePerSeat: trip.pricePerSeat,
+      totalPrice,
+
+      childEntryId: childInfo?.childEntryId,
+      childName: childInfo?.childName,
+      childEntries: childInfo?.childEntries,
+
+      paymentMethod,
+      paymentStatus: paymentMethod === "bit" ? "mock_paid" : "cash_pending",
+
+      status: "booked" as SchoolBookingStatus,
+      tripStatus: "booked" as TripTrackingStatus,
+      trackingEnabled: false,
+      finishedByDriver: false,
+
+      needsPassengerRating: false,
+      ratingSubmitted: false,
+      rating: null,
+
+      deletedForPassenger: false,
+      deletedForDriver: false,
+
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    if (__DEV__) {
+      const undefinedPaths = collectUndefinedPaths(rawBooking);
+      if (undefinedPaths.length > 0) {
+        console.log("[School Booking] undefined fields:", undefinedPaths);
+      }
+    }
+
+    transaction.set(bookingRef, deepRemoveUndefined(rawBooking));
+
+    notifyDriverId = trip.driverId;
+    const childSuffix = childInfo?.childName ? ` (${childInfo.childName})` : "";
+    notifyMessage =
+      trip.direction === "to_school"
+        ? `${me.name} booked your outbound school trip to ${trip.schoolName}`
+        : `${me.name} booked your return school trip from ${trip.schoolName}${childSuffix}`;
+  });
+
+  if (notifyDriverId) {
+    await notify({
+      receiverId: notifyDriverId,
+      senderId: me.id,
+      type: "school_ride_booking",
+      title: i18n.t("schoolTrip.newBookingNotificationTitle"),
+      message: notifyMessage,
+      applicationId: bookingRef.id,
+      bookingId: bookingRef.id,
+      category: "school",
+      status: "booked",
+      targetTab: "driver",
+    });
+  }
+
+  return bookingRef.id;
+};
+
+// existingBookingGroupId is passed when this booking is the RETURN leg of a
+// round trip whose outbound leg was already booked — the two bookings then
+// share one bookingGroupId (AGENTS.md #9/#10) even though they're booked as
+// two separate user actions (search outbound → book → "book a return too?"
+// → search return → book), never as one combined selection screen.
+export const bookSchoolTripSingle = async (
+  tripId: string,
+  seats: number,
+  paymentMethod: SchoolBookingPaymentMethod = "cash",
+  existingBookingGroupId?: string,
+  childInfo?: SchoolBookingChildInfo,
+): Promise<{ bookingGroupId: string; bookingId: string }> => {
+  const bookingGroupId = existingBookingGroupId || generateBookingGroupId();
+  const bookingId = await bookSingleSchoolTrip(
+    tripId,
+    seats,
+    bookingGroupId,
+    paymentMethod,
+    childInfo,
+  );
+  return { bookingGroupId, bookingId };
+};
+
+// ---------------------------------------------------------------------------
+// Family booking convenience wrappers — AGENTS.md's "Outbound ride
+// behavior" (one multi-seat booking, tagged with every child riding it) and
+// "Return booking documents" (one 1-seat booking per child, sharing a
+// bookingGroupId). Both are thin, typed call sites over bookSchoolTripSingle
+// — never a second booking/transaction implementation.
+// ---------------------------------------------------------------------------
+
+export const bookOutboundForChildren = async (
+  tripId: string,
+  childEntries: SchoolBookingChildEntry[],
+  paymentMethod: SchoolBookingPaymentMethod,
+  bookingGroupId: string,
+): Promise<string> => {
+  const { bookingId } = await bookSchoolTripSingle(
+    tripId,
+    childEntries.length,
+    paymentMethod,
+    bookingGroupId,
+    { childEntries },
+  );
+  return bookingId;
+};
+
+export const bookReturnForChild = async (
+  tripId: string,
+  child: { localId: string; childName?: string },
+  paymentMethod: SchoolBookingPaymentMethod,
+  bookingGroupId: string,
+): Promise<string> => {
+  const { bookingId } = await bookSchoolTripSingle(tripId, 1, paymentMethod, bookingGroupId, {
+    childEntryId: child.localId,
+    childName: child.childName,
+  });
+  return bookingId;
+};
+
+export type RoundTripBookingResult = {
+  bookingGroupId: string;
+  outboundBookingId: string;
+  returnBookingId: string | null;
+  returnFailed: boolean;
+  returnErrorMessage: string | null;
+};
+
+// Books outbound then return under the SAME bookingGroupId. If the outbound
+// booking succeeds but the return trip is no longer available, this does NOT
+// throw — it returns returnFailed:true so the screen can show AGENTS.md #9's
+// exact message ("outbound booked, return no longer available") instead of
+// silently losing the outbound booking or hiding the failure.
+export const bookSchoolRoundTrip = async (
+  outboundTripId: string,
+  returnTripId: string,
+  seats: number,
+): Promise<RoundTripBookingResult> => {
+  const bookingGroupId = generateBookingGroupId();
+
+  const outboundBookingId = await bookSingleSchoolTrip(
+    outboundTripId,
+    seats,
+    bookingGroupId,
+  );
+
+  try {
+    const returnBookingId = await bookSingleSchoolTrip(
+      returnTripId,
+      seats,
+      bookingGroupId,
+    );
+
+    return {
+      bookingGroupId,
+      outboundBookingId,
+      returnBookingId,
+      returnFailed: false,
+      returnErrorMessage: null,
+    };
+  } catch (error: any) {
+    return {
+      bookingGroupId,
+      outboundBookingId,
+      returnBookingId: null,
+      returnFailed: true,
+      returnErrorMessage: error?.message || i18n.t("rides.tripNoLongerAvailable"),
+    };
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Cancellation — restores availableSeats and reopens a "full" trip
+// (AGENTS.md #10/#12).
+// ---------------------------------------------------------------------------
+
+export const cancelSchoolBooking = async (bookingId: string) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("auth.pleaseLoginFirst"));
+
+  const bookingRef = doc(db, SCHOOL_BOOKINGS_COLLECTION, bookingId);
+
+  let tripId = "";
+  let driverId = "";
+  let passengerName = "";
+  let direction: SchoolTripDirection = "to_school";
+
+  await runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+
+    if (!bookingSnap.exists()) {
+      throw new Error(i18n.t("rides.bookingNotFound"));
+    }
+
+    const booking = normalizeSchoolBooking(bookingSnap.id, bookingSnap.data());
+
+    if (booking.passengerId !== user.uid) {
+      throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
+    }
+
+    if (booking.status === "cancelled") {
+      return;
+    }
+
+    tripId = booking.tripId;
+    driverId = booking.driverId;
+    passengerName = booking.passengerName;
+    direction = booking.bookingDirection;
+
+    transaction.update(bookingRef, {
+      status: "cancelled" as SchoolBookingStatus,
+      updatedAt: serverTimestamp(),
+    });
+
+    const tripRef = doc(db, SCHOOL_TRIPS_COLLECTION, booking.tripId);
+    const tripSnap = await transaction.get(tripRef);
+
+    if (tripSnap.exists()) {
+      const trip = normalizeSchoolTrip(tripSnap.id, tripSnap.data());
+      const restoredSeats = Math.min(
+        trip.availableSeats + booking.seats,
+        trip.totalSeats,
+      );
+
+      transaction.update(tripRef, {
+        availableSeats: restoredSeats,
+        status: trip.status === "cancelled" ? "cancelled" : "active",
+        updatedAt: serverTimestamp(),
+      });
+    }
+  });
+
+  if (driverId) {
+    await notify({
+      receiverId: driverId,
+      type: "cancelled",
+      title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
+      message: `${passengerName} cancelled their ${
+        direction === "to_school" ? "outbound" : "return"
+      } school trip booking`,
+      applicationId: tripId,
+      bookingId,
+      category: "school",
+      status: "cancelled",
+      targetTab: "driver",
+    });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Rating — same algorithm as rideBookingLib.ts's submitRideRating (running
+// average on the driver's users/{driverId} doc + one driverReviews doc),
+// just targeting schoolBookings/driverId instead of bookings/driverId —
+// never a second rating system.
+// ---------------------------------------------------------------------------
+
+export const submitSchoolBookingRating = async (
+  bookingId: string,
+  booking: SchoolBooking,
+  rating: number,
+  comment: string,
+) => {
+  const cleanComment = comment.trim();
+
+  if (!booking.driverId) {
+    await updateDoc(doc(db, SCHOOL_BOOKINGS_COLLECTION, bookingId), {
+      rating,
+      ratingSubmitted: true,
+      needsPassengerRating: false,
+      updatedAt: serverTimestamp(),
+    });
+    return;
+  }
+
+  const bookingRef = doc(db, SCHOOL_BOOKINGS_COLLECTION, bookingId);
+  const driverRef = doc(db, "users", booking.driverId);
+  const reviewRef = doc(collection(db, "driverReviews"));
+
+  await runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+
+    if (!bookingSnap.exists()) {
+      throw new Error(i18n.t("rides.bookingNotFound"));
+    }
+
+    const bookingData: any = bookingSnap.data();
+
+    if (bookingData.ratingSubmitted === true) {
+      return;
+    }
+
+    const driverSnap = await transaction.get(driverRef);
+    const driverData: any = driverSnap.exists() ? driverSnap.data() : {};
+
+    const oldCount = Number(driverData.ratingCount) || 0;
+    const oldSum =
+      Number(driverData.ratingSum) || Number(driverData.ratingAverage || 0) * oldCount;
+
+    const newCount = oldCount + 1;
+    const newSum = oldSum + rating;
+    const newAverage = Number((newSum / newCount).toFixed(2));
+
+    transaction.set(reviewRef, {
+      bookingId,
+      driverId: booking.driverId,
+      driverName: booking.driverName || "Driver",
+      passengerId: booking.passengerId || null,
+      passengerName: booking.passengerName || "Passenger",
+      rating,
+      comment: cleanComment,
+      category: "school",
+      from: booking.fromAddress || "",
+      to: booking.toAddress || "",
+      date: booking.date || "",
+      time: booking.departureTime || "",
+      createdAt: serverTimestamp(),
+    });
+
+    transaction.update(bookingRef, {
+      rating,
+      ratingSubmitted: true,
+      needsPassengerRating: false,
+      updatedAt: serverTimestamp(),
+    });
+
+    transaction.set(
+      driverRef,
+      {
+        ratingCount: newCount,
+        ratingSum: newSum,
+        ratingAverage: newAverage,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Ride requests — waiting list for a return ride when no exact/alternative
+// trip exists yet (AGENTS.md #7).
+// ---------------------------------------------------------------------------
+
+export type CreateRideRequestInput = {
+  // One request is always exactly one child (AGENTS.md #3's per-child
+  // waiting requests) — childEntryId matches the SchoolPassengerEntry this
+  // request was created for.
+  childEntryId: string;
+  childId?: string;
+  childName?: string;
+
+  schoolId: string;
+  schoolName: string;
+  schoolAddress: string;
+  schoolLocation: LatLng | null;
+  // The return trip's "From" (school area) — see RideRequest.fromArea.
+  fromArea: string;
+  fromLocation: LatLng | null;
+  // The return trip's "To" (the parent's home/destination) — what matching
+  // actually runs against.
+  toArea: string;
+  destinationLocation: LatLng | null;
+  requestedDate: string;
+  requestedTime: string;
+  // Always 1 in practice (one child = one seat) — kept as an explicit input
+  // rather than hardcoded so a future multi-seat-per-child case isn't a
+  // breaking type change.
+  seats: number;
+};
+
+export const findDuplicateRideRequest = async (
+  input: CreateRideRequestInput,
+): Promise<RideRequest | null> => {
+  const user = auth.currentUser;
+  if (!user) return null;
+
+  const q = query(
+    collection(db, RIDE_REQUESTS_COLLECTION),
+    where("parentId", "==", user.uid),
+    where("schoolId", "==", input.schoolId),
+    where("requestedDate", "==", input.requestedDate),
+    where("status", "==", "waiting"),
+  );
+
+  const snap = await getDocs(q);
+
+  const match = snap.docs
+    .map((d) => normalizeRideRequest(d.id, d.data()))
+    .find(
+      (existing) =>
+        existing.childEntryId === input.childEntryId &&
+        existing.requestedTime === input.requestedTime &&
+        existing.toArea === input.toArea &&
+        existing.seats === input.seats,
+    );
+
+  return match || null;
+};
+
+export const createRideRequest = async (
+  input: CreateRideRequestInput,
+): Promise<string> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("validation.mustBeLoggedInToBook"));
+
+  const duplicate = await findDuplicateRideRequest(input);
+  if (duplicate) return duplicate.id;
+
+  const ref = await addDoc(collection(db, RIDE_REQUESTS_COLLECTION), {
+    parentId: user.uid,
+    userId: user.uid,
+
+    childEntryId: input.childEntryId,
+    childId: input.childId || null,
+    childName: input.childName || null,
+
+    tripType: "school",
+    direction: "from_school",
+
+    schoolId: input.schoolId,
+    schoolName: input.schoolName,
+    schoolAddress: input.schoolAddress,
+    schoolLocation: input.schoolLocation,
+
+    fromArea: input.fromArea,
+    fromLocation: input.fromLocation,
+
+    toArea: input.toArea,
+    destinationLocation: input.destinationLocation,
+
+    requestedDate: input.requestedDate,
+    requestedTime: input.requestedTime,
+    seats: input.seats,
+
+    maxTimeDifferenceMinutes: MAX_ALTERNATIVE_MINUTES,
+
+    status: "waiting" as RideRequestStatus,
+
+    matchedTripId: null,
+    matchedTripIds: [],
+    notifiedTripIds: [],
+    lastNotifiedAt: null,
+
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  return ref.id;
+};
+
+// ---------------------------------------------------------------------------
+// Client-side match-and-notify — AGENTS.md #8, run immediately after a
+// driver publishes a `from_school` trip (see createSchoolRoundTrip below).
+//
+// The Cloud Function in functions/index.js implements the exact same rule
+// server-side, but that function only runs once actually deployed
+// (`firebase deploy --only functions`, requiring the Blaze plan) — until
+// then, or as a redundant safety net afterward, this is what makes "Notify
+// me when a suitable ride becomes available" actually notify someone. Both
+// paths write to the SAME `rideRequests`/`notifications` collections
+// through the SAME `notify()` helper used everywhere else in the app —
+// never a second, parallel notification system.
+// ---------------------------------------------------------------------------
+
+export const matchRideRequestsForNewTrip = async (trip: SchoolTrip): Promise<void> => {
+  if (trip.direction !== "from_school" || trip.status !== "active") return;
+
+  let snap;
+  try {
+    snap = await getDocs(
+      query(
+        collection(db, RIDE_REQUESTS_COLLECTION),
+        where("status", "==", "waiting"),
+        where("schoolId", "==", trip.schoolId),
+        where("requestedDate", "==", trip.date),
+      ),
+    );
+  } catch (error) {
+    // Best-effort — a matching failure (e.g. a missing index) must never
+    // block the trip publish flow that just succeeded.
+    console.log("matchRideRequestsForNewTrip: could not query rideRequests", error);
+    return;
+  }
+
+  if (snap.empty) return;
+
+  const routeStart = trip.schoolLocation;
+  const routeEnd = trip.toLocation;
+
+  await Promise.all(
+    snap.docs.map(async (requestDoc) => {
+      const request = normalizeRideRequest(requestDoc.id, requestDoc.data());
+
+      if (request.notifiedTripIds.includes(trip.id)) return;
+      if (trip.availableSeats < request.seats) return;
+
+      const diff = getTimeDifferenceInMinutes(trip.departureTime, request.requestedTime);
+      if (diff === null || diff > request.maxTimeDifferenceMinutes) return;
+
+      if (
+        request.destinationLocation &&
+        !isDestinationNearRoute(request.destinationLocation, routeStart, routeEnd)
+      ) {
+        return;
+      }
+
+      try {
+        await updateDoc(doc(db, RIDE_REQUESTS_COLLECTION, request.id), {
+          status: "matched" as RideRequestStatus,
+          matchedTripId: trip.id,
+          matchedTripIds: arrayUnion(trip.id),
+          notifiedTripIds: arrayUnion(trip.id),
+          lastNotifiedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        // Identify the correct child in the notification text whenever this
+        // request has one (AGENTS.md #3: "the notification must identify
+        // the correct child") — falls back to the generic message for the
+        // rare legacy request created before per-child requests existed.
+        const message = request.childName
+          ? i18n.t("schoolTrip.tripMatchFoundForChildMessage", {
+              childName: request.childName,
+              school: trip.schoolName,
+              time: trip.departureTime,
+              destination: trip.toArea,
+            })
+          : i18n.t("schoolTrip.tripMatchFoundMessage", {
+              school: trip.schoolName,
+              time: trip.departureTime,
+              destination: trip.toArea,
+            });
+
+        await notify({
+          receiverId: request.parentId,
+          type: "school_trip_match",
+          title: i18n.t("schoolTrip.tripMatchFound"),
+          message,
+          applicationId: trip.id,
+          bookingId: trip.id,
+          requestId: request.id,
+          childEntryId: request.childEntryId,
+          childName: request.childName,
+          category: "school",
+          status: "matched",
+          targetTab: "passenger",
+        });
+      } catch (error) {
+        // One failing match (e.g. a rules/permission hiccup) must not stop
+        // the rest of the batch from being checked.
+        console.log("matchRideRequestsForNewTrip: match failed for request", request.id, error);
+      }
+    }),
+  );
+};
+
+export const cancelRideRequest = async (requestId: string) => {
+  await updateDoc(doc(db, RIDE_REQUESTS_COLLECTION, requestId), {
+    status: "cancelled" as RideRequestStatus,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+// A waiting request whose date/time has already passed is stale — flip it to
+// "expired" so it never gets matched/notified again (AGENTS.md #12). Called
+// lazily wherever a parent's own requests are read (no Cloud Scheduler
+// required for this; the scheduled Cloud Function in functions/index.js is a
+// belt-and-suspenders server-side sweep for requests nobody ever re-opens
+// the app to see).
+const isRequestExpired = (requestData: RideRequest, now: Date = new Date()): boolean => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(requestData.requestedDate || "");
+  if (!match) return false;
+
+  const cleanTime = normalizeTime(requestData.requestedTime) || "23:59";
+  const [hours, minutes] = cleanTime.split(":").map(Number);
+
+  const requestedAt = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    hours,
+    minutes,
+  );
+
+  return requestedAt.getTime() < now.getTime();
+};
+
+export const subscribeMyRideRequests = (
+  onUpdate: (requests: RideRequest[]) => void,
+): (() => void) => {
+  const user = auth.currentUser;
+  if (!user) {
+    onUpdate([]);
+    return () => {};
+  }
+
+  return onSnapshot(
+    query(
+      collection(db, RIDE_REQUESTS_COLLECTION),
+      where("parentId", "==", user.uid),
+    ),
+    (snap) => {
+      const requests = snap.docs.map((d) => normalizeRideRequest(d.id, d.data()));
+
+      requests
+        .filter((r) => r.status === "waiting" && isRequestExpired(r))
+        .forEach((r) => {
+          updateDoc(doc(db, RIDE_REQUESTS_COLLECTION, r.id), {
+            status: "expired",
+            updatedAt: serverTimestamp(),
+          }).catch(() => {});
+        });
+
+      onUpdate(requests);
+    },
+    () => onUpdate([]),
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Live single-trip subscription — used by the trip details/confirm screen,
+// including when opened from a "suitable ride found" notification tap.
+// ---------------------------------------------------------------------------
+
+export const subscribeSchoolTrip = (
+  tripId: string,
+  onUpdate: (trip: SchoolTrip | null) => void,
+): (() => void) =>
+  onSnapshot(doc(db, SCHOOL_TRIPS_COLLECTION, tripId), (snap) => {
+    onUpdate(snap.exists() ? normalizeSchoolTrip(snap.id, snap.data()) : null);
+  });
+
+export const fetchDriverRating = async (
+  driverId: string,
+): Promise<{ ratingAverage: number; ratingCount: number; photoUrl: string | null }> => {
+  if (!driverId) return { ratingAverage: 0, ratingCount: 0, photoUrl: null };
+
+  try {
+    const snap = await getDoc(doc(db, "users", driverId));
+    if (snap.exists()) {
+      const data = snap.data();
+      return {
+        ratingAverage: Number(data.ratingAverage) || 0,
+        ratingCount: Number(data.ratingCount) || 0,
+        photoUrl: data.photoUrl || data.photoURL || null,
+      };
+    }
+  } catch {
+    // Keep 0/0/null.
+  }
+
+  return { ratingAverage: 0, ratingCount: 0, photoUrl: null };
+};

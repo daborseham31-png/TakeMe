@@ -56,6 +56,12 @@ type Notification = {
   driverId?: string | null;
   passengerId?: string | null;
 
+  // School rides only — which child a "school_trip_match" notification is
+  // for (AGENTS.md #3/#8), so tapping it opens trip-confirm already tagged
+  // to the right child instead of losing that identity.
+  childEntryId?: string | null;
+  childName?: string | null;
+
   read?: boolean;
   deleted?: boolean;
   createdAt?: { seconds?: number } | null;
@@ -74,6 +80,7 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
 
   personal_ride_booking: "car-sport-outline",
   school_ride_booking: "school-outline",
+  school_trip_match: "checkmark-done-circle-outline",
   ride_on_the_way: "car-outline",
   ride_arrived: "location-outline",
   ride_completed: "trophy-outline",
@@ -215,6 +222,22 @@ export default function NotificationsScreen() {
         params: {
           requestId: n.requestId || "",
           highlightOfferId: n.offerId || "",
+        },
+      } as any);
+      return;
+    }
+
+    // A waiting parent's requested return ride was matched — open the trip
+    // details/confirm screen directly (AGENTS.md #8). Never books
+    // automatically; the parent still has to confirm on that screen.
+    if (n.type === "school_trip_match") {
+      router.push({
+        pathname: "/booking/school/trip-confirm",
+        params: {
+          tripId: n.bookingId || n.applicationId || "",
+          rideRequestId: n.requestId || "",
+          childEntryId: n.childEntryId || "",
+          childName: n.childName || "",
         },
       } as any);
       return;
