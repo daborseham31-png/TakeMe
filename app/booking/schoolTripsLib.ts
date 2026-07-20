@@ -1267,11 +1267,19 @@ const bookSingleSchoolTrip = async (
   // just before it as a best-effort guard (the same trust boundary already
   // accepted throughout this booking system — see AGENTS.md #13's note on
   // client-run transactions).
+  //
+  // Also filtered by passengerId == me.id: the schoolBookings read rule
+  // only allows resource.data.passengerId/driverId == request.auth.uid, and
+  // a query can only be granted if its OWN where() filters prove every
+  // possible result satisfies that — this childEntryId belongs to the
+  // current parent's own family regardless, so this is both the correct
+  // scope for the check and what makes the query valid under the rule.
   if (childInfo?.childEntryId) {
     const existing = await getDocs(
       query(
         collection(db, SCHOOL_BOOKINGS_COLLECTION),
         where("tripId", "==", tripId),
+        where("passengerId", "==", me.id),
         where("childEntryId", "==", childInfo.childEntryId),
         where("status", "==", "booked"),
       ),
