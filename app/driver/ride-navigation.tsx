@@ -17,11 +17,13 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
@@ -36,6 +38,8 @@ import {
   normalizeSchoolTrip,
   SCHOOL_BOOKINGS_COLLECTION,
   SCHOOL_TRIPS_COLLECTION,
+  SchoolBooking,
+  verifySchoolBookingCode,
 } from "../booking/schoolTripsLib";
 import { notify } from "../booking/work-errand/workErrandLib";
 import { useLanguage } from "../i18n/LanguageProvider";
@@ -88,6 +92,15 @@ export default function RideNavigationScreen() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
+  // Every still-booked passenger on this trip (AGENTS.md's passenger
+  // verification feature) — one schoolTrips doc can carry several
+  // independent SchoolBooking docs, so this is its own subscription rather
+  // than a field on `booking` itself.
+  const [schoolPassengerBookings, setSchoolPassengerBookings] = useState<SchoolBooking[]>([]);
+  const [verifyModalBooking, setVerifyModalBooking] = useState<SchoolBooking | null>(null);
+  const [verifyCodeInput, setVerifyCodeInput] = useState("");
+  const [verifying, setVerifying] = useState(false);
+
   useEffect(() => {
     if (!id) {
       setLoading(false);
@@ -126,6 +139,56 @@ export default function RideNavigationScreen() {
 
     return unsub;
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !isSchoolTripsSource) {
+      setSchoolPassengerBookings([]);
+      return;
+    }
+
+    const unsub = onSnapshot(
+      query(
+        collection(db, SCHOOL_BOOKINGS_COLLECTION),
+        where("tripId", "==", id),
+        where("status", "==", "booked"),
+      ),
+      (snap) => {
+        setSchoolPassengerBookings(snap.docs.map((d) => normalizeSchoolBooking(d.id, d.data())));
+      },
+    );
+
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, isSchoolTripsSource]);
+
+  const unverifiedPassengerCount = schoolPassengerBookings.filter(
+    (b) => b.verificationStatus === "pending",
+  ).length;
+
+  const openVerifyModal = (passengerBooking: SchoolBooking) => {
+    setVerifyModalBooking(passengerBooking);
+    setVerifyCodeInput("");
+  };
+
+  const closeVerifyModal = () => {
+    setVerifyModalBooking(null);
+    setVerifyCodeInput("");
+  };
+
+  const handleSubmitVerification = async () => {
+    if (!verifyModalBooking || verifying) return;
+
+    setVerifying(true);
+    try {
+      await verifySchoolBookingCode(verifyModalBooking.id, verifyCodeInput.trim());
+      Alert.alert(t("common.success"), t("booking.verificationSuccessful"));
+      closeVerifyModal();
+    } catch (error: any) {
+      Alert.alert(t("common.error"), error?.message || t("booking.invalidVerificationCode"));
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   // Exact GPS pickup point, if the passenger captured one — checked across
   // every field name this has ever been saved under. This is completely
@@ -598,6 +661,14 @@ useEffect(() => {
   };
 
   const handleFinishTrip = () => {
+    // AGENTS.md: verification is required before the trip can finish for
+    // every still-booked passenger — no manual override exists in this app
+    // today, so this is a hard block rather than a warning.
+    if (isSchoolTripsSource && unverifiedPassengerCount > 0) {
+      Alert.alert(t("common.error"), t("booking.verificationRequiredBeforeStart"));
+      return;
+    }
+
     Alert.alert(
       t("booking.finishTripTitle"),
       t("booking.finishTripConfirmMessage"),
@@ -871,25 +942,71 @@ useEffect(() => {
               </Pressable>
             ) : null}
 
+            {isSchoolTripsSource && schoolPassengerBookings.length > 0 && tripStatus !== "booked" ? (
+              <View style={styles.passengersBox}>
+                <Text style={styles.passengersTitle}>{t("booking.verifyPassenger")}</Text>
+
+                {schoolPassengerBookings.map((passengerBooking) => (
+                  <View key={passengerBooking.id} style={styles.passengerRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.passengerName}>
+                        {passengerBooking.childName || passengerBooking.passengerName}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.passengerStatus,
+                          passengerBooking.verificationStatus === "verified" && styles.passengerVerified,
+                        ]}
+                      >
+                        {passengerBooking.verificationStatus === "verified"
+                          ? t("booking.verificationSuccessful")
+                          : t("booking.enterVerificationCode")}
+                      </Text>
+                    </View>
+
+                    {passengerBooking.verificationStatus === "verified" ? (
+                      <Ionicons name="checkmark-circle" size={22} color="#166534" />
+                    ) : (
+                      <Pressable
+                        style={styles.verifyButton}
+                        onPress={() => openVerifyModal(passengerBooking)}
+                      >
+                        <Text style={styles.verifyButtonText}>{t("booking.verifyPassenger")}</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
             {tripStatus === "arrived_pickup" ? (
-              <Pressable
-                style={[styles.endButton, busy && styles.disabled]}
-                onPress={handleFinishTrip}
-                disabled={busy}
-              >
-                {busy ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons
-                      name="checkmark-circle-outline"
-                      size={20}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.actionText}>{t("booking.finishTripButton")}</Text>
-                  </>
-                )}
-              </Pressable>
+              <>
+                <Pressable
+                  style={[
+                    styles.endButton,
+                    (busy || (isSchoolTripsSource && unverifiedPassengerCount > 0)) && styles.disabled,
+                  ]}
+                  onPress={handleFinishTrip}
+                  disabled={busy || (isSchoolTripsSource && unverifiedPassengerCount > 0)}
+                >
+                  {busy ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="checkmark-circle-outline"
+                        size={20}
+                        color="#FFFFFF"
+                      />
+                      <Text style={styles.actionText}>{t("booking.finishTripButton")}</Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {isSchoolTripsSource && unverifiedPassengerCount > 0 ? (
+                  <Text style={styles.gateHint}>{t("booking.verificationRequiredBeforeStart")}</Text>
+                ) : null}
+              </>
             ) : null}
 
             {shouldTrackDriver(tripStatus) ? (
@@ -900,6 +1017,51 @@ useEffect(() => {
           </View>
         )}
       </ScrollView>
+
+      <Modal
+        visible={!!verifyModalBooking}
+        animationType="fade"
+        transparent
+        onRequestClose={closeVerifyModal}
+      >
+        <View style={styles.verifyOverlay}>
+          <View style={styles.verifySheet}>
+            <Text style={styles.verifySheetTitle}>{t("booking.verifyPassenger")}</Text>
+            <Text style={styles.verifySheetSubtitle}>
+              {verifyModalBooking?.childName || verifyModalBooking?.passengerName}
+            </Text>
+
+            <TextInput
+              style={styles.verifyInput}
+              value={verifyCodeInput}
+              onChangeText={(text) => setVerifyCodeInput(text.replace(/[^0-9]/g, "").slice(0, 4))}
+              placeholder={t("booking.enterVerificationCode")}
+              placeholderTextColor="#8B7B6B"
+              keyboardType="number-pad"
+              maxLength={4}
+            />
+
+            <Pressable
+              style={[
+                styles.verifySubmitButton,
+                (verifyCodeInput.length !== 4 || verifying) && styles.disabled,
+              ]}
+              onPress={handleSubmitVerification}
+              disabled={verifyCodeInput.length !== 4 || verifying}
+            >
+              {verifying ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.actionText}>{t("common.submit")}</Text>
+              )}
+            </Pressable>
+
+            <Pressable style={styles.verifyCancelButton} onPress={closeVerifyModal}>
+              <Text style={styles.backText}>{t("common.cancel")}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1090,6 +1252,99 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.6,
+  },
+  passengersBox: {
+    marginBottom: 14,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0E5DC",
+  },
+  passengersTitle: {
+    fontWeight: "900",
+    fontSize: 14,
+    color: "#111827",
+    marginBottom: 10,
+  },
+  passengerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 8,
+  },
+  passengerName: {
+    fontWeight: "800",
+    fontSize: 14,
+    color: "#111827",
+  },
+  passengerStatus: {
+    fontSize: 12,
+    color: "#B86115",
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  passengerVerified: {
+    color: "#166534",
+  },
+  verifyButton: {
+    backgroundColor: "#F58220",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  verifyButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 12.5,
+  },
+  verifyOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  verifySheet: {
+    width: "100%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 22,
+    alignItems: "center",
+  },
+  verifySheetTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  verifySheetSubtitle: {
+    fontSize: 13,
+    color: "#7C5F46",
+    fontWeight: "700",
+    marginTop: 4,
+    marginBottom: 18,
+  },
+  verifyInput: {
+    width: "100%",
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 24,
+    fontWeight: "900",
+    textAlign: "center",
+    letterSpacing: 8,
+    color: "#111827",
+    marginBottom: 18,
+  },
+  verifySubmitButton: {
+    width: "100%",
+    backgroundColor: "#F58220",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  verifyCancelButton: {
+    marginTop: 12,
+    paddingVertical: 8,
   },
   doneBanner: {
     flexDirection: "row",

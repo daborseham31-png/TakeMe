@@ -28,10 +28,12 @@ import {
   query,
   runTransaction,
   serverTimestamp,
+  Timestamp,
   updateDoc,
   where,
   writeBatch,
 } from "firebase/firestore";
+import * as Crypto from "expo-crypto";
 
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";
@@ -154,6 +156,13 @@ export interface SchoolTrip {
   driverLocationUpdatedAtSeconds: number;
   finishedByDriver: boolean;
 
+  // Set only when a driver cancels this trip (see cancelSchoolTrip) — the
+  // reason the driver gave, read server-side by the onSchoolTripCancelled
+  // Cloud Function to stamp onto every affected booking and to search for
+  // replacement trips. Never shown to passengers directly on the trip
+  // itself (only surfaced through the booking's own cancellation fields).
+  cancellationReason?: string;
+
   createdAtSeconds: number;
   updatedAtSeconds: number;
 }
@@ -224,6 +233,24 @@ export interface RideRequest {
 
 export type SchoolBookingStatus = "booked" | "cancelled" | "completed";
 
+export type VerificationStatus = "pending" | "verified" | "failed" | "expired";
+
+// Additive, parallel to SchoolBookingStatus — see SchoolBooking.bookingStatus.
+export type SchoolBookingLifecycleStatus =
+  | "confirmed"
+  | "driver_cancelled"
+  | "replacement_pending"
+  | "replacement_offered"
+  | "replacement_confirmed"
+  | "cancelled"
+  | "completed";
+
+// After this many wrong attempts, verification locks out for
+// VERIFICATION_LOCKOUT_MINUTES (AGENTS.md's "temporarily lock verification
+// for a few minutes" — never a permanent lock).
+export const MAX_VERIFICATION_ATTEMPTS = 5;
+export const VERIFICATION_LOCKOUT_MINUTES = 5;
+
 // A single child on an outbound (usually multi-seat) booking — see
 // SchoolBooking.childEntries. Deliberately just localId + an optional
 // display name (no full child-profile system in this project today).
@@ -288,6 +315,45 @@ export interface SchoolBooking {
   needsPassengerRating: boolean;
   ratingSubmitted: boolean;
   rating: number | null;
+
+  // ---------------------------------------------------------------------
+  // Passenger verification code — a short, driver-checked code so the
+  // driver and parent/child can confirm the right child is entering the
+  // right car. Always a zero-padded STRING (never a number — "0427" must
+  // stay valid), generated fresh per booking via generateVerificationCode()
+  // (expo-crypto, never Math.random or a predictable seed like the booking
+  // id/phone/date). See verifySchoolBookingCode for the driver-side check.
+  // ---------------------------------------------------------------------
+  verificationCode: string;
+  verificationStatus: VerificationStatus;
+  verifiedAtSeconds: number;
+  verifiedByDriverId: string | null;
+  verificationAttempts: number;
+  verificationLockedUntilSeconds: number;
+
+  // ---------------------------------------------------------------------
+  // Driver-cancellation replacement lifecycle — additive, parallel to the
+  // existing `status` field above (status still means exactly what it
+  // always meant everywhere else in the app: "booked"/"cancelled"/
+  // "completed" — nothing that already reads `status` needs to change).
+  // bookingStatus only carries the finer-grained replacement workflow
+  // state; see schoolReplacementOffers / acceptReplacementOffer below.
+  // ---------------------------------------------------------------------
+  bookingStatus: SchoolBookingLifecycleStatus;
+  cancelledBy?: "driver" | "passenger";
+  cancellationReason?: string;
+  cancelledAtSeconds?: number;
+  // The trip this booking was originally made for — frozen at cancellation
+  // time so it survives even though `tripId` itself never actually changes
+  // (a replacement is always a NEW booking document, never a mutation of
+  // this one's own tripId).
+  originalTripId?: string;
+  replacedByBookingId?: string;
+  replacementTripId?: string;
+  replacementConfirmedAtSeconds?: number;
+  // Set only on a booking that WAS CREATED to replace another — points back
+  // to the booking it replaced, for traceability.
+  replacesBookingId?: string;
 
   deletedForPassenger: boolean;
   deletedForDriver: boolean;
@@ -588,6 +654,31 @@ export const normalizeSchoolBooking = (id: string, data: any): SchoolBooking => 
   ratingSubmitted: data.ratingSubmitted === true,
   rating: typeof data.rating === "number" ? data.rating : null,
 
+  // Always a string — a legacy booking predating this feature simply has no
+  // code at all, never shown/verifiable (verificationStatus defaults to
+  // "expired" for those so the UI never invites a driver to check a code
+  // that was never generated).
+  verificationCode: typeof data.verificationCode === "string" ? data.verificationCode : "",
+  verificationStatus: (["pending", "verified", "failed", "expired"].includes(data.verificationStatus)
+    ? data.verificationStatus
+    : data.verificationCode
+      ? "pending"
+      : "expired") as VerificationStatus,
+  verifiedAtSeconds: data.verifiedAt?.seconds || 0,
+  verifiedByDriverId: data.verifiedByDriverId || null,
+  verificationAttempts: Number(data.verificationAttempts) || 0,
+  verificationLockedUntilSeconds: data.verificationLockedUntil?.seconds || 0,
+
+  bookingStatus: (data.bookingStatus || "confirmed") as SchoolBookingLifecycleStatus,
+  cancelledBy: data.cancelledBy || undefined,
+  cancellationReason: data.cancellationReason || undefined,
+  cancelledAtSeconds: data.cancelledAt?.seconds || undefined,
+  originalTripId: data.originalTripId || undefined,
+  replacedByBookingId: data.replacedByBookingId || undefined,
+  replacementTripId: data.replacementTripId || undefined,
+  replacementConfirmedAtSeconds: data.replacementConfirmedAt?.seconds || undefined,
+  replacesBookingId: data.replacesBookingId || undefined,
+
   deletedForPassenger: data.deletedForPassenger === true,
   deletedForDriver: data.deletedForDriver === true,
 
@@ -777,9 +868,16 @@ export const createSchoolRoundTrip = async (
 // never touch the other linked trip).
 // ---------------------------------------------------------------------------
 
-export const cancelSchoolTrip = async (tripId: string) => {
+// `reason` (when given) is stamped onto the trip doc itself so the
+// server-side onSchoolTripCancelled Cloud Function (functions/index.js) can
+// read it and propagate it onto every affected booking + use it to search
+// for replacement trips for the affected passengers — the client here never
+// enumerates/updates bookings itself (that matching/notification logic runs
+// server-side, per the driver-cancellation-replacement feature).
+export const cancelSchoolTrip = async (tripId: string, reason?: string) => {
   await updateDoc(doc(db, SCHOOL_TRIPS_COLLECTION, tripId), {
     status: "cancelled" as SchoolTripStatus,
+    ...(reason ? { cancellationReason: reason } : {}),
     updatedAt: serverTimestamp(),
   });
 };
@@ -789,13 +887,13 @@ export const cancelSchoolTrip = async (tripId: string) => {
 // automatically cancel the return trip unless the driver explicitly
 // chooses to cancel both"). Reads linkedTripId fresh from the document
 // rather than trusting a stale value the caller might be holding.
-export const cancelSchoolTripAndLinked = async (tripId: string) => {
+export const cancelSchoolTripAndLinked = async (tripId: string, reason?: string) => {
   const snap = await getDoc(doc(db, SCHOOL_TRIPS_COLLECTION, tripId));
   const linkedTripId: string | null = snap.exists() ? snap.data()?.linkedTripId || null : null;
 
-  await cancelSchoolTrip(tripId);
+  await cancelSchoolTrip(tripId, reason);
   if (linkedTripId) {
-    await cancelSchoolTrip(linkedTripId);
+    await cancelSchoolTrip(linkedTripId, reason);
   }
 };
 
@@ -1092,6 +1190,26 @@ const validateRequiredBookingFields = (fields: RequiredSchoolBookingFields) => {
 export const generateBookingGroupId = () =>
   `school_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
+// A short passenger-verification code (AGENTS.md's driver/parent-child
+// safety check) — cryptographically random via expo-crypto, NEVER derived
+// from the booking id, phone number, date, or current time. Rejection
+// sampling over 2 secure random bytes keeps the 0-9999 result uniform (no
+// modulo bias). Always returned as a zero-padded STRING — "0427" must stay
+// valid, so this is never stored/compared as a number.
+export const generateVerificationCode = async (): Promise<string> => {
+  const RANGE = 10000;
+  const MAX_UNBIASED = 65536 - (65536 % RANGE);
+
+  let value = MAX_UNBIASED;
+  while (value >= MAX_UNBIASED) {
+    // eslint-disable-next-line no-await-in-loop
+    const bytes = await Crypto.getRandomBytesAsync(2);
+    value = (bytes[0] << 8) | bytes[1];
+  }
+
+  return String(value % RANGE).padStart(4, "0");
+};
+
 export type SchoolBookingPaymentMethod = "cash" | "bit";
 
 // A single child on this booking (return legs), or the whole family riding
@@ -1186,6 +1304,13 @@ const bookSingleSchoolTrip = async (
       schoolName: trip.schoolName,
     });
 
+    // Generated fresh for THIS booking only, after every check above has
+    // passed and right before the write that actually creates it — a
+    // failed/retried transaction attempt never leaves a leaked, unused code
+    // lying around anywhere (AGENTS.md: "generate only after... the booking
+    // transaction succeeds").
+    const verificationCode = await generateVerificationCode();
+
     // Optional fields (bookingGroupId/childEntryId/childId/childName/
     // rideRequestId/linkedTripId/paymentReference/returnRequestedTime/
     // childEntries) are included only when they actually have a value —
@@ -1243,6 +1368,15 @@ const bookSingleSchoolTrip = async (
       needsPassengerRating: false,
       ratingSubmitted: false,
       rating: null,
+
+      verificationCode,
+      verificationStatus: "pending" as VerificationStatus,
+      verifiedAt: null,
+      verifiedByDriverId: null,
+      verificationAttempts: 0,
+      verificationLockedUntil: null,
+
+      bookingStatus: "confirmed" as SchoolBookingLifecycleStatus,
 
       deletedForPassenger: false,
       deletedForDriver: false,
@@ -1346,6 +1480,92 @@ export const bookReturnForChild = async (
   return bookingId;
 };
 
+// ---------------------------------------------------------------------------
+// Passenger verification — the driver checks the 4-digit code shown to the
+// booking owner (My Bookings) against what's stored on the booking. A
+// Firestore transaction (the same client-trust boundary already accepted
+// throughout this booking system, see AGENTS.md #13) rather than a Cloud
+// Function, since this needs to run instantly at pickup time and this app
+// has no other interactive-callable-function precedent; the driver already
+// has Firestore read access to this exact booking doc regardless (see
+// firestore.rules), so a wrong-guess lockout is this check's real
+// protection, not secrecy from the driver's own client.
+// ---------------------------------------------------------------------------
+
+export const verifySchoolBookingCode = async (
+  bookingId: string,
+  enteredCode: string,
+): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("auth.pleaseLoginFirst"));
+
+  const bookingRef = doc(db, SCHOOL_BOOKINGS_COLLECTION, bookingId);
+
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(bookingRef);
+    if (!snap.exists()) {
+      throw new Error(i18n.t("rides.bookingNotFound"));
+    }
+
+    const booking = normalizeSchoolBooking(snap.id, snap.data());
+
+    // The driver may only verify bookings on their own trip.
+    if (booking.driverId !== user.uid) {
+      throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
+    }
+
+    if (booking.verificationStatus === "verified") {
+      return;
+    }
+
+    if (booking.verificationStatus === "expired" || !booking.verificationCode) {
+      throw new Error(i18n.t("booking.codeExpired"));
+    }
+
+    const now = Date.now();
+    if (
+      booking.verificationLockedUntilSeconds &&
+      booking.verificationLockedUntilSeconds * 1000 > now
+    ) {
+      throw new Error(i18n.t("booking.verificationLocked"));
+    }
+
+    // Exact string comparison — the code is stored zero-padded, and a
+    // leading-zero code ("0427") must only ever match the same string.
+    if (String(enteredCode) !== booking.verificationCode) {
+      const attempts = booking.verificationAttempts + 1;
+      const payload: any = {
+        verificationAttempts: attempts,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (attempts >= MAX_VERIFICATION_ATTEMPTS) {
+        payload.verificationLockedUntil = Timestamp.fromMillis(
+          now + VERIFICATION_LOCKOUT_MINUTES * 60 * 1000,
+        );
+      }
+
+      transaction.update(bookingRef, payload);
+
+      // Never reveal the correct code, and never reveal whether the wrong
+      // guess was "close" — the same generic error either way.
+      throw new Error(
+        attempts >= MAX_VERIFICATION_ATTEMPTS
+          ? i18n.t("booking.verificationLocked")
+          : i18n.t("booking.invalidVerificationCode"),
+      );
+    }
+
+    transaction.update(bookingRef, {
+      verificationStatus: "verified" as VerificationStatus,
+      verifiedAt: serverTimestamp(),
+      verifiedByDriverId: user.uid,
+      verificationAttempts: 0,
+      updatedAt: serverTimestamp(),
+    });
+  });
+};
+
 export type RoundTripBookingResult = {
   bookingGroupId: string;
   outboundBookingId: string;
@@ -1437,6 +1657,8 @@ export const cancelSchoolBooking = async (bookingId: string) => {
 
     transaction.update(bookingRef, {
       status: "cancelled" as SchoolBookingStatus,
+      // A cancelled booking's code can never be used again (AGENTS.md).
+      verificationStatus: "expired" as VerificationStatus,
       updatedAt: serverTimestamp(),
     });
 
@@ -1561,6 +1783,343 @@ export const submitSchoolBookingRating = async (
       },
       { merge: true },
     );
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Driver-cancellation replacement offers — when a driver cancels a trip
+// that already has bookings, the onSchoolTripCancelled Cloud Function
+// (functions/index.js) marks each affected booking `bookingStatus:
+// "replacement_pending"`, searches for alternative trips using the exact
+// same matching rule as every other school-trip search (schoolId,
+// direction, date, seats, coordinates/distance — never translated
+// name/city text), and creates ONE of these per affected booking (or
+// per-child group, for a multi-child outbound booking). The parent reviews
+// and explicitly accepts one candidate here — nothing is ever auto-booked.
+// ---------------------------------------------------------------------------
+
+export const SCHOOL_REPLACEMENT_OFFERS_COLLECTION = "schoolReplacementOffers";
+
+export type ReplacementOfferStatus = "pending" | "offered" | "accepted" | "declined" | "expired";
+
+export interface ReplacementOffer {
+  id: string;
+  originalBookingId: string;
+  originalTripId: string;
+  parentId: string;
+  childEntryIds?: string[];
+  direction: SchoolTripDirection;
+  seatsNeeded: number;
+  candidateTripIds: string[];
+  status: ReplacementOfferStatus;
+  acceptedTripId: string | null;
+  acceptedBookingId: string | null;
+  createdAtSeconds: number;
+  expiresAtSeconds: number;
+}
+
+export const normalizeReplacementOffer = (id: string, data: any): ReplacementOffer => ({
+  id,
+  originalBookingId: data.originalBookingId || "",
+  originalTripId: data.originalTripId || "",
+  parentId: data.parentId || "",
+  childEntryIds: Array.isArray(data.childEntryIds) ? data.childEntryIds : undefined,
+  direction: data.direction === "from_school" ? "from_school" : "to_school",
+  seatsNeeded: Number(data.seatsNeeded) || 1,
+  candidateTripIds: Array.isArray(data.candidateTripIds) ? data.candidateTripIds : [],
+  status: (["pending", "offered", "accepted", "declined", "expired"].includes(data.status)
+    ? data.status
+    : "pending") as ReplacementOfferStatus,
+  acceptedTripId: data.acceptedTripId || null,
+  acceptedBookingId: data.acceptedBookingId || null,
+  createdAtSeconds: data.createdAt?.seconds || 0,
+  expiresAtSeconds: data.expiresAt?.seconds || 0,
+});
+
+// Every non-declined/non-expired offer for the signed-in parent — surfaced
+// in My Bookings and reachable from the "school_trip_replacement"
+// notification (see notifications.tsx).
+export const subscribeMyReplacementOffers = (
+  onUpdate: (offers: ReplacementOffer[]) => void,
+): (() => void) => {
+  const user = auth.currentUser;
+  if (!user) {
+    onUpdate([]);
+    return () => {};
+  }
+
+  return onSnapshot(
+    query(collection(db, SCHOOL_REPLACEMENT_OFFERS_COLLECTION), where("parentId", "==", user.uid)),
+    (snap) => {
+      onUpdate(snap.docs.map((d) => normalizeReplacementOffer(d.id, d.data())));
+    },
+    () => onUpdate([]),
+  );
+};
+
+export const fetchReplacementOffer = async (offerId: string): Promise<ReplacementOffer | null> => {
+  const snap = await getDoc(doc(db, SCHOOL_REPLACEMENT_OFFERS_COLLECTION, offerId));
+  return snap.exists() ? normalizeReplacementOffer(snap.id, snap.data()) : null;
+};
+
+// Resolves the offer from the ORIGINAL booking it was created for — used by
+// the "Review offers" link on that booking's own My Bookings card, which
+// only knows its own bookingId (not the offer's id).
+export const fetchReplacementOfferByBookingId = async (
+  originalBookingId: string,
+): Promise<ReplacementOffer | null> => {
+  const snap = await getDocs(
+    query(
+      collection(db, SCHOOL_REPLACEMENT_OFFERS_COLLECTION),
+      where("originalBookingId", "==", originalBookingId),
+    ),
+  );
+
+  if (snap.empty) return null;
+  return normalizeReplacementOffer(snap.docs[0].id, snap.docs[0].data());
+};
+
+// Live data for every still-existing candidate trip (a candidate found at
+// cancellation time may since have filled up, been cancelled, or expired —
+// the review screen always re-reads before showing/accepting anything,
+// never trusts the offer's own stored snapshot as booking-eligible truth).
+export const fetchReplacementCandidateTrips = async (
+  offer: ReplacementOffer,
+): Promise<SchoolTrip[]> => {
+  const snaps = await Promise.all(
+    offer.candidateTripIds.map((tripId) => getDoc(doc(db, SCHOOL_TRIPS_COLLECTION, tripId))),
+  );
+
+  return snaps
+    .filter((snap) => snap.exists())
+    .map((snap) => normalizeSchoolTrip(snap.id, snap.data()))
+    .filter((trip) => trip.status === "active" && trip.availableSeats >= offer.seatsNeeded);
+};
+
+// The parent explicitly accepts ONE candidate trip. Atomic: reads the
+// replacement trip fresh, confirms seats, creates the replacement booking
+// (with a BRAND NEW verification code — never the old booking's code),
+// decrements the replacement trip's seats, marks the old booking replaced
+// (its own code already expired when the driver's cancellation ran), and
+// marks the offer accepted — all in one transaction, so a failure partway
+// through never leaves partial replacement data (no seats decremented
+// without a booking, no booking without the old one being marked replaced).
+export const acceptReplacementOffer = async (
+  offerId: string,
+  chosenTripId: string,
+  paymentMethod: SchoolBookingPaymentMethod,
+): Promise<{ bookingId: string }> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("auth.pleaseLoginFirst"));
+
+  const offerRef = doc(db, SCHOOL_REPLACEMENT_OFFERS_COLLECTION, offerId);
+  const tripRef = doc(db, SCHOOL_TRIPS_COLLECTION, chosenTripId);
+  const bookingRef = doc(collection(db, SCHOOL_BOOKINGS_COLLECTION));
+
+  const bookingId = await runTransaction(db, async (transaction) => {
+    const offerSnap = await transaction.get(offerRef);
+    if (!offerSnap.exists()) {
+      throw new Error(i18n.t("rides.bookingNotFound"));
+    }
+
+    const offer = normalizeReplacementOffer(offerSnap.id, offerSnap.data());
+
+    if (offer.parentId !== user.uid) {
+      throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
+    }
+
+    // Prevent accepting twice, or two different alternatives.
+    if (offer.status === "accepted") {
+      throw new Error(i18n.t("booking.replacementAlreadyAccepted"));
+    }
+    if (offer.status === "declined" || offer.status === "expired") {
+      throw new Error(i18n.t("booking.replacementNoLongerAvailable"));
+    }
+    if (!offer.candidateTripIds.includes(chosenTripId)) {
+      throw new Error(i18n.t("rides.tripNoLongerAvailable"));
+    }
+
+    const oldBookingRef = doc(db, SCHOOL_BOOKINGS_COLLECTION, offer.originalBookingId);
+    const oldBookingSnap = await transaction.get(oldBookingRef);
+    if (!oldBookingSnap.exists()) {
+      throw new Error(i18n.t("rides.bookingNotFound"));
+    }
+    const oldBooking = normalizeSchoolBooking(oldBookingSnap.id, oldBookingSnap.data());
+
+    if (oldBooking.replacedByBookingId) {
+      throw new Error(i18n.t("booking.replacementAlreadyAccepted"));
+    }
+
+    const tripSnap = await transaction.get(tripRef);
+    if (!tripSnap.exists()) {
+      throw new Error(i18n.t("rides.tripNoLongerAvailable"));
+    }
+    const trip = normalizeSchoolTrip(tripSnap.id, tripSnap.data());
+
+    if (trip.status !== "active") {
+      throw new Error(i18n.t("rides.seatAvailabilityChanged"));
+    }
+    if (trip.availableSeats < offer.seatsNeeded) {
+      throw new Error(i18n.t("rides.notEnoughSeats"));
+    }
+
+    const remainingSeats = trip.availableSeats - offer.seatsNeeded;
+
+    transaction.update(tripRef, {
+      availableSeats: remainingSeats,
+      status: remainingSeats <= 0 ? "full" : "active",
+      updatedAt: serverTimestamp(),
+    });
+
+    const totalPrice = trip.pricePerSeat * offer.seatsNeeded;
+
+    validateRequiredBookingFields({
+      tripId: chosenTripId,
+      passengerId: user.uid,
+      driverId: trip.driverId,
+      direction: trip.direction,
+      date: trip.date,
+      departureTime: trip.departureTime,
+      seats: offer.seatsNeeded,
+      pricePerSeat: trip.pricePerSeat,
+      totalPrice,
+      status: "booked",
+      fromArea: trip.fromAddress,
+      toArea: trip.toAddress,
+      schoolId: trip.schoolId,
+      schoolName: trip.schoolName,
+    });
+
+    // Brand new code — never copied from the booking being replaced.
+    const verificationCode = await generateVerificationCode();
+
+    const rawBooking = {
+      bookingGroupId: oldBooking.bookingGroupId || generateBookingGroupId(),
+      tripId: chosenTripId,
+      bookingDirection: trip.direction,
+
+      passengerId: user.uid,
+      passengerName: oldBooking.passengerName,
+      passengerPhone: oldBooking.passengerPhone,
+
+      driverId: trip.driverId,
+      driverName: trip.driverName,
+      driverPhone: trip.driverPhone,
+
+      schoolId: trip.schoolId,
+      schoolName: trip.schoolName,
+
+      fromAddress: trip.fromAddress,
+      toAddress: trip.toAddress,
+      fromLocation: trip.fromLocation,
+      toLocation: trip.toLocation,
+      schoolLocation: trip.schoolLocation,
+      date: trip.date,
+      departureTime: trip.departureTime,
+
+      seats: offer.seatsNeeded,
+      pricePerSeat: trip.pricePerSeat,
+      totalPrice,
+
+      childEntryId: oldBooking.childEntryId,
+      childName: oldBooking.childName,
+      childEntries: oldBooking.childEntries,
+
+      paymentMethod,
+      paymentStatus: paymentMethod === "bit" ? "mock_paid" : "cash_pending",
+
+      status: "booked" as SchoolBookingStatus,
+      tripStatus: "booked" as TripTrackingStatus,
+      trackingEnabled: false,
+      finishedByDriver: false,
+
+      needsPassengerRating: false,
+      ratingSubmitted: false,
+      rating: null,
+
+      verificationCode,
+      verificationStatus: "pending" as VerificationStatus,
+      verifiedAt: null,
+      verifiedByDriverId: null,
+      verificationAttempts: 0,
+      verificationLockedUntil: null,
+
+      bookingStatus: "replacement_confirmed" as SchoolBookingLifecycleStatus,
+      replacesBookingId: oldBooking.id,
+
+      deletedForPassenger: false,
+      deletedForDriver: false,
+
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    transaction.set(bookingRef, deepRemoveUndefined(rawBooking));
+
+    transaction.update(oldBookingRef, {
+      bookingStatus: "replacement_confirmed" as SchoolBookingLifecycleStatus,
+      replacedByBookingId: bookingRef.id,
+      replacementTripId: chosenTripId,
+      replacementConfirmedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    transaction.update(offerRef, {
+      status: "accepted" as ReplacementOfferStatus,
+      acceptedTripId: chosenTripId,
+      acceptedBookingId: bookingRef.id,
+      updatedAt: serverTimestamp(),
+    });
+
+    return bookingRef.id;
+  });
+
+  const tripSnapForNotify = await getDoc(tripRef);
+  if (tripSnapForNotify.exists()) {
+    const trip = normalizeSchoolTrip(tripSnapForNotify.id, tripSnapForNotify.data());
+    if (trip.driverId) {
+      await notify({
+        receiverId: trip.driverId,
+        senderId: user.uid,
+        type: "school_ride_booking",
+        title: i18n.t("schoolTrip.newBookingNotificationTitle"),
+        message: `A parent accepted a replacement booking for your ${
+          trip.direction === "to_school" ? "outbound" : "return"
+        } school trip to ${trip.schoolName}`,
+        applicationId: bookingId,
+        bookingId,
+        category: "school",
+        status: "booked",
+        targetTab: "driver",
+      });
+    }
+  }
+
+  return { bookingId };
+};
+
+export const declineReplacementOffer = async (offerId: string): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("auth.pleaseLoginFirst"));
+
+  const offerRef = doc(db, SCHOOL_REPLACEMENT_OFFERS_COLLECTION, offerId);
+
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(offerRef);
+    if (!snap.exists()) return;
+
+    const offer = normalizeReplacementOffer(snap.id, snap.data());
+    if (offer.parentId !== user.uid) {
+      throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
+    }
+    if (offer.status === "accepted") {
+      throw new Error(i18n.t("booking.replacementAlreadyAccepted"));
+    }
+
+    transaction.update(offerRef, {
+      status: "declined" as ReplacementOfferStatus,
+      updatedAt: serverTimestamp(),
+    });
   });
 };
 

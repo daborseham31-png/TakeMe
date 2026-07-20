@@ -62,6 +62,11 @@ type Notification = {
   childEntryId?: string | null;
   childName?: string | null;
 
+  // "school_trip_replacement" only (driver-cancellation replacement search)
+  // — see functions/index.js's onSchoolTripCancelled.
+  originalBookingId?: string | null;
+  replacementOfferId?: string | null;
+
   read?: boolean;
   deleted?: boolean;
   createdAt?: { seconds?: number } | null;
@@ -81,6 +86,7 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
   personal_ride_booking: "car-sport-outline",
   school_ride_booking: "school-outline",
   school_trip_match: "checkmark-done-circle-outline",
+  school_trip_replacement: "alert-circle-outline",
   ride_on_the_way: "car-outline",
   ride_arrived: "location-outline",
   ride_completed: "trophy-outline",
@@ -238,6 +244,20 @@ export default function NotificationsScreen() {
           rideRequestId: n.requestId || "",
           childEntryId: n.childEntryId || "",
           childName: n.childName || "",
+        },
+      } as any);
+      return;
+    }
+
+    // A driver cancelled a trip the parent had booked — open the
+    // replacement-offer review screen directly (never books anything
+    // automatically; the parent must explicitly accept one alternative).
+    if (n.type === "school_trip_replacement") {
+      router.push({
+        pathname: "/booking/school/replacement-offer",
+        params: {
+          offerId: n.replacementOfferId || n.applicationId || "",
+          originalBookingId: n.originalBookingId || "",
         },
       } as any);
       return;
