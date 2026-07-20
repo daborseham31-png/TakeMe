@@ -44,9 +44,24 @@ type Props = {
   category: RideCategory;
   showPets?: boolean;
   onBack?: () => void;
+  // Rendered inline below another screen's own header/selector (see
+  // app/driver/create/school.tsx's "Weekly recurring" mode) instead of as a
+  // full standalone screen — skips this form's own SafeAreaView/back
+  // button/title so the two never visually stack.
+  embedded?: boolean;
+  // The embedding screen's own selector already means "weekly recurring" —
+  // skips this form's internal repeat-toggle and always shows the weekly
+  // days card, never the one-time date/time/price/seats fields.
+  forceRecurring?: boolean;
 };
 
-export default function RideForm({ category, showPets, onBack }: Props) {
+export default function RideForm({
+  category,
+  showPets,
+  onBack,
+  embedded,
+  forceRecurring,
+}: Props) {
   const { t } = useTranslation();
   const { driverName, phone, driverAge, languages } = useDriverAccount();
 
@@ -94,7 +109,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
   const [tripDate, setTripDate] = useState("");
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
 
-  const [isRecurring, setIsRecurring] = useState(false);
+  const [isRecurring, setIsRecurring] = useState(!!forceRecurring);
   const [weeklyRows, setWeeklyRows] = useState<WeekDayRow[]>([]);
 
   const [time, setTime] = useState("");
@@ -332,24 +347,16 @@ export default function RideForm({ category, showPets, onBack }: Props) {
     }
   };
 
-  return (
-    <SafeAreaView style={styles.page}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Pressable
-          style={styles.backButton}
-          onPress={() => (onBack ? onBack() : router.back())}
-        >
-          <Ionicons name="arrow-back" size={24} color="#7C5F46" />
-        </Pressable>
-
-        <View style={styles.card}>
+  const content = (
+    <View style={styles.card}>
+      {!embedded ? (
+        <>
           <Text style={styles.title}>{t("driverCreate.newTripTitle")}</Text>
           <Text style={styles.subtitle}>{t("driverCreate.newTripSubtitle")}</Text>
+        </>
+      ) : null}
 
-          <Text style={styles.label}>{t("driverCreate.carModel")}</Text>
+      <Text style={styles.label}>{t("driverCreate.carModel")}</Text>
           <View style={styles.inputRow}>
             <Ionicons name="car-outline" size={18} color="#8B7B6B" />
             <TextInput
@@ -452,7 +459,7 @@ export default function RideForm({ category, showPets, onBack }: Props) {
             </>
           ) : null}
 
-          {canRepeat && (
+          {canRepeat && !forceRecurring && (
             <YesNoField
               label={t("driverCreate.repeatMultipleDays")}
               value={isRecurring}
@@ -535,7 +542,34 @@ export default function RideForm({ category, showPets, onBack }: Props) {
               {loading ? t("driverCreate.creating") : t("driverCreate.createTrip")}
             </Text>
           </Pressable>
-        </View>
+    </View>
+  );
+
+  if (embedded) {
+    return (
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 8 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        {content}
+      </ScrollView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.page}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Pressable
+          style={styles.backButton}
+          onPress={() => (onBack ? onBack() : router.back())}
+        >
+          <Ionicons name="arrow-back" size={24} color="#7C5F46" />
+        </Pressable>
+
+        {content}
       </ScrollView>
     </SafeAreaView>
   );

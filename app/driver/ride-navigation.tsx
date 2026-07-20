@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as Location from "expo-location";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   collection,
@@ -32,6 +31,11 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";
 import { canStartTrip, getStartTripBlockedReason } from "../booking/bookingsLib";
+import {
+  captureDriverLocationOnce,
+  startDriverLocationTracking,
+  stopDriverLocationTracking,
+} from "../driverLocationTask";
 import { normalizeRideBooking, RideBooking } from "../booking/rideBookingLib";
 import {
   normalizeSchoolBooking,
@@ -39,10 +43,14 @@ import {
   SCHOOL_BOOKINGS_COLLECTION,
   SCHOOL_TRIPS_COLLECTION,
   SchoolBooking,
-  verifySchoolBookingCode,
+  TRIP_LOCATIONS_COLLECTION,
+  verifyPassengerCodeAndStartTrip,
 } from "../booking/schoolTripsLib";
 import { notify } from "../booking/work-errand/workErrandLib";
+import i18n from "../i18n";
+import { normalizeToWesternDigits } from "../i18n/digits";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { getUserLanguage } from "../i18n/userLanguage";
 
 type TripStatus =
   | "booked"
@@ -58,19 +66,13 @@ const getTripStatus = (booking: any): TripStatus => {
   return "booked";
 };
 
-// Live tracking starts as soon as the driver arrives for pickup (there is no
-// separate "Start Trip" step) and stays on until Finish Trip.
+// Personal Ride: live tracking starts as soon as the driver arrives for
+// pickup (there is no verification-code step for this trip type) and stays
+// on until Finish Trip. School Trips uses its own condition instead — see
+// anySchoolPassengerInProgress below (only after a passenger's code is
+// verified, never merely at arrival).
 const shouldTrackDriver = (status: TripStatus) => {
   return status === "arrived_pickup";
-};
-
-const getDriverLocation = (booking: any) => {
-  const lat = Number(booking?.driverLocation?.latitude);
-  const lng = Number(booking?.driverLocation?.longitude);
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-
-  return { latitude: lat, longitude: lng };
 };
 
 export default function RideNavigationScreen() {
@@ -140,6 +142,32 @@ export default function RideNavigationScreen() {
     return unsub;
   }, [id]);
 
+  // The driver's own live location, read back from the SAME tripLocations
+  // doc driverLocationTask.ts writes to — confirms the round-trip actually
+  // worked and drives this screen's own map marker, instead of a second,
+  // separate device-local coordinate source.
+  const [liveDriverLocation, setLiveDriverLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!id) {
+      setLiveDriverLocation(null);
+      return;
+    }
+
+    const unsub = onSnapshot(doc(db, TRIP_LOCATIONS_COLLECTION, id), (snap) => {
+      const data = snap.data();
+      const lat = Number(data?.latitude);
+      const lng = Number(data?.longitude);
+
+      setLiveDriverLocation(Number.isFinite(lat) && Number.isFinite(lng) ? { latitude: lat, longitude: lng } : null);
+    });
+
+    return unsub;
+  }, [id]);
+
   useEffect(() => {
     if (!id || !isSchoolTripsSource) {
       setSchoolPassengerBookings([]);
@@ -161,9 +189,20 @@ export default function RideNavigationScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isSchoolTripsSource]);
 
-  const unverifiedPassengerCount = schoolPassengerBookings.filter(
-    (b) => b.verificationStatus === "pending",
+  // Passengers still waiting on their own verify-and-start step — this is
+  // what gates Finish Trip (never the old "verificationStatus" alone, since
+  // a booking can only be considered actually picked up once its own
+  // tripStatus has reached "in_progress").
+  const unstartedPassengerCount = schoolPassengerBookings.filter(
+    (b) => b.tripStatus !== "in_progress",
   ).length;
+
+  // At least one passenger has been verified and their own trip started —
+  // this (never "arrived_pickup" alone) is what's allowed to turn on the
+  // driver's live location broadcast, per AGENTS.md.
+  const anySchoolPassengerInProgress = schoolPassengerBookings.some(
+    (b) => b.tripStatus === "in_progress",
+  );
 
   const openVerifyModal = (passengerBooking: SchoolBooking) => {
     setVerifyModalBooking(passengerBooking);
@@ -180,9 +219,40 @@ export default function RideNavigationScreen() {
 
     setVerifying(true);
     try {
-      await verifySchoolBookingCode(verifyModalBooking.id, verifyCodeInput.trim());
+      const { started, booking: startedBooking } = await verifyPassengerCodeAndStartTrip(
+        verifyModalBooking.id,
+        verifyCodeInput.trim(),
+      );
+
       Alert.alert(t("common.success"), t("booking.verificationSuccessful"));
       closeVerifyModal();
+
+      if (!started) return;
+
+      // The tracking effect below picks this up automatically as soon as
+      // schoolPassengerBookings reflects the now-"in_progress" booking (its
+      // own onSnapshot fires right after this transaction commits) — never
+      // at "I arrived" itself, only from here on.
+
+      if (startedBooking.passengerId) {
+        const passengerLanguage = await getUserLanguage(startedBooking.passengerId);
+        const tPassenger = i18n.getFixedT(passengerLanguage);
+
+        await notify({
+          receiverId: startedBooking.passengerId,
+          type: "trip_started",
+          title: tPassenger("notifications.tripStartedTitle"),
+          message: tPassenger("notifications.tripStartedMessage"),
+          // Mirrors the "school_trip_match" convention (bookingId holds the
+          // TRIP id) so tapping this notification can open Live Tracking
+          // directly via source=schoolTrips — see notifications.tsx.
+          applicationId: startedBooking.tripId,
+          bookingId: startedBooking.tripId,
+          category: "school",
+          status: "in_progress",
+          targetTab: "passenger",
+        });
+      }
     } catch (error: any) {
       Alert.alert(t("common.error"), error?.message || t("booking.invalidVerificationCode"));
     } finally {
@@ -243,99 +313,57 @@ export default function RideNavigationScreen() {
     return null;
   };
 
-  const updateDriverLocationOnce = async () => {
-    if (!id) return;
+  // Which tripLocations/{targetId} doc this device should be writing to —
+  // tripId (School Trips, one shared car) or bookingId (Personal Ride, 1:1)
+  // — see driverLocationTask.ts / firestore.rules for why this is its own
+  // collection rather than a field on this trip/booking doc.
+  const getTrackingTarget = () => {
+    const driverId = (booking as any)?.driverId;
+    if (!id || !driverId) return null;
 
-    const permission = await Location.requestForegroundPermissionsAsync();
+    return isSchoolTripsSource
+      ? { targetId: id, driverId }
+      : { targetId: id, driverId, passengerId: (booking as any)?.passengerId };
+  };
 
-    if (permission.status !== "granted") {
-      Alert.alert(
-        t("booking.locationPermissionTitle"),
-        t("booking.allowLocationForTracking"),
-      );
-      return;
-    }
+  useEffect(() => {
+    if (!booking || !id) return;
 
-    const current = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.High,
+    const tripStatus = getTripStatus(booking);
+
+    // Personal Ride: live location updates run while the driver has arrived
+    // for pickup, up until Finish Trip (unchanged — there is no passenger
+    // verification step for Personal Ride).
+    //
+    // School Trips: must NOT start merely because the driver pressed "I
+    // arrived" — only once at least one passenger's code has been verified
+    // and their own booking has actually reached "in_progress" (see
+    // verifyPassengerCodeAndStartTrip in schoolTripsLib.ts).
+    const shouldTrack = isSchoolTripsSource
+      ? anySchoolPassengerInProgress
+      : tripStatus === "arrived_pickup";
+
+    if (!shouldTrack) return;
+
+    const target = getTrackingTarget();
+    if (!target) return;
+
+    // startDriverLocationTracking is idempotent for the same target (and
+    // internally guarantees only one background registration ever exists),
+    // so re-running this on every relevant state change — including this
+    // screen simply remounting after the app was relaunched mid-trip — is
+    // always safe. Deliberately NO cleanup/stop here: background tracking
+    // must keep running even if this screen unmounts (driver navigates
+    // away, backgrounds the app, locks the phone) — only an explicit status
+    // transition (Finish Trip below) or sign-out stops it.
+    captureDriverLocationOnce(target);
+    startDriverLocationTracking(target).then((result) => {
+      if (!result.started) {
+        Alert.alert(t("booking.locationPermissionTitle"), t("booking.allowLocationForTracking"));
+      }
     });
-
-    await updateDoc(doc(db, bookingCollection, id), {
-      driverLocation: {
-        latitude: current.coords.latitude,
-        longitude: current.coords.longitude,
-        accuracy: current.coords.accuracy ?? null,
-        heading: current.coords.heading ?? null,
-        speed: current.coords.speed ?? null,
-      },
-      driverLocationUpdatedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  };
-
-useEffect(() => {
-  if (!booking || !id) return;
-
-  const tripStatus = getTripStatus(booking);
-
-  // Live location updates run while the driver has arrived for pickup, up
-  // until Finish Trip.
-  if (tripStatus !== "arrived_pickup") return;
-
-  let subscription: Location.LocationSubscription | null = null;
-  let cancelled = false;
-
-  const startLiveTracking = async () => {
-    const permission = await Location.requestForegroundPermissionsAsync();
-
-    if (permission.status !== "granted") {
-      Alert.alert(
-        t("booking.locationPermissionTitle"),
-        t("booking.allowLocationForTracking"),
-      );
-      return;
-    }
-
-    subscription = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.High,
-        timeInterval: 3000,
-        distanceInterval: 5,
-      },
-      async (location) => {
-        if (cancelled) return;
-
-        try {
-          await updateDoc(doc(db, bookingCollection, id), {
-            driverLocation: {
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-              accuracy: location.coords.accuracy ?? null,
-              heading: location.coords.heading ?? null,
-              speed: location.coords.speed ?? null,
-            },
-            driverLocationUpdatedAt: serverTimestamp(),
-            trackingEnabled: true,
-            updatedAt: serverTimestamp(),
-          });
-        } catch (error) {
-          console.log("Could not update driver location", error);
-        }
-      },
-    );
-  };
-
-  startLiveTracking();
-
-  return () => {
-    cancelled = true;
-
-    if (subscription) {
-      subscription.remove();
-    }
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [id, booking]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, booking, isSchoolTripsSource, anySchoolPassengerInProgress]);
 
   const updateTripStatus = async (nextStatus: TripStatus) => {
     if (!id || !booking) return;
@@ -404,8 +432,8 @@ useEffect(() => {
       });
     }
 
-    if (nextStatus === "arrived_pickup") {
-      await updateDriverLocationOnce();
+    if (nextStatus === "completed") {
+      await stopDriverLocationTracking();
     }
 
     const passengerId = (booking as any).passengerId;
@@ -474,7 +502,12 @@ useEffect(() => {
     }
 
     if (nextStatus === "arrived_pickup") {
-      tripPayload.trackingEnabled = true;
+      // Arriving only unlocks the per-passenger verify-and-start step below
+      // (see the passengersBox UI) — it must NOT switch on location
+      // broadcasting by itself. trackingEnabled only flips true once
+      // driverLocationTask.ts actually starts sending updates, which only
+      // happens after a passenger is verified.
+      tripPayload.trackingEnabled = false;
       tripPayload.arrivedPickupAt = serverTimestamp();
     }
 
@@ -489,8 +522,8 @@ useEffect(() => {
 
     await updateDoc(doc(db, SCHOOL_TRIPS_COLLECTION, id), tripPayload);
 
-    if (nextStatus === "arrived_pickup") {
-      await updateDriverLocationOnce();
+    if (nextStatus === "completed") {
+      await stopDriverLocationTracking();
     }
 
     const bookingsSnap = await getDocs(
@@ -661,10 +694,11 @@ useEffect(() => {
   };
 
   const handleFinishTrip = () => {
-    // AGENTS.md: verification is required before the trip can finish for
-    // every still-booked passenger — no manual override exists in this app
-    // today, so this is a hard block rather than a warning.
-    if (isSchoolTripsSource && unverifiedPassengerCount > 0) {
+    // Every still-booked passenger must have been verified and actually
+    // started (tripStatus "in_progress") before the trip can finish — no
+    // manual override exists in this app today, so this is a hard block
+    // rather than a warning.
+    if (isSchoolTripsSource && unstartedPassengerCount > 0) {
       Alert.alert(t("common.error"), t("booking.verificationRequiredBeforeStart"));
       return;
     }
@@ -717,7 +751,7 @@ useEffect(() => {
   }
 
   const c = coords(booking);
-  const driverLocation = getDriverLocation(booking);
+  const driverLocation = liveDriverLocation;
   const tripStatus = getTripStatus(booking);
   const completed = tripStatus === "completed";
   const canStart = canStartTrip(booking);
@@ -942,9 +976,9 @@ useEffect(() => {
               </Pressable>
             ) : null}
 
-            {isSchoolTripsSource && schoolPassengerBookings.length > 0 && tripStatus !== "booked" ? (
+            {isSchoolTripsSource && schoolPassengerBookings.length > 0 && tripStatus === "arrived_pickup" ? (
               <View style={styles.passengersBox}>
-                <Text style={styles.passengersTitle}>{t("booking.verifyPassenger")}</Text>
+                <Text style={styles.passengersTitle}>{t("booking.verifyAndStartTrip")}</Text>
 
                 {schoolPassengerBookings.map((passengerBooking) => (
                   <View key={passengerBooking.id} style={styles.passengerRow}>
@@ -955,23 +989,23 @@ useEffect(() => {
                       <Text
                         style={[
                           styles.passengerStatus,
-                          passengerBooking.verificationStatus === "verified" && styles.passengerVerified,
+                          passengerBooking.tripStatus === "in_progress" && styles.passengerVerified,
                         ]}
                       >
-                        {passengerBooking.verificationStatus === "verified"
+                        {passengerBooking.tripStatus === "in_progress"
                           ? t("booking.verificationSuccessful")
                           : t("booking.enterVerificationCode")}
                       </Text>
                     </View>
 
-                    {passengerBooking.verificationStatus === "verified" ? (
+                    {passengerBooking.tripStatus === "in_progress" ? (
                       <Ionicons name="checkmark-circle" size={22} color="#166534" />
                     ) : (
                       <Pressable
                         style={styles.verifyButton}
                         onPress={() => openVerifyModal(passengerBooking)}
                       >
-                        <Text style={styles.verifyButtonText}>{t("booking.verifyPassenger")}</Text>
+                        <Text style={styles.verifyButtonText}>{t("booking.verifyAndStartTrip")}</Text>
                       </Pressable>
                     )}
                   </View>
@@ -984,10 +1018,10 @@ useEffect(() => {
                 <Pressable
                   style={[
                     styles.endButton,
-                    (busy || (isSchoolTripsSource && unverifiedPassengerCount > 0)) && styles.disabled,
+                    (busy || (isSchoolTripsSource && unstartedPassengerCount > 0)) && styles.disabled,
                   ]}
                   onPress={handleFinishTrip}
-                  disabled={busy || (isSchoolTripsSource && unverifiedPassengerCount > 0)}
+                  disabled={busy || (isSchoolTripsSource && unstartedPassengerCount > 0)}
                 >
                   {busy ? (
                     <ActivityIndicator color="#FFFFFF" />
@@ -1003,7 +1037,7 @@ useEffect(() => {
                   )}
                 </Pressable>
 
-                {isSchoolTripsSource && unverifiedPassengerCount > 0 ? (
+                {isSchoolTripsSource && unstartedPassengerCount > 0 ? (
                   <Text style={styles.gateHint}>{t("booking.verificationRequiredBeforeStart")}</Text>
                 ) : null}
               </>
@@ -1026,7 +1060,7 @@ useEffect(() => {
       >
         <View style={styles.verifyOverlay}>
           <View style={styles.verifySheet}>
-            <Text style={styles.verifySheetTitle}>{t("booking.verifyPassenger")}</Text>
+            <Text style={styles.verifySheetTitle}>{t("booking.verifyAndStartTrip")}</Text>
             <Text style={styles.verifySheetSubtitle}>
               {verifyModalBooking?.childName || verifyModalBooking?.passengerName}
             </Text>
@@ -1034,11 +1068,17 @@ useEffect(() => {
             <TextInput
               style={styles.verifyInput}
               value={verifyCodeInput}
-              onChangeText={(text) => setVerifyCodeInput(text.replace(/[^0-9]/g, "").slice(0, 4))}
+              // Never rely on keyboardType alone — an RTL/Arabic keyboard can
+              // still hand back Arabic-Indic digits regardless of it, so the
+              // typed value is always normalized to Western digits first.
+              onChangeText={(text) =>
+                setVerifyCodeInput(normalizeToWesternDigits(text).replace(/[^0-9]/g, "").slice(0, 4))
+              }
               placeholder={t("booking.enterVerificationCode")}
               placeholderTextColor="#8B7B6B"
               keyboardType="number-pad"
               maxLength={4}
+              editable={!verifying}
             />
 
             <Pressable
@@ -1052,7 +1092,7 @@ useEffect(() => {
               {verifying ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.actionText}>{t("common.submit")}</Text>
+                <Text style={styles.actionText}>{t("booking.verifyAndStartTrip")}</Text>
               )}
             </Pressable>
 

@@ -1,18 +1,16 @@
 // ---------------------------------------------------------------------------
-// TakeMe Cloud Functions — school trip return-ride matching (AGENTS.md #8)
-// and stale waiting-request expiry (AGENTS.md #12).
+// TakeMe Cloud Functions — school trip return-ride matching (AGENTS.md #8),
+// stale waiting-request expiry (AGENTS.md #12), driver-cancellation
+// replacement search, and (see sendPushForNotification at the bottom of
+// this file) push notification delivery.
 //
 // This is the ONLY server-side (trusted) code in the project today — the
-// mobile app has no functions/firebase-admin dependency and never runs
-// this file; it only reads the `notifications` / `rideRequests` documents
-// this code writes. See the deployment steps in the final project summary
-// for how to install, configure, and deploy this.
-//
-// Note: this project has no real push notification delivery yet (no
-// expo-notifications, no push tokens — see app/admin/adminNotificationsLib.ts's
-// comment). "Notify the parent" here means writing an in-app `notifications`
-// document, exactly like every other notification in this app — the parent
-// sees it next time they open the Notifications screen or app.
+// mobile app has no other firebase-admin dependency and never runs this
+// file; it only reads the `notifications` / `rideRequests` documents this
+// code writes, and (for push) the `expoPushTokens` array
+// app/pushNotifications.ts stores on each user's own `users/{uid}` doc. See
+// the deployment steps in the final project summary for how to install,
+// configure, and deploy this.
 // ---------------------------------------------------------------------------
 
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
@@ -494,5 +492,80 @@ exports.onSchoolTripCancelled = onDocumentUpdated("schoolTrips/{tripId}", async 
 
   if (operations.length > 0) {
     await commitInChunks(operations);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Push notification delivery — fires once for every `notifications` doc
+// created anywhere in the app (client notify() calls in workErrandLib.ts,
+// this file's own onSchoolTripCancelled above, ride-navigation.tsx's
+// trip-started notify() call, ...). This is the ONLY place a push is ever
+// sent — the client never calls the Expo push API directly, per AGENTS.md's
+// "prefer a trusted backend implementation for sending the push
+// notification". The in-app notification (what the Notifications screen
+// shows) is unaffected either way; this only ever ADDS a push on top of it.
+//
+// Idempotent by construction: this trigger fires exactly once per document
+// (a Firestore onCreate trigger never re-fires for the same doc), and the
+// notification doc itself is only ever created once per real event by its
+// caller (e.g. verifyPassengerCodeAndStartTrip's transaction is the actual
+// duplicate-prevention boundary for "trip started" — see schoolTripsLib.ts).
+// ---------------------------------------------------------------------------
+
+const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
+
+// Where tapping the push (from a backgrounded/killed app) should open —
+// mirrors the exact routes notifications.tsx's onPressNotification already
+// uses for the same `type` when the notification is tapped inside the app.
+function routeForNotificationType(type) {
+  if (type === "trip_started") return "/booking/live-tracking";
+  if (type === "school_trip_match") return "/booking/school/trip-confirm";
+  if (type === "school_trip_replacement") return "/booking/school/replacement-offer";
+  return "/(tabs)/bookings";
+}
+
+exports.sendPushForNotification = onDocumentCreated("notifications/{notificationId}", async (event) => {
+  const notification = event.data.data();
+  const notificationRef = event.data.ref;
+
+  const receiverId = notification.receiverId || notification.userId;
+  if (!receiverId || !notification.title) return;
+
+  const userSnap = await db.collection("users").doc(receiverId).get();
+  const tokens = userSnap.exists ? userSnap.data().expoPushTokens : null;
+
+  if (!Array.isArray(tokens) || tokens.length === 0) return;
+
+  const messages = tokens
+    .filter((token) => typeof token === "string" && token.startsWith("ExponentPushToken"))
+    .map((token) => ({
+      to: token,
+      title: notification.title,
+      body: notification.message || "",
+      data: {
+        type: notification.type || null,
+        bookingId: notification.bookingId || notification.applicationId || null,
+        route: routeForNotificationType(notification.type),
+      },
+    }));
+
+  if (messages.length === 0) return;
+
+  try {
+    await fetch(EXPO_PUSH_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(messages),
+    });
+
+    await notificationRef.update({
+      pushSent: true,
+      pushSentAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    console.error("sendPushForNotification: Expo push request failed", error);
   }
 });

@@ -37,6 +37,7 @@ import * as Crypto from "expo-crypto";
 
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";
+import { normalizeToWesternDigits } from "../i18n/digits";
 import { DriverLiveLocation, TripTrackingStatus } from "./bookingsLib";
 import { normalizeTime, timeToMinutes } from "../driver/create/driverHelpers";
 import { calculateDistanceKm } from "./homeFeedLib";
@@ -54,6 +55,11 @@ export type LatLng = { latitude: number; longitude: number };
 
 export const SCHOOL_TRIPS_COLLECTION = "schoolTrips";
 export const SCHOOL_BOOKINGS_COLLECTION = "schoolBookings";
+// Real-time driver GPS during an active trip — see driverLocationTask.ts and
+// firestore.rules. Its own collection (never a field on schoolTrips/
+// bookings), keyed by tripId for School Trips (one shared car) or bookingId
+// for Personal Ride (see live-tracking.tsx / ride-navigation.tsx).
+export const TRIP_LOCATIONS_COLLECTION = "tripLocations";
 export const RIDE_REQUESTS_COLLECTION = "rideRequests";
 
 // Driver-side creation mode — a return leg is now creatable completely on
@@ -322,7 +328,9 @@ export interface SchoolBooking {
   // right car. Always a zero-padded STRING (never a number — "0427" must
   // stay valid), generated fresh per booking via generateVerificationCode()
   // (expo-crypto, never Math.random or a predictable seed like the booking
-  // id/phone/date). See verifySchoolBookingCode for the driver-side check.
+  // id/phone/date). See verifyPassengerCodeAndStartTrip for the driver-side
+  // check — a CORRECT code is the ONLY thing that can move tripStatus from
+  // "arrived_pickup" to "in_progress" (never "I arrived" alone).
   // ---------------------------------------------------------------------
   verificationCode: string;
   verificationStatus: VerificationStatus;
@@ -330,6 +338,20 @@ export interface SchoolBooking {
   verifiedByDriverId: string | null;
   verificationAttempts: number;
   verificationLockedUntilSeconds: number;
+
+  // Set together, atomically, only by a successful verifyPassengerCodeAndStartTrip
+  // call — passengerVerified is the durable "this exact booking's code was
+  // checked and matched" flag (verificationStatus can be reset to "expired"
+  // later by the stale-code sweep; this one never is). tripStartedAt is this
+  // booking's own start timestamp, always set in the same write as
+  // tripStatus becoming "in_progress".
+  passengerVerified: boolean;
+  passengerVerifiedAtSeconds: number;
+  tripStartedAtSeconds: number;
+  // Guards the trip-started notification/push from ever being sent twice
+  // for the same booking (e.g. a retried/duplicate verify call after the
+  // trip already started) — see verifyPassengerCodeAndStartTrip.
+  tripStartedNotificationSent: boolean;
 
   // ---------------------------------------------------------------------
   // Driver-cancellation replacement lifecycle — additive, parallel to the
@@ -668,6 +690,11 @@ export const normalizeSchoolBooking = (id: string, data: any): SchoolBooking => 
   verifiedByDriverId: data.verifiedByDriverId || null,
   verificationAttempts: Number(data.verificationAttempts) || 0,
   verificationLockedUntilSeconds: data.verificationLockedUntil?.seconds || 0,
+
+  passengerVerified: data.passengerVerified === true,
+  passengerVerifiedAtSeconds: data.passengerVerifiedAt?.seconds || 0,
+  tripStartedAtSeconds: data.tripStartedAt?.seconds || 0,
+  tripStartedNotificationSent: data.tripStartedNotificationSent === true,
 
   bookingStatus: (data.bookingStatus || "confirmed") as SchoolBookingLifecycleStatus,
   cancelledBy: data.cancelledBy || undefined,
@@ -1376,6 +1403,11 @@ const bookSingleSchoolTrip = async (
       verificationAttempts: 0,
       verificationLockedUntil: null,
 
+      passengerVerified: false,
+      passengerVerifiedAt: null,
+      tripStartedAt: null,
+      tripStartedNotificationSent: false,
+
       bookingStatus: "confirmed" as SchoolBookingLifecycleStatus,
 
       deletedForPassenger: false,
@@ -1481,25 +1513,42 @@ export const bookReturnForChild = async (
 };
 
 // ---------------------------------------------------------------------------
-// Passenger verification — the driver checks the 4-digit code shown to the
-// booking owner (My Bookings) against what's stored on the booking. A
-// Firestore transaction (the same client-trust boundary already accepted
-// throughout this booking system, see AGENTS.md #13) rather than a Cloud
-// Function, since this needs to run instantly at pickup time and this app
-// has no other interactive-callable-function precedent; the driver already
-// has Firestore read access to this exact booking doc regardless (see
-// firestore.rules), so a wrong-guess lockout is this check's real
-// protection, not secrecy from the driver's own client.
+// Passenger verification + trip start — the ONLY way a booking's tripStatus
+// can move from "arrived_pickup" to "in_progress" (pressing "I arrived"
+// only ever gets a booking to "arrived_pickup"; see ride-navigation.tsx).
+// The driver checks the code shown to the booking owner (My Bookings)
+// against what's stored on the booking, and a match atomically verifies +
+// starts the trip in the same write. A Firestore transaction (the same
+// client-trust boundary already accepted throughout this booking system,
+// see AGENTS.md #13 and the schoolTrips rules' own seat-booking comment)
+// rather than a Cloud Function, since this needs to run instantly at pickup
+// time and this app has no other interactive-callable-function precedent;
+// the driver already has Firestore read access to this exact booking doc
+// regardless (see firestore.rules), so a wrong-guess lockout is this
+// check's real protection, not secrecy from the driver's own client.
+//
+// Idempotent: calling this again after the trip has already started (e.g. a
+// retried request, or the driver double-tapping the button before it
+// disables) is a silent no-op — `started` comes back false so the caller
+// never re-sends the trip-started notification/push or resets tripStartedAt.
 // ---------------------------------------------------------------------------
 
-export const verifySchoolBookingCode = async (
+export const verifyPassengerCodeAndStartTrip = async (
   bookingId: string,
   enteredCode: string,
-): Promise<void> => {
+): Promise<{ started: boolean; booking: SchoolBooking }> => {
   const user = auth.currentUser;
   if (!user) throw new Error(i18n.t("auth.pleaseLoginFirst"));
 
   const bookingRef = doc(db, SCHOOL_BOOKINGS_COLLECTION, bookingId);
+
+  // Never trust the entered code (or, defensively, the stored one) to
+  // already be Western digits — an RTL/Arabic keyboard can hand back
+  // Arabic-Indic digits regardless of keyboardType.
+  const cleanEnteredCode = normalizeToWesternDigits(enteredCode).trim();
+
+  let started = false;
+  let resultBooking: SchoolBooking | null = null;
 
   await runTransaction(db, async (transaction) => {
     const snap = await transaction.get(bookingRef);
@@ -1514,11 +1563,20 @@ export const verifySchoolBookingCode = async (
       throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
     }
 
-    if (booking.verificationStatus === "verified") {
+    // Idempotent success path — already started by this exact call (or a
+    // prior one). Never re-compare the code, re-stamp timestamps, or signal
+    // the caller to send a second notification.
+    if (booking.tripStatus === "in_progress" && booking.passengerVerified && booking.tripStartedAtSeconds) {
+      resultBooking = booking;
+      started = false;
       return;
     }
 
-    if (booking.verificationStatus === "expired" || !booking.verificationCode) {
+    if (booking.tripStatus !== "arrived_pickup") {
+      throw new Error(i18n.t("booking.verificationRequiredBeforeStart"));
+    }
+
+    if (!booking.verificationCode) {
       throw new Error(i18n.t("booking.codeExpired"));
     }
 
@@ -1530,9 +1588,12 @@ export const verifySchoolBookingCode = async (
       throw new Error(i18n.t("booking.verificationLocked"));
     }
 
-    // Exact string comparison — the code is stored zero-padded, and a
-    // leading-zero code ("0427") must only ever match the same string.
-    if (String(enteredCode) !== booking.verificationCode) {
+    // Exact string comparison of normalized values — the code is stored
+    // zero-padded, and a leading-zero code ("0427") must only ever match
+    // the same string; never compared as a number.
+    const cleanStoredCode = normalizeToWesternDigits(booking.verificationCode).trim();
+
+    if (cleanEnteredCode !== cleanStoredCode) {
       const attempts = booking.verificationAttempts + 1;
       const payload: any = {
         verificationAttempts: attempts,
@@ -1556,14 +1617,54 @@ export const verifySchoolBookingCode = async (
       );
     }
 
+    const nowTs = serverTimestamp();
+
     transaction.update(bookingRef, {
       verificationStatus: "verified" as VerificationStatus,
-      verifiedAt: serverTimestamp(),
+      verifiedAt: nowTs,
       verifiedByDriverId: user.uid,
       verificationAttempts: 0,
-      updatedAt: serverTimestamp(),
+      passengerVerified: true,
+      passengerVerifiedAt: nowTs,
+      tripStatus: "in_progress" as TripTrackingStatus,
+      tripStartedAt: nowTs,
+      tripStartedNotificationSent: true,
+      updatedAt: nowTs,
     });
+
+    // Authorizes this exact passenger to read the trip's shared live
+    // location (tripLocations/{tripId} — one doc per car, several
+    // authorized passengers) the moment their own trip actually starts —
+    // see driverLocationTask.ts and firestore.rules. merge:true both
+    // creates the doc (first passenger on this trip to verify) and grows
+    // the list (later ones), matching the rules' create/update shapes.
+    const tripLocationRef = doc(db, TRIP_LOCATIONS_COLLECTION, booking.tripId);
+    transaction.set(
+      tripLocationRef,
+      {
+        driverId: user.uid,
+        authorizedPassengerIds: arrayUnion(booking.passengerId),
+        updatedAt: nowTs,
+      },
+      { merge: true },
+    );
+
+    started = true;
+    resultBooking = {
+      ...booking,
+      verificationStatus: "verified",
+      verifiedByDriverId: user.uid,
+      verificationAttempts: 0,
+      passengerVerified: true,
+      tripStatus: "in_progress",
+    };
   });
+
+  if (!resultBooking) {
+    throw new Error(i18n.t("rides.bookingNotFound"));
+  }
+
+  return { started, booking: resultBooking };
 };
 
 export type RoundTripBookingResult = {
@@ -2043,6 +2144,11 @@ export const acceptReplacementOffer = async (
       verifiedByDriverId: null,
       verificationAttempts: 0,
       verificationLockedUntil: null,
+
+      passengerVerified: false,
+      passengerVerifiedAt: null,
+      tripStartedAt: null,
+      tripStartedNotificationSent: false,
 
       bookingStatus: "replacement_confirmed" as SchoolBookingLifecycleStatus,
       replacesBookingId: oldBooking.id,
