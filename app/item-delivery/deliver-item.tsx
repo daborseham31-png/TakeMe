@@ -15,6 +15,8 @@ import { useTranslation } from "react-i18next";
 
 import IsraelLocationAutocomplete from "../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../booking/israelLocations";
+import { TimeInput } from "../driver/create/DateInput";
+import { normalizeToWesternDigits } from "../i18n/digits";
 
 const LANGUAGES_LIST = [
   { key: "ar", label: "العربية" },
@@ -36,15 +38,11 @@ const getTodayDate = () => {
 };
 
 const getDigitsOnly = (value: string) => {
-  return value.replace(/\D/g, "");
-};
-
-const cleanTimeInput = (value: string) => {
-  return value.replace(/[^\d:]/g, "").slice(0, 5);
+  return normalizeToWesternDigits(value).replace(/\D/g, "");
 };
 
 const normalizeTime = (value: string) => {
-  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+  const match = normalizeToWesternDigits(value).trim().match(/^(\d{1,2}):(\d{2})$/);
 
   if (!match) return null;
 
@@ -69,6 +67,7 @@ export default function DeliverItemScreen() {
   const [fromError, setFromError] = useState("");
   const [toError, setToError] = useState("");
   const [tripTime, setTripTime] = useState("09:00");
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   const handleFromChange = (text: string) => {
     setFromLocation(text);
@@ -240,21 +239,14 @@ export default function DeliverItemScreen() {
             </View>
           </View>
 
-          <Text style={styles.labelOrange}>
-            <Text>🕐 </Text>{t("booking.deliveryTimeLabel")}
-          </Text>
-          <View style={styles.timeRowFull}>
-            <TextInput
-              style={styles.timeInput}
-              placeholder="--:--"
-              placeholderTextColor="#8B7B6B"
-              keyboardType="numbers-and-punctuation"
-              maxLength={5}
-              value={tripTime}
-              onChangeText={(text) => setTripTime(cleanTimeInput(text))}
-            />
-            <Ionicons name="time-outline" size={18} color="#111827" />
-          </View>
+          <TimeInput
+            label={`🕐 ${t("booking.deliveryTimeLabel")}`}
+            value={tripTime}
+            onChange={setTripTime}
+            showPicker={showTimePicker}
+            setShowPicker={setShowTimePicker}
+            associatedDate={getTodayDate()}
+          />
 
           <Text style={styles.label}>📦 {t("driverCreate.recipientPhoneLabel")}</Text>
           <View style={styles.inputRow}>

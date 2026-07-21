@@ -1,10 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +11,7 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import InfiniteTimeWheelPicker from "../../components/InfiniteTimeWheelPicker";
 import {
   formatDateToYMD,
   getDayFromDateText,
@@ -101,27 +101,14 @@ export default function DateInput({
 }
 
 // ---------------------------------------------------------------------------
-// TimeInput – a fully custom hour/minute grid picker.
-//
-// The native @react-native-community/datetimepicker "time" mode is
-// unreliable when embedded (controlled) inside a custom Modal on Android —
-// it can appear to get stuck on a single hour because the OS dialog re-opens
-// imperatively on every controlled re-render. Building the picker out of
-// plain scrollable button lists sidesteps that entirely and behaves
-// identically on iOS, Android, and Expo Go.
+// TimeInput – the app's shared time field: a pressable row that opens a
+// Confirm/Cancel modal wrapping InfiniteTimeWheelPicker (see
+// app/components/InfiniteTimeWheelPicker.tsx for the actual continuous
+// hour/minute wheel — this file owns only the field/modal chrome and this
+// screen-shared "today only, no past times" restriction).
 // ---------------------------------------------------------------------------
 
-const HOURS = Array.from({ length: 24 }, (_, i) => i);
-const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
-const ROW_HEIGHT = 46;
-const VISIBLE_ROWS = 5;
-
 const pad2 = (value: number) => String(value).padStart(2, "0");
-
-const nearestMinuteStep = (minute: number) =>
-  MINUTES.reduce((closest, step) =>
-    Math.abs(step - minute) < Math.abs(closest - minute) ? step : closest,
-  );
 
 type TimeInputProps = {
   label: string;
@@ -133,6 +120,8 @@ type TimeInputProps = {
   // hours/minutes already in the past are disabled. Any other date (or no
   // date at all) allows every hour/minute — the time is never locked.
   associatedDate?: string;
+  // Matches the app's existing default when omitted.
+  minuteInterval?: number;
 };
 
 export function TimeInput({
@@ -142,6 +131,7 @@ export function TimeInput({
   showPicker,
   setShowPicker,
   associatedDate,
+  minuteInterval = 5,
 }: TimeInputProps) {
   const { t } = useTranslation();
   const isToday = associatedDate
@@ -152,14 +142,10 @@ export function TimeInput({
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
 
-  const hasValidMinuteForHour = (hour: number) => {
-    if (!isToday) return true;
-    if (hour > currentHour) return true;
-    if (hour < currentHour) return false;
-    return MINUTES.some((minute) => minute >= currentMinute);
+  const isHourDisabled = (hour: number) => {
+    if (!isToday) return false;
+    return hour < currentHour;
   };
-
-  const isHourDisabled = (hour: number) => !hasValidMinuteForHour(hour);
 
   const isMinuteDisabled = (hour: number, minute: number) => {
     if (!isToday) return false;
@@ -167,176 +153,38 @@ export function TimeInput({
     return minute < currentMinute;
   };
 
-  const findInitialSelection = (): [number, number] => {
-    const parsed = normalizeTime(value);
-    let hour = parsed ? Number(parsed.split(":")[0]) : isToday ? currentHour : 0;
-    let minute = parsed
-      ? nearestMinuteStep(Number(parsed.split(":")[1]))
-      : isToday
-        ? nearestMinuteStep(currentMinute)
-        : 0;
-
-    if (isToday) {
-      while (hour < 24 && !hasValidMinuteForHour(hour)) {
-        hour += 1;
-      }
-
-      if (hour > 23) hour = 23;
-
-      if (hour === currentHour) {
-        const validMinutes = MINUTES.filter((m) => m >= currentMinute);
-        if (!validMinutes.includes(minute)) {
-          minute = validMinutes[0] ?? MINUTES[MINUTES.length - 1];
-        }
-      }
-    }
-
-    return [hour, minute];
-  };
-
-  const [selectedHour, setSelectedHour] = useState(0);
-  const [selectedMinute, setSelectedMinute] = useState(0);
-
-  const hourScrollRef = useRef<ScrollView>(null);
-  const minuteScrollRef = useRef<ScrollView>(null);
+  // Rule 8 (this component's own contract, see InfiniteTimeWheelPicker's
+  // header comment): the wheel itself never stops looping just because
+  // today's past hours/minutes are disabled here — only taps/settling on
+  // those specific rows are blocked, for this field only.
+  const [draftValue, setDraftValue] = useState(value);
 
   useEffect(() => {
     if (!showPicker) return;
 
-    const [hour, minute] = findInitialSelection();
+    // Rule 2: center on the current value, or (nothing selected yet) on the
+    // device's current time rounded to the configured interval.
+    if (normalizeTime(value)) {
+      setDraftValue(normalizeTime(value)!);
+      return;
+    }
 
-    setSelectedHour(hour);
-    setSelectedMinute(minute);
+    const step = Math.max(1, Math.min(30, Math.round(minuteInterval)));
+    const roundedMinute = Math.round(currentMinute / step) * step;
+    const rollOverHour = roundedMinute >= 60 ? 1 : 0;
 
-    requestAnimationFrame(() => {
-      hourScrollRef.current?.scrollTo({
-        y: hour * ROW_HEIGHT,
-        animated: false,
-      });
-      minuteScrollRef.current?.scrollTo({
-        y: MINUTES.indexOf(minute) * ROW_HEIGHT,
-        animated: false,
-      });
-    });
+    setDraftValue(`${pad2((currentHour + rollOverHour) % 24)}:${pad2(roundedMinute % 60)}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPicker, value, associatedDate]);
-
-  const clampIndex = (index: number, length: number) =>
-    Math.max(0, Math.min(length - 1, index));
-
-  const findFirstEnabledHourFrom = (startIndex: number) => {
-    let index = HOURS.findIndex(
-      (hour, i) => i >= startIndex && !isHourDisabled(hour),
-    );
-    if (index === -1) index = HOURS.findIndex((hour) => !isHourDisabled(hour));
-    return index;
-  };
-
-  const findFirstEnabledMinuteFrom = (hour: number, startIndex: number) => {
-    let index = MINUTES.findIndex(
-      (minute, i) => i >= startIndex && !isMinuteDisabled(hour, minute),
-    );
-    if (index === -1) {
-      index = MINUTES.findIndex((minute) => !isMinuteDisabled(hour, minute));
-    }
-    return index;
-  };
-
-  // The centered hour becomes selectedHour as soon as the wheel settles — no
-  // tap required. If it settles on a disabled hour it snaps forward to the
-  // nearest selectable one, and clamps the minute wheel to match.
-  const applyHourSelection = (index: number) => {
-    const hour = HOURS[index];
-    setSelectedHour(hour);
-
-    if (isMinuteDisabled(hour, selectedMinute)) {
-      const minuteIndex = findFirstEnabledMinuteFrom(hour, 0);
-
-      if (minuteIndex !== -1) {
-        setSelectedMinute(MINUTES[minuteIndex]);
-        minuteScrollRef.current?.scrollTo({
-          y: minuteIndex * ROW_HEIGHT,
-          animated: true,
-        });
-      }
-    }
-  };
-
-  const applyMinuteSelection = (index: number) => {
-    setSelectedMinute(MINUTES[index]);
-  };
-
-  const handleHourScrollEnd = (event: any) => {
-    const rawIndex = clampIndex(
-      Math.round(event.nativeEvent.contentOffset.y / ROW_HEIGHT),
-      HOURS.length,
-    );
-
-    const index = isHourDisabled(HOURS[rawIndex])
-      ? findFirstEnabledHourFrom(rawIndex)
-      : rawIndex;
-
-    if (index === -1) return;
-
-    if (index !== rawIndex) {
-      hourScrollRef.current?.scrollTo({
-        y: index * ROW_HEIGHT,
-        animated: true,
-      });
-    }
-
-    applyHourSelection(index);
-  };
-
-  const handleMinuteScrollEnd = (event: any) => {
-    const rawIndex = clampIndex(
-      Math.round(event.nativeEvent.contentOffset.y / ROW_HEIGHT),
-      MINUTES.length,
-    );
-
-    const index = isMinuteDisabled(selectedHour, MINUTES[rawIndex])
-      ? findFirstEnabledMinuteFrom(selectedHour, rawIndex)
-      : rawIndex;
-
-    if (index === -1) return;
-
-    if (index !== rawIndex) {
-      minuteScrollRef.current?.scrollTo({
-        y: index * ROW_HEIGHT,
-        animated: true,
-      });
-    }
-
-    applyMinuteSelection(index);
-  };
-
-  // Tapping a cell is still supported as a shortcut, but it isn't required —
-  // scrolling a value to the center is enough.
-  const handleSelectHour = (hour: number) => {
-    if (isHourDisabled(hour)) return;
-
-    const index = HOURS.indexOf(hour);
-    applyHourSelection(index);
-    hourScrollRef.current?.scrollTo({ y: index * ROW_HEIGHT, animated: true });
-  };
-
-  const handleSelectMinute = (minute: number) => {
-    if (isMinuteDisabled(selectedHour, minute)) return;
-
-    const index = MINUTES.indexOf(minute);
-    applyMinuteSelection(index);
-    minuteScrollRef.current?.scrollTo({
-      y: index * ROW_HEIGHT,
-      animated: true,
-    });
-  };
+  }, [showPicker]);
 
   const handleCancel = () => {
+    // Rule 4: Cancel keeps the previous value — the draft is simply
+    // discarded (never committed via the external onChange).
     setShowPicker(false);
   };
 
   const handleSave = () => {
-    onChange(`${pad2(selectedHour)}:${pad2(selectedMinute)}`);
+    onChange(draftValue);
     setShowPicker(false);
   };
 
@@ -347,7 +195,7 @@ export function TimeInput({
       <Pressable style={styles.inputRow} onPress={() => setShowPicker(true)}>
         <Ionicons name="time-outline" size={18} color="#8B7B6B" />
 
-        <Text style={[styles.rowInput, !value && { color: "#8B7B6B" }]}>
+        <Text style={[styles.rowInput, styles.ltrText, !value && { color: "#8B7B6B" }]}>
           {value || `${t("common.select")} ${label}`}
         </Text>
       </Pressable>
@@ -370,89 +218,13 @@ export function TimeInput({
               </Text>
             </View>
 
-            <View style={timeStyles.pickerBox}>
-              <View style={timeStyles.columnsRow}>
-                <ScrollView
-                  ref={hourScrollRef}
-                  style={timeStyles.column}
-                  contentContainerStyle={timeStyles.columnContent}
-                  showsVerticalScrollIndicator={false}
-                  snapToInterval={ROW_HEIGHT}
-                  decelerationRate="fast"
-                  onMomentumScrollEnd={handleHourScrollEnd}
-                  onScrollEndDrag={handleHourScrollEnd}
-                >
-                  {HOURS.map((hour) => {
-                    const disabled = isHourDisabled(hour);
-                    const selected = hour === selectedHour;
-
-                    return (
-                      <Pressable
-                        key={hour}
-                        disabled={disabled}
-                        onPress={() => handleSelectHour(hour)}
-                        style={[
-                          timeStyles.cell,
-                          selected && timeStyles.cellSelected,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            timeStyles.cellText,
-                            selected && timeStyles.cellTextSelected,
-                            disabled && timeStyles.cellTextDisabled,
-                          ]}
-                        >
-                          {pad2(hour)}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-
-                <Text style={timeStyles.colon}>:</Text>
-
-                <ScrollView
-                  ref={minuteScrollRef}
-                  style={timeStyles.column}
-                  contentContainerStyle={timeStyles.columnContent}
-                  showsVerticalScrollIndicator={false}
-                  snapToInterval={ROW_HEIGHT}
-                  decelerationRate="fast"
-                  onMomentumScrollEnd={handleMinuteScrollEnd}
-                  onScrollEndDrag={handleMinuteScrollEnd}
-                >
-                  {MINUTES.map((minute) => {
-                    const disabled = isMinuteDisabled(selectedHour, minute);
-                    const selected = minute === selectedMinute;
-
-                    return (
-                      <Pressable
-                        key={minute}
-                        disabled={disabled}
-                        onPress={() => handleSelectMinute(minute)}
-                        style={[
-                          timeStyles.cell,
-                          selected && timeStyles.cellSelected,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            timeStyles.cellText,
-                            selected && timeStyles.cellTextSelected,
-                            disabled && timeStyles.cellTextDisabled,
-                          ]}
-                        >
-                          {pad2(minute)}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-
-              <View pointerEvents="none" style={timeStyles.selectionHighlight} />
-            </View>
+            <InfiniteTimeWheelPicker
+              value={draftValue}
+              onChange={setDraftValue}
+              minuteInterval={minuteInterval}
+              isHourDisabled={isHourDisabled}
+              isMinuteDisabled={isMinuteDisabled}
+            />
 
             <View style={timeStyles.buttonsRow}>
               <Pressable onPress={handleCancel} style={timeStyles.cancelButton}>
@@ -508,67 +280,8 @@ const timeStyles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 4,
   },
-  pickerBox: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E7DCD1",
-    borderRadius: 18,
-    marginBottom: 16,
-    position: "relative",
-  },
-  columnsRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  column: {
-    height: ROW_HEIGHT * VISIBLE_ROWS,
-    width: 90,
-  },
-  // Pads the scrollable content itself (not the row around it) so the
-  // first and last cell can each be scrolled all the way to the centered
-  // selection slot.
-  columnContent: {
-    paddingVertical: (ROW_HEIGHT * (VISIBLE_ROWS - 1)) / 2,
-  },
-  colon: {
-    fontSize: 24,
-    fontWeight: "900",
-    color: "#111827",
-    marginHorizontal: 6,
-  },
-  cell: {
-    height: ROW_HEIGHT,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cellSelected: {
-    backgroundColor: "#FFF2E8",
-    borderRadius: 12,
-  },
-  cellText: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#111827",
-  },
-  cellTextSelected: {
-    color: "#F58220",
-    fontWeight: "900",
-  },
-  cellTextDisabled: {
-    color: "#D9CFC5",
-  },
-  selectionHighlight: {
-    position: "absolute",
-    left: 12,
-    right: 12,
-    top: (ROW_HEIGHT * VISIBLE_ROWS) / 2 - ROW_HEIGHT / 2,
-    height: ROW_HEIGHT,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#F1CBA5",
-  },
   buttonsRow: {
+    marginTop: 16,
     flexDirection: "row",
     gap: 12,
   },

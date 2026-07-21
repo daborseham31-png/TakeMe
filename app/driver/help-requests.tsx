@@ -134,11 +134,24 @@ export default function DriverHelpRequestsScreen() {
       where("selectedDriverId", "==", uid),
     );
 
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setAcceptedRequests(
-        snap.docs.map((d) => normalizeRoadsideRequest(d.id, d.data())),
-      );
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => {
+        setAcceptedRequests(
+          snap.docs.map((d) => normalizeRoadsideRequest(d.id, d.data())),
+        );
+      },
+      (error) => {
+        console.log("Listener failed:", {
+          feature: "help-requests.acceptedRequests",
+          collection: "roadsideRequests",
+          userId: uid,
+          code: error.code,
+          message: error.message,
+        });
+        setAcceptedRequests([]);
+      },
+    );
 
     return unsubscribe;
   }, [uid]);

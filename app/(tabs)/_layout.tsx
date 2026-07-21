@@ -2,12 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { RIDE_CATEGORY } from "../booking/rideBookingLib";
+import { stopDriverLocationTracking } from "../driverLocationTask";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { registerForPushNotificationsAsync } from "../pushNotifications";
 
 const RIDE_LIKE_CATEGORIES = [RIDE_CATEGORY, "school"];
 
@@ -67,9 +70,15 @@ function BookingsTabIcon({
 
 export default function TabLayout() {
   const { t } = useTranslation();
+  const { language } = useLanguage();
+  const languageRef = useRef(language);
   const [hasPassengerAttention, setHasPassengerAttention] = useState(false);
   const [hasDriverAttention, setHasDriverAttention] = useState(false);
   const hasActiveRide = hasPassengerAttention || hasDriverAttention;
+
+  useEffect(() => {
+    languageRef.current = language;
+  }, [language]);
 
   // Live listeners: passenger side stays lit until the trip is rated;
   // driver side stays lit until the driver presses Finish Trip.
@@ -86,8 +95,16 @@ export default function TabLayout() {
       if (!user) {
         setHasPassengerAttention(false);
         setHasDriverAttention(false);
+        // Tracking is no longer authorized once the driver signs out — see
+        // app/driverLocationTask.ts (this is the one central place every
+        // auth-loss path in the app already passes through).
+        stopDriverLocationTracking();
         return;
       }
+
+      // Best-effort, once per sign-in — see app/pushNotifications.ts for
+      // why this can silently no-op (permission denied, no EAS project id).
+      registerForPushNotificationsAsync(user.uid, languageRef.current);
 
       unsubPassenger = onSnapshot(
         query(collection(db, "bookings"), where("passengerId", "==", user.uid)),

@@ -1,10 +1,12 @@
 // ---------------------------------------------------------------------------
-// School ride creation entry point — offers two modes:
-//   - "One-time trip": the NEW outbound (+ optional return) flow, writing to
-//     the schoolTrips collection (see SchoolTripForm.tsx / schoolTripsLib.ts).
-//   - "Weekly recurring": the ORIGINAL school ride form (RideForm.tsx),
-//     completely unchanged, still writing to driverRoutes — kept reachable
-//     so no existing feature is removed by this upgrade.
+// School ride creation entry point — one screen, two selectable modes:
+//   - "One-time trip": writes to the schoolTrips collection (see
+//     SchoolTripForm.tsx / schoolTripsLib.ts).
+//   - "Weekly recurring": the original school ride form (RideForm.tsx),
+//     still writing to driverRoutes — rendered inline (embedded) below the
+//     SAME header/subtitle/selector, never a separate screen. Both forms
+//     stay mounted at all times (toggled with display:none) so switching
+//     between modes never loses whatever the driver already typed.
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
@@ -18,16 +20,12 @@ import { styles } from "./driverHelpers";
 import RideForm from "./RideForm";
 import SchoolTripForm from "./SchoolTripForm";
 
-type Mode = "oneTime" | "weekly";
+type TripFrequency = "oneTime" | "weekly";
 
 export default function SchoolRideScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
-  const [mode, setMode] = useState<Mode>("oneTime");
-
-  if (mode === "weekly") {
-    return <RideForm category="school" onBack={() => setMode("oneTime")} />;
-  }
+  const [tripFrequency, setTripFrequency] = useState<TripFrequency>("oneTime");
 
   return (
     <SafeAreaView style={styles.page}>
@@ -45,13 +43,13 @@ export default function SchoolRideScreen() {
 
         <View style={modeStyles.tabRow}>
           <Pressable
-            style={[modeStyles.tab, mode === "oneTime" && modeStyles.tabActive]}
-            onPress={() => setMode("oneTime")}
+            style={[modeStyles.tab, tripFrequency === "oneTime" && modeStyles.tabActive]}
+            onPress={() => setTripFrequency("oneTime")}
           >
             <Text
               style={[
                 modeStyles.tabText,
-                mode === "oneTime" && modeStyles.tabTextActive,
+                tripFrequency === "oneTime" && modeStyles.tabTextActive,
               ]}
             >
               {t("schoolTrip.modeOneTime")}
@@ -59,13 +57,13 @@ export default function SchoolRideScreen() {
           </Pressable>
 
           <Pressable
-            style={[modeStyles.tab, (mode as Mode) === "weekly" && modeStyles.tabActive]}
-            onPress={() => setMode("weekly")}
+            style={[modeStyles.tab, tripFrequency === "weekly" && modeStyles.tabActive]}
+            onPress={() => setTripFrequency("weekly")}
           >
             <Text
               style={[
                 modeStyles.tabText,
-                (mode as Mode) === "weekly" && modeStyles.tabTextActive,
+                tripFrequency === "weekly" && modeStyles.tabTextActive,
               ]}
             >
               {t("schoolTrip.modeWeekly")}
@@ -75,7 +73,15 @@ export default function SchoolRideScreen() {
       </View>
 
       <View style={{ flex: 1, paddingHorizontal: 16 }}>
-        <SchoolTripForm />
+        {/* Both forms stay mounted the whole time — only visibility toggles,
+            so each keeps whatever the driver already entered when the
+            selector flips back and forth. */}
+        <View style={{ flex: 1, display: tripFrequency === "oneTime" ? "flex" : "none" }}>
+          <SchoolTripForm />
+        </View>
+        <View style={{ flex: 1, display: tripFrequency === "weekly" ? "flex" : "none" }}>
+          <RideForm category="school" embedded forceRecurring />
+        </View>
       </View>
     </SafeAreaView>
   );

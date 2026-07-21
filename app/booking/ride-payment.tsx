@@ -30,6 +30,7 @@ import { openBitPayment } from "./bitPayment";
 import { isDateTimeExpired } from "./homeFeedLib";
 import { RIDE_CATEGORY, RidePayment } from "./rideBookingLib";
 import {
+  acceptReplacementOffer,
   bookOutboundForChildren,
   bookReturnForChild,
   bookSchoolTripSingle,
@@ -107,6 +108,17 @@ export default function RidePaymentScreen() {
   ) as SchoolTripDirection;
   const schoolBookingGroupIdParam = String(params.bookingGroupId || "");
   const schoolRoundTrip = params.roundTrip === "true";
+
+  // Driver-cancellation replacement (AGENTS.md's replacement-offer feature)
+  // — the parent already picked ONE specific replacement trip on
+  // app/booking/school/replacement-offer.tsx; this screen only collects
+  // payment for the (higher) price difference before acceptReplacementOffer
+  // actually creates the replacement booking. Treated as its own booking
+  // source (not "schoolTrips") since it calls a different function on
+  // continue, but shares every bit of UI/seat-locking with it below.
+  const isReplacementSource = String(params.bookingSource || "") === "schoolTripReplacement";
+  const replacementOfferId = String(params.replacementOfferId || "");
+  const isAnySchoolTripsSource = isSchoolTripsSource || isReplacementSource;
 
   // One entry per child riding this trip (AGENTS.md #3) — set by
   // trip-confirm.tsx. Empty for any booking with no per-child data (legacy
@@ -195,7 +207,7 @@ export default function RidePaymentScreen() {
   // starts (and, since the stepper card below is hidden for this source,
   // stays) at that exact count rather than the generic default of 1.
   const [selectedSeats, setSelectedSeats] = useState(
-    isSchoolTripsSource ? maxSeatsValue : 1,
+    isAnySchoolTripsSource ? maxSeatsValue : 1,
   );
 
   const decreaseSeats = () =>
@@ -539,6 +551,27 @@ const createBookingAfterPayment = async (
     const payment: RidePayment =
       method === "cash" ? { method: "cash" } : { method: "bit" };
 
+    if (isReplacementSource) {
+      if (!replacementOfferId || !schoolTripId) {
+        Alert.alert(t("common.error"), t("rides.missingTripId"));
+        return;
+      }
+
+      try {
+        setProcessing(true);
+        await acceptReplacementOffer(replacementOfferId, schoolTripId, method === "bit" ? "bit" : "cash");
+        Alert.alert(t("common.success"), t("booking.replacementConfirmed"), [
+          { text: t("common.ok"), onPress: () => router.replace("/(tabs)/bookings" as any) },
+        ]);
+      } catch (error: any) {
+        Alert.alert(t("common.error"), error?.message || t("rides.couldNotConfirmBooking"));
+      } finally {
+        setProcessing(false);
+      }
+
+      return;
+    }
+
     if (isSchoolTripsSource) {
       try {
         setProcessing(true);
@@ -825,7 +858,7 @@ const createBookingAfterPayment = async (
             <View style={styles.summaryCard}>
               <Text style={styles.summaryTitle}>{t("rides.numberOfSeats")}</Text>
 
-              {isSchoolTripsSource ? (
+              {isAnySchoolTripsSource ? (
                 // Locked — this count was already fixed on trip-confirm.tsx
                 // (the child roster's size, or the passenger's own choice
                 // there — AGENTS.md's "one seat = one child" invariant must

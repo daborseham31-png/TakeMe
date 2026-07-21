@@ -13,7 +13,9 @@ import {
 } from "react-native";
 import MapView, { Marker, Region } from "react-native-maps";
 import { useTranslation } from "react-i18next";
+import { TimeInput } from "../driver/create/DateInput";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { normalizeToWesternDigits } from "../i18n/digits";
 
 // Default map region (Nazareth area) used until the user moves the pin.
 const DEFAULT_REGION: Region = {
@@ -29,12 +31,8 @@ type StoreEntry = {
   items: string;
 };
 
-const cleanTimeInput = (value: string) => {
-  return value.replace(/[^\d:]/g, "").slice(0, 5);
-};
-
 const normalizeTime = (value: string) => {
-  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+  const match = normalizeToWesternDigits(value).trim().match(/^(\d{1,2}):(\d{2})$/);
 
   if (!match) return null;
 
@@ -72,6 +70,8 @@ export default function StoreDeliveryScreen() {
 
   const [fromTime, setFromTime] = useState("");
   const [toTime, setToTime] = useState("");
+  const [showFromTimePicker, setShowFromTimePicker] = useState(false);
+  const [showToTimePicker, setShowToTimePicker] = useState(false);
 
   const addressLabel = `${marker.latitude.toFixed(5)}, ${marker.longitude.toFixed(
     5,
@@ -263,35 +263,23 @@ export default function StoreDeliveryScreen() {
 
           <View style={styles.twoColumns}>
             <View style={styles.column}>
-              <Text style={styles.label}>{t("booking.from")}</Text>
-              <View style={styles.timeRow}>
-                <TextInput
-                  style={styles.timeInput}
-                  placeholder="--:--"
-                  placeholderTextColor="#8B7B6B"
-                  keyboardType="numbers-and-punctuation"
-                  maxLength={5}
-                  value={fromTime}
-                  onChangeText={(text) => setFromTime(cleanTimeInput(text))}
-                />
-                <Ionicons name="time-outline" size={18} color="#111827" />
-              </View>
+              <TimeInput
+                label={t("booking.from")}
+                value={fromTime}
+                onChange={setFromTime}
+                showPicker={showFromTimePicker}
+                setShowPicker={setShowFromTimePicker}
+              />
             </View>
 
             <View style={styles.column}>
-              <Text style={styles.label}>{t("booking.to")}</Text>
-              <View style={styles.timeRow}>
-                <TextInput
-                  style={styles.timeInput}
-                  placeholder="--:--"
-                  placeholderTextColor="#8B7B6B"
-                  keyboardType="numbers-and-punctuation"
-                  maxLength={5}
-                  value={toTime}
-                  onChangeText={(text) => setToTime(cleanTimeInput(text))}
-                />
-                <Ionicons name="time-outline" size={18} color="#111827" />
-              </View>
+              <TimeInput
+                label={t("booking.to")}
+                value={toTime}
+                onChange={setToTime}
+                showPicker={showToTimePicker}
+                setShowPicker={setShowToTimePicker}
+              />
             </View>
           </View>
         </View>

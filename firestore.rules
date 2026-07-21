@@ -79,6 +79,24 @@ service cloud.firestore {
         unchanged("isDriver") &&
         unchanged("driverVerificationStatus") &&
         unchanged("accountStatus")
+      ) || (
+        // A passenger who just rated THIS user as their driver credits
+        // exactly one new rating onto the running-average fields — see
+        // submitSchoolBookingRating (schoolTripsLib.ts) and
+        // submitRideRating (rideBookingLib.ts), which both write here as
+        // one step of the same rating transaction that creates the
+        // driverReviews doc and marks the booking rated. Never touches
+        // name/role/phone/verification/anything else about the profile,
+        // and the increment is bounded to a single valid 1-5 star value —
+        // this can't be used to overwrite or reset another user's profile.
+        isSignedIn() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["ratingCount", "ratingSum", "ratingAverage", "updatedAt"]) &&
+        request.resource.data.ratingCount == resource.data.get("ratingCount", 0) + 1 &&
+        (request.resource.data.ratingSum - resource.data.get("ratingSum", 0)) >= 1 &&
+        (request.resource.data.ratingSum - resource.data.get("ratingSum", 0)) <= 5 &&
+        request.resource.data.ratingAverage >= 0 &&
+        request.resource.data.ratingAverage <= 5
       );
 
       allow delete: if isAdmin() && request.auth.uid != userId;
@@ -142,7 +160,23 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+
+      // Left as broad "any signed-in user" for receiverId, matching this
+      // collection's actual de-facto use everywhere in the app (a driver
+      // notifying their passenger, a passenger notifying their driver, ... —
+      // "notify someone else" IS the whole point of this collection, not a
+      // gap). The one real spoofing risk closed here: a caller can never
+      // forge a DIFFERENT sender identity than their own auth uid, and can
+      // never mark a notification as already pushed (pushSent is
+      // exclusively set by the send-push Cloud Function after it actually
+      // sends one — see functions/index.js's sendPushForNotification).
+      allow create: if isSignedIn() &&
+        (!("senderId" in request.resource.data) || request.resource.data.senderId == null ||
+          request.resource.data.senderId == request.auth.uid) &&
+        (!("pushSent" in request.resource.data) || request.resource.data.pushSent == false);
+
+      allow update, delete: if isSignedIn();
     }
 
     match /driverNotifications/{notificationId} {
@@ -177,7 +211,10 @@ service cloud.firestore {
         request.resource.data.availableSeats == request.resource.data.totalSeats;
 
       // Legitimate non-owner-agnostic update shapes:
-      //   1) The owning driver changes status only (e.g. cancelling a leg).
+      //   1) The owning driver changes status (e.g. cancelling a leg) and
+      //      optionally stamps WHY — cancellationReason is read server-side
+      //      by the onSchoolTripCancelled Cloud Function to propagate onto
+      //      affected bookings and to build the replacement offer.
       //   2) ANY signed-in user's booking/cancellation transaction moves
       //      availableSeats within [0, totalSeats] and status between
       //      active/full — never any other field (price, driverId, date,
@@ -198,7 +235,8 @@ service cloud.firestore {
         (
           resource.data.driverId == request.auth.uid &&
           request.resource.data.driverId == resource.data.driverId &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "updatedAt"])
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "cancellationReason", "updatedAt"])
         ) ||
         (
           request.resource.data.diff(resource.data).affectedKeys()
@@ -231,21 +269,44 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
         request.resource.data.passengerId == request.auth.uid;
 
-      // Three legitimate update shapes:
+      // Seven legitimate update shapes:
       //   1) The booking passenger cancels it — driver/trip/price/seat
-      //      fields are immutable after creation.
+      //      fields are immutable after creation, and this can only ever
+      //      move status to "cancelled" + expire the passenger's own
+      //      verification code (never "verified" — a passenger can never
+      //      mark themselves as verified).
       //   2) The owning driver syncs this booking's own tripStatus mirror
       //      (and, once, its rating-eligibility flags) from the SAME trip-
       //      lifecycle transition as the schoolTrips write above — see
       //      ride-navigation.tsx's updateSchoolTripStatus batch sync.
+      //      "in_progress" is deliberately NOT a legal value here — see
+      //      shape 5 below, the only path allowed to reach it.
       //   3) The booking passenger submits their own post-trip rating.
+      //   4) The owning driver records a WRONG code guess (attempt count /
+      //      lockout only) — see verifyPassengerCodeAndStartTrip in
+      //      schoolTripsLib.ts. Never touches verificationStatus/tripStatus.
+      //   5) The owning driver checks the passenger's verification code AND
+      //      it MATCHED — the only update shape that may ever move
+      //      tripStatus from "arrived_pickup" to "in_progress", and only
+      //      together, atomically, with passengerVerified/tripStartedAt all
+      //      becoming set in the same write (never independently, never a
+      //      second time on a booking that already started). The driver can
+      //      never write the code itself, only the check outcome.
+      //   6) The booking passenger (parent) accepts a driver-cancellation
+      //      replacement offer for THIS (old) booking — see
+      //      acceptReplacementOffer in schoolTripsLib.ts. Everything else
+      //      about the old booking (seats, price, trip, driver) is frozen;
+      //      only the replacement-linkage fields change.
       allow update: if isSignedIn() && (
         (
           resource.data.passengerId == request.auth.uid &&
           request.resource.data.passengerId == resource.data.passengerId &&
           request.resource.data.driverId == resource.data.driverId &&
           request.resource.data.tripId == resource.data.tripId &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "tripStatus", "updatedAt"])
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "verificationStatus", "updatedAt"]) &&
+          request.resource.data.status == "cancelled" &&
+          request.resource.data.verificationStatus == "expired"
         ) ||
         (
           resource.data.driverId == request.auth.uid &&
@@ -257,7 +318,7 @@ service cloud.firestore {
             "ratingSubmitted", "rating", "updatedAt"
           ]) &&
           request.resource.data.tripStatus in
-            ["booked", "driver_on_way", "arrived_pickup", "in_progress", "completed"] &&
+            ["booked", "driver_on_way", "arrived_pickup", "completed"] &&
           (request.resource.data.status == resource.data.status || request.resource.data.status == "completed")
         ) ||
         (
@@ -268,6 +329,136 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(["rating", "ratingSubmitted", "needsPassengerRating", "updatedAt"]) &&
           request.resource.data.ratingSubmitted == true
+        ) ||
+        (
+          resource.data.driverId == request.auth.uid &&
+          request.resource.data.driverId == resource.data.driverId &&
+          request.resource.data.passengerId == resource.data.passengerId &&
+          request.resource.data.tripId == resource.data.tripId &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["verificationAttempts", "verificationLockedUntil", "updatedAt"])
+        ) ||
+        (
+          resource.data.driverId == request.auth.uid &&
+          request.resource.data.driverId == resource.data.driverId &&
+          request.resource.data.passengerId == resource.data.passengerId &&
+          request.resource.data.tripId == resource.data.tripId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "verificationStatus", "verifiedAt", "verifiedByDriverId", "verificationAttempts",
+            "passengerVerified", "passengerVerifiedAt",
+            "tripStatus", "tripStartedAt", "tripStartedNotificationSent", "updatedAt"
+          ]) &&
+          request.resource.data.verificationStatus == "verified" &&
+          request.resource.data.verifiedByDriverId == request.auth.uid &&
+          request.resource.data.passengerVerified == true &&
+          request.resource.data.tripStatus == "in_progress" &&
+          resource.data.tripStatus == "arrived_pickup" &&
+          (!("passengerVerified" in resource.data) || resource.data.passengerVerified != true) &&
+          (!("tripStartedAt" in resource.data) || resource.data.tripStartedAt == null)
+        ) ||
+        (
+          resource.data.passengerId == request.auth.uid &&
+          request.resource.data.passengerId == resource.data.passengerId &&
+          request.resource.data.driverId == resource.data.driverId &&
+          request.resource.data.tripId == resource.data.tripId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "bookingStatus", "replacedByBookingId", "replacementTripId",
+            "replacementConfirmedAt", "updatedAt"
+          ])
+        )
+      );
+
+      allow delete: if false;
+    }
+
+    match /schoolReplacementOffers/{offerId} {
+      // Only the affected parent ever reads their own offers — this
+      // document exists purely to drive their own review screen.
+      // `resource == null` guard: fetchReplacementOfferByBookingId /
+      // fetchReplacementOffer (schoolTripsLib.ts) can be called for a
+      // booking that was never actually driver-cancelled, i.e. no offer
+      // doc exists — same dereference-on-null pitfall fixed on
+      // tripLocations above, caught here during the same review.
+      allow read: if isSignedIn() && (resource == null || resource.data.parentId == request.auth.uid);
+
+      // Only the onSchoolTripCancelled Cloud Function creates these (Admin
+      // SDK, bypasses these rules regardless) — no client ever creates one
+      // directly.
+      allow create: if false;
+
+      // The owning parent accepts or declines — nothing else about the
+      // offer (candidateTripIds, seatsNeeded, the original booking/trip it
+      // points at) is ever client-editable.
+      allow update: if isSignedIn() &&
+        resource.data.parentId == request.auth.uid &&
+        request.resource.data.parentId == resource.data.parentId &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["status", "acceptedTripId", "acceptedBookingId", "updatedAt"]) &&
+        request.resource.data.status in ["accepted", "declined"];
+
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------------------
+    // tripLocations/{targetId} — the driver's live GPS during an active
+    // trip. Deliberately its OWN collection, never a field on the public/
+    // searchable schoolTrips doc or the wide-open bookings doc — those
+    // documents are readable far more broadly than "the assigned driver and
+    // passenger" (schoolTrips is publicly searchable; bookings is
+    // any-signed-in-user today), so real-time GPS could never be locked
+    // down to just the two people on that exact trip if it lived there.
+    //
+    // targetId is the bookingId for Personal Ride (one driver, one
+    // passenger, both known at doc-creation time), or the tripId for School
+    // Trips (one shared car, so passengers accumulate into
+    // authorizedPassengerIds as their own bookings verify+start — see
+    // verifyPassengerCodeAndStartTrip in schoolTripsLib.ts).
+    // -----------------------------------------------------------------
+    match /tripLocations/{targetId} {
+      // `resource` is null for a document that doesn't exist yet — every
+      // trip/booking has one of these BEFORE tracking ever starts (driver
+      // hasn't arrived/been verified yet), and ride-navigation.tsx /
+      // live-tracking.tsx both subscribe to this path the moment their
+      // screen opens, regardless of trip status. Dereferencing
+      // resource.data without checking existence first throws a rules
+      // evaluation error — which Firestore reports to the client as the
+      // same generic "Missing or insufficient permissions" as a real
+      // denial — for EVERY signed-in user, including the legitimate
+      // driver/passenger. Allowing the not-yet-created case through (there
+      // is nothing to protect on a document with no data) is what actually
+      // fixes this; the client already renders "no location yet" for a
+      // missing snapshot either way.
+      allow read: if isSignedIn() && (
+        resource == null ||
+        resource.data.driverId == request.auth.uid ||
+        resource.data.get("passengerId", null) == request.auth.uid ||
+        request.auth.uid in resource.data.get("authorizedPassengerIds", [])
+      );
+
+      // Only the assigned driver ever creates this doc — Personal Ride when
+      // their own tracking starts (app/driverLocationTask.ts), School Trips
+      // inside the verify-and-start transaction. Never seeded with
+      // coordinates on create; a passenger can never create one.
+      allow create: if isSignedIn() &&
+        request.resource.data.driverId == request.auth.uid &&
+        !("latitude" in request.resource.data) &&
+        !("longitude" in request.resource.data);
+
+      allow update: if isSignedIn() && resource.data.driverId == request.auth.uid && (
+        // The driver's own GPS ticks — coordinates only, ownership frozen,
+        // and only for the trip they actually own.
+        (
+          request.resource.data.driverId == resource.data.driverId &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["latitude", "longitude", "heading", "speed", "accuracy", "updatedAt"])
+        ) ||
+        // School Trips only — authorizing exactly one more verified
+        // passenger to read this trip's shared location. Grows the list by
+        // exactly one entry, touches nothing else.
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(["authorizedPassengerIds", "updatedAt"]) &&
+          request.resource.data.authorizedPassengerIds.size() ==
+            resource.data.get("authorizedPassengerIds", []).size() + 1
         )
       );
 
