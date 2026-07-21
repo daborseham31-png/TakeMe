@@ -1144,7 +1144,6 @@
     "noReturnNeeded": "No return ride needed",
     "returnRideForChild": "Return ride for {{child}}",
     "noExactReturnForChild": "No ride found for {{child}} at the requested time",
-    "returnSearchFailedForChild": "Could not search return rides for {{child}}. Please try again.",
     "familyBookingSummary": "{{count}} return ride(s) selected",
     "duplicateChildBooking": "This child already has a booking for this ride.",
     "tripMatchFoundForChildMessage": "A suitable return ride for {{childName}} was found from {{school}} at {{time}} toward {{destination}}. Tap to view the trip.",

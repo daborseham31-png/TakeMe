@@ -1148,7 +1148,6 @@
     "noReturnNeeded": "אין צורך בנסיעת חזור",
     "returnRideForChild": "נסיעת חזור עבור {{child}}",
     "noExactReturnForChild": "לא נמצאה נסיעה עבור {{child}} בשעה המבוקשת",
-    "returnSearchFailedForChild": "לא ניתן היה לחפש נסיעות חזרה עבור {{child}}. נסה שוב.",
     "familyBookingSummary": "נבחרו {{count}} נסיעות חזור",
     "duplicateChildBooking": "לילד זה כבר יש הזמנה לנסיעה זו.",
     "tripMatchFoundForChildMessage": "נמצאה נסיעת חזור מתאימה עבור {{childName}} מ{{school}} בשעה {{time}} לכיוון {{destination}}. הקש כדי להציג את הנסיעה.",

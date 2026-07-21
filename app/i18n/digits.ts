@@ -12,7 +12,5 @@ const EXTENDED_ARABIC_INDIC_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
 export const normalizeToWesternDigits = (value: string): string => {
   return String(value ?? "")
     .replace(/[٠-٩]/g, (digit) => String(ARABIC_INDIC_DIGITS.indexOf(digit)))
-    .replace(/[۰-۹]/g, (digit) =>
-      String(EXTENDED_ARABIC_INDIC_DIGITS.indexOf(digit)),
-    );
+    .replace(/[۰-۹]/g, (digit) => String(EXTENDED_ARABIC_INDIC_DIGITS.indexOf(digit)));
 };

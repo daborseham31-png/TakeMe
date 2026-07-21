@@ -29,7 +29,7 @@ import MapView, { Marker } from "react-native-maps";
 
 import { useTranslation } from "react-i18next";
 
-import { auth, db } from "../../firebase";
+import { db } from "../../firebase";
 import { canStartTrip, getStartTripBlockedReason } from "../booking/bookingsLib";
 import {
   captureDriverLocationOnce,
@@ -169,22 +169,15 @@ export default function RideNavigationScreen() {
   }, [id]);
 
   useEffect(() => {
-    if (!id || !isSchoolTripsSource || !auth.currentUser) {
+    if (!id || !isSchoolTripsSource) {
       setSchoolPassengerBookings([]);
       return;
     }
 
-    // The schoolBookings read rule only allows resource.data.driverId ==
-    // request.auth.uid (or passengerId) — a query can only be granted if
-    // its OWN where() filters prove every possible result satisfies that,
-    // so this must filter by driverId itself, not just tripId/status
-    // (Firestore statically rejects a query it can't prove safe, even when
-    // every actual result would have passed the rule at read time).
     const unsub = onSnapshot(
       query(
         collection(db, SCHOOL_BOOKINGS_COLLECTION),
         where("tripId", "==", id),
-        where("driverId", "==", auth.currentUser.uid),
         where("status", "==", "booked"),
       ),
       (snap) => {
@@ -533,13 +526,10 @@ export default function RideNavigationScreen() {
       await stopDriverLocationTracking();
     }
 
-    // Same driverId-filter requirement as the schoolPassengerBookings
-    // subscription above — see its comment.
     const bookingsSnap = await getDocs(
       query(
         collection(db, SCHOOL_BOOKINGS_COLLECTION),
         where("tripId", "==", id),
-        where("driverId", "==", auth.currentUser?.uid || ""),
         where("status", "==", "booked"),
       ),
     );

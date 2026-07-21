@@ -1160,7 +1160,6 @@
     "noReturnNeeded": "لا حاجة لرحلة عودة",
     "returnRideForChild": "رحلة العودة لـ {{child}}",
     "noExactReturnForChild": "لم يتم العثور على رحلة لـ {{child}} في الوقت المطلوب",
-    "returnSearchFailedForChild": "تعذّر البحث عن رحلات العودة لـ {{child}}. حاول مرة أخرى.",
     "familyBookingSummary": "تم اختيار {{count}} رحلة عودة",
     "duplicateChildBooking": "هذا الطفل لديه حجز بالفعل لهذه الرحلة.",
     "tripMatchFoundForChildMessage": "تم العثور على رحلة عودة مناسبة لـ {{childName}} من {{school}} في الساعة {{time}} باتجاه {{destination}}. اضغط لعرض الرحلة.",

@@ -1152,7 +1152,6 @@
     "noReturnNeeded": "Обратная поездка не нужна",
     "returnRideForChild": "Обратная поездка для {{child}}",
     "noExactReturnForChild": "Поездка для {{child}} на запрошенное время не найдена",
-    "returnSearchFailedForChild": "Не удалось выполнить поиск обратных поездок для {{child}}. Попробуйте снова.",
     "familyBookingSummary": "Выбрано обратных поездок: {{count}}",
     "duplicateChildBooking": "У этого ребёнка уже есть бронирование на эту поездку.",
     "tripMatchFoundForChildMessage": "Найдена подходящая обратная поездка для {{childName}} из {{school}} в {{time}} в направлении {{destination}}. Нажмите, чтобы посмотреть поездку.",

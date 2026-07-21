@@ -69,10 +69,6 @@ type ChildSearchState = {
   skipped: boolean;
   creatingRequest: boolean;
   requestCreated: boolean;
-  // Set only when this child's own search threw — never the raw
-  // error.message (which for a Firestore denial is an unhelpful SDK code),
-  // always a localized, generic search-failed string.
-  searchError: boolean;
 };
 
 export default function SchoolTripResultsScreen() {
@@ -248,58 +244,43 @@ export default function SchoolTripResultsScreen() {
         skipped: false,
         creatingRequest: false,
         requestCreated: false,
-        searchError: false,
       })),
     );
 
     const runAll = async () => {
       await Promise.all(
         parsedChildEntries.map(async (entry) => {
-          try {
-            const criteria: ChildReturnSearchCriteria = {
-              schoolId: String(params.schoolId || ""),
-              date: String(params.date || ""),
-              requestedTime: entry.returnRequestedTime || String(params.requestedTime || ""),
-              destinationLocation: toCoords,
-            };
+          const criteria: ChildReturnSearchCriteria = {
+            schoolId: String(params.schoolId || ""),
+            date: String(params.date || ""),
+            requestedTime: entry.returnRequestedTime || String(params.requestedTime || ""),
+            destinationLocation: toCoords,
+          };
 
-            const exact = await findReturnTripsForChild(criteria);
-            if (cancelled) return;
+          const exact = await findReturnTripsForChild(criteria);
+          if (cancelled) return;
 
-            if (exact.length > 0) {
-              setChildStates((prev) =>
-                prev.map((cs) =>
-                  cs.entry.localId === entry.localId
-                    ? { ...cs, loading: false, exactTrips: exact, alternatives: [] }
-                    : cs,
-                ),
-              );
-              return;
-            }
-
-            const alts = await findAlternativeTripsForChild(criteria);
-            if (cancelled) return;
-
+          if (exact.length > 0) {
             setChildStates((prev) =>
               prev.map((cs) =>
                 cs.entry.localId === entry.localId
-                  ? { ...cs, loading: false, exactTrips: [], alternatives: alts }
+                  ? { ...cs, loading: false, exactTrips: exact, alternatives: [] }
                   : cs,
               ),
             );
-          } catch (error) {
-            if (cancelled) return;
-
-            // Never the raw error.message next to a child's name — a
-            // generic, localized "search failed" state instead. The real
-            // cause still goes to the console for debugging.
-            console.log(`Return-trip search failed for child ${entry.localId}`, error);
-            setChildStates((prev) =>
-              prev.map((cs) =>
-                cs.entry.localId === entry.localId ? { ...cs, loading: false, searchError: true } : cs,
-              ),
-            );
+            return;
           }
+
+          const alts = await findAlternativeTripsForChild(criteria);
+          if (cancelled) return;
+
+          setChildStates((prev) =>
+            prev.map((cs) =>
+              cs.entry.localId === entry.localId
+                ? { ...cs, loading: false, exactTrips: [], alternatives: alts }
+                : cs,
+            ),
+          );
         }),
       );
     };
@@ -677,11 +658,6 @@ export default function SchoolTripResultsScreen() {
         {cs.loading ? (
           <View style={localStyles.childLoadingBox}>
             <ActivityIndicator size="small" color="#F58220" />
-          </View>
-        ) : cs.searchError ? (
-          <View style={styles.emptyCard}>
-            <Ionicons name="alert-circle-outline" size={28} color="#B91C1C" />
-            <Text style={styles.emptyTitle}>{t("schoolTrip.returnSearchFailedForChild", { child: childLabel })}</Text>
           </View>
         ) : cs.skipped ? (
           <View style={localStyles.noReturnBanner}>
