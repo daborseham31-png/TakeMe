@@ -2527,22 +2527,9 @@ export const subscribeSchoolTrip = (
   tripId: string,
   onUpdate: (trip: SchoolTrip | null) => void,
 ): (() => void) =>
-  onSnapshot(
-    doc(db, SCHOOL_TRIPS_COLLECTION, tripId),
-    (snap) => {
-      onUpdate(snap.exists() ? normalizeSchoolTrip(snap.id, snap.data()) : null);
-    },
-    (error) => {
-      console.log("Listener failed:", {
-        feature: "subscribeSchoolTrip",
-        collection: SCHOOL_TRIPS_COLLECTION,
-        docId: tripId,
-        code: error.code,
-        message: error.message,
-      });
-      onUpdate(null);
-    },
-  );
+  onSnapshot(doc(db, SCHOOL_TRIPS_COLLECTION, tripId), (snap) => {
+    onUpdate(snap.exists() ? normalizeSchoolTrip(snap.id, snap.data()) : null);
+  });
 
 export const fetchDriverRating = async (
   driverId: string,

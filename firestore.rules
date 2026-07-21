@@ -79,24 +79,6 @@ service cloud.firestore {
         unchanged("isDriver") &&
         unchanged("driverVerificationStatus") &&
         unchanged("accountStatus")
-      ) || (
-        // A passenger who just rated THIS user as their driver credits
-        // exactly one new rating onto the running-average fields — see
-        // submitSchoolBookingRating (schoolTripsLib.ts) and
-        // submitRideRating (rideBookingLib.ts), which both write here as
-        // one step of the same rating transaction that creates the
-        // driverReviews doc and marks the booking rated. Never touches
-        // name/role/phone/verification/anything else about the profile,
-        // and the increment is bounded to a single valid 1-5 star value —
-        // this can't be used to overwrite or reset another user's profile.
-        isSignedIn() &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(["ratingCount", "ratingSum", "ratingAverage", "updatedAt"]) &&
-        request.resource.data.ratingCount == resource.data.get("ratingCount", 0) + 1 &&
-        (request.resource.data.ratingSum - resource.data.get("ratingSum", 0)) >= 1 &&
-        (request.resource.data.ratingSum - resource.data.get("ratingSum", 0)) <= 5 &&
-        request.resource.data.ratingAverage >= 0 &&
-        request.resource.data.ratingAverage <= 5
       );
 
       allow delete: if isAdmin() && request.auth.uid != userId;

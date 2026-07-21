@@ -479,16 +479,6 @@ const subscribe = (
           snap.docs.map((d) => normalizeRoadsideRequest(d.id, d.data())),
         );
       },
-      (error) => {
-        console.log("Listener failed:", {
-          feature: "bookings.driverRoadsideRequests",
-          collection: "roadsideRequests",
-          userId: uid,
-          code: error.code,
-          message: error.message,
-        });
-        setDriverRoadsideRequests([]);
-      },
     );
 
     const unsubRoutes = subscribe("driverRoutes", "driverId", setRoutes);

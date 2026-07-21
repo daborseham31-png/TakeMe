@@ -10,13 +10,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import Constants from "expo-constants";
+import { router } from "expo-router";
+import { signOut } from "firebase/auth";
 import { doc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
-import { signOutAndRedirectToLogin } from "../authLib";
 import { useLanguage } from "../i18n/LanguageProvider";
 import LanguageSelectorModal from "../i18n/LanguageSelectorModal";
 import { SUPPORTED_LANGUAGES } from "../i18n/languages";
@@ -93,7 +94,8 @@ export default function AdminSettingsScreen() {
         text: t("common.logOut"),
         style: "destructive",
         onPress: async () => {
-          await signOutAndRedirectToLogin();
+          await signOut(auth);
+          router.replace("/");
         },
       },
     ]);
