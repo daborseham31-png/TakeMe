@@ -866,7 +866,7 @@ const availableDrivers = drivers.filter((driver: any) => {
                           </Text>
                         </>
                       ) : (
-                        <Text style={styles.reviewCount}>{t("roadsideHelp.newDriverLabel")}</Text>
+                        <Text style={styles.reviewCount}>{t("rides.newProvider")}</Text>
                       )}
                     </View>
                   </View>

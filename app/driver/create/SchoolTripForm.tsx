@@ -13,7 +13,7 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
@@ -30,19 +30,16 @@ import {
   createSchoolRoundTrip,
   DriverSchoolTripMode,
 } from "../../booking/schoolTripsLib";
-import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
 import {
   getDigitsOnly,
-  isValidCarPlate,
   styles,
   useDriverAccount,
   validateAccountInfo,
   validateDateAndTimeNotPassed,
 } from "./driverHelpers";
-import { recordUsedFormValues, useSavedFormValues } from "./savedFormValuesLib";
 
 const MODE_TABS: { key: DriverSchoolTripMode; labelKey: string }[] = [
   { key: "outbound_only", labelKey: "schoolTrip.outboundOnly" },
@@ -83,30 +80,6 @@ export default function SchoolTripForm() {
 
   const [price, setPrice] = useState("");
   const [seats, setSeats] = useState("1");
-
-  // Vehicle — one car for the whole trip (both legs share it when
-  // outbound_and_return), so this lives once in the main section rather
-  // than being duplicated per leg. Same field names as the legacy
-  // driverRoutes-based weekly flow (see RideForm.tsx) — never a second
-  // vehicle schema. Prefilled from the driver's own most-recently-used
-  // values (see savedFormValuesLib.ts) the first time this form mounts.
-  const [car, setCar] = useState("");
-  const [carColor, setCarColor] = useState("");
-  const [carPlate, setCarPlate] = useState("");
-  const savedValues = useSavedFormValues();
-  const [prefilledVehicle, setPrefilledVehicle] = useState(false);
-
-  useEffect(() => {
-    if (prefilledVehicle) return;
-    if (!savedValues.carModels.length && !savedValues.carColors.length && !savedValues.plateNumbers.length) {
-      return;
-    }
-
-    setCar((current) => current || savedValues.carModels[0] || "");
-    setCarColor((current) => current || savedValues.carColors[0] || "");
-    setCarPlate((current) => current || savedValues.plateNumbers[0] || "");
-    setPrefilledVehicle(true);
-  }, [savedValues, prefilledVehicle]);
 
   // Return section — only rendered for "outbound_and_return", auto-filled
   // from the main (outbound) section per AGENTS.md #1.
@@ -259,20 +232,9 @@ export default function SchoolTripForm() {
       !tripDate ||
       !departureTime ||
       !price ||
-      !seats ||
-      !car ||
-      !carColor ||
-      !carPlate
+      !seats
     ) {
       Alert.alert(t("auth.missingDetails"), t("validation.fillAllFields"));
-      return;
-    }
-
-    if (!isValidCarPlate(carPlate)) {
-      Alert.alert(
-        t("validation.invalidVehicleNumberTitle"),
-        t("validation.invalidVehicleNumber"),
-      );
       return;
     }
 
@@ -375,9 +337,6 @@ export default function SchoolTripForm() {
         departureTime: mainValidation.cleanTime,
         pricePerSeat: cleanPrice,
         totalSeats: cleanSeats,
-        car,
-        carColor,
-        carPlate,
       };
 
       if (isReturnOnly) {
@@ -412,19 +371,12 @@ export default function SchoolTripForm() {
           departureTime: returnValidation.cleanTime,
           pricePerSeat: cleanReturnPrice,
           totalSeats: cleanReturnSeats,
-          car,
-          carColor,
-          carPlate,
         };
 
         await createSchoolRoundTrip(mainInput, returnInput, driver);
       } else {
         await createSchoolOutboundTrip(mainInput, driver);
       }
-
-      // Best-effort — only after the trip actually saved, never for a
-      // cancelled/failed submission (see savedFormValuesLib.ts).
-      recordUsedFormValues({ carModel: car, carColor, plateNumber: carPlate, price: String(cleanPrice) });
 
       Alert.alert(t("common.success"), t("driver.tripCreated"));
       router.replace("/(tabs)/home" as any);
@@ -669,16 +621,6 @@ export default function SchoolTripForm() {
           ) : null}
         </View>
       ) : null}
-
-      <VehicleDetailsSection
-        car={car}
-        onChangeCar={setCar}
-        carColor={carColor}
-        onChangeCarColor={setCarColor}
-        carPlate={carPlate}
-        onChangeCarPlate={(text) => setCarPlate(getDigitsOnly(text).slice(0, 9))}
-        savedValues={savedValues}
-      />
 
       <Pressable
         style={[styles.submitButton, loading && styles.submitButtonDisabled]}

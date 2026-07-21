@@ -30,7 +30,6 @@ import {
 
 import { db } from "../../firebase";
 import { LocationNames } from "./locationSearch";
-import { normalizeSchoolTripDirection } from "./schoolTripsLib";
 import { getDriverDayTrips, WeeklyDriverDay } from "./weeklyBookingLib";
 
 // "school" = the legacy driverRoutes-based school category (still shown for
@@ -72,12 +71,6 @@ export type FeedItem = {
   car: string;
   carColor: string;
   carPlateLast3: string;
-
-  // schoolTrip category only — which leg this specific card represents.
-  // Never used to imply "outbound and return" on one card; each leg is its
-  // own independent schoolTrips document/FeedItem (see
-  // normalizeSchoolTripItem below and TripFeedCard.tsx's badge).
-  direction: "to_school" | "from_school" | "";
 
   fromLocationId: string;
   toLocationId: string;
@@ -233,7 +226,6 @@ const normalizeDriverRouteItem = (id: string, data: any): FeedItem | null => {
     car: data.car || "",
     carColor: data.carColor || "",
     carPlateLast3: getLast3Digits(data.carPlate || ""),
-    direction: "",
 
     fromLocationId: data.fromLocationId || "",
     toLocationId: data.toLocationId || "",
@@ -297,7 +289,6 @@ const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
     car: "",
     carColor: "",
     carPlateLast3: "",
-    direction: "",
 
     fromLocationId: "",
     toLocationId: "",
@@ -370,7 +361,6 @@ const normalizeErrandJobItem = (id: string, data: any): FeedItem | null => {
     car: "",
     carColor: "",
     carPlateLast3: "",
-    direction: "",
 
     fromLocationId: "",
     toLocationId: "",
@@ -445,16 +435,9 @@ const normalizeSchoolTripItem = (id: string, data: any): FeedItem | null => {
     isHourly: false,
     seats: typeof data.availableSeats === "number" ? data.availableSeats : null,
 
-    car: data.car || "",
-    carColor: data.carColor || "",
-    carPlateLast3: getLast3Digits(data.carPlate || ""),
-
-    // This card represents exactly ONE leg (outbound OR return) — never
-    // both, even when the trip was originally created together with its
-    // linked leg via the outbound-and-return form. See
-    // normalizeSchoolTripDirection in schoolTripsLib.ts for how an
-    // unrecognized/legacy raw value is resolved.
-    direction: normalizeSchoolTripDirection(data.direction),
+    car: "",
+    carColor: "",
+    carPlateLast3: "",
 
     fromLocationId: "",
     toLocationId: "",

@@ -746,7 +746,6 @@
     "invalidDate": "יש לבחור תאריך תקין.",
     "invalidTime": "יש לבחור שעה תקינה.",
     "invalidPrice": "המחיר חייב להיות גדול מ-0.",
-    "invalidRating": "יש לבחור דירוג בין 1 ל-5 כוכבים.",
     "invalidSeats": "מספר המקומות חייב להיות בין 1 ל-8.",
     "invalidDateFuture": "יש לבחור תאריך תקין להיום או לעתיד.",
     "pastTime": "לא ניתן להזמין שעה שכבר עברה.",
@@ -907,7 +906,6 @@
     "ridePerson": "נסיעה (אדם)",
     "getRideToDestination": "קבל נסיעה ליעד שלך",
     "startTripOnlyOnTripDate": "ניתן להתחיל נסיעה זו רק בתאריך הנסיעה.",
-    "tripNotCompletedYet": "הנסיעה הזו עדיין לא הסתיימה.",
     "tripDatePassed": "תאריך הנסיעה הזו כבר עבר.",
     "tripDateUnavailable": "תאריך הנסיעה אינו זמין.",
     "rideNavigationTitle": "ניווט הנסיעה",
@@ -1170,7 +1168,6 @@
   "driverCreate": {
     "newTripTitle": "יצירת נסיעה חדשה",
     "newTripSubtitle": "הגדר את הרכב, היעד, התאריך, השעה, המחיר והמקומות הפנויים",
-    "vehicleDetails": "פרטי הרכב",
     "carModel": "דגם הרכב",
     "enterCarModel": "הזן את דגם הרכב שלך",
     "carColor": "צבע הרכב",

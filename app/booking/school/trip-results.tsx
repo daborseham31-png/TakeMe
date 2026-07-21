@@ -559,11 +559,7 @@ export default function SchoolTripResultsScreen() {
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={13} color="#F58220" />
               <Text style={styles.ratingText}>
-                {!info
-                  ? "—"
-                  : info.ratingCount > 0
-                    ? `${info.ratingAverage.toFixed(1)} (${info.ratingCount})`
-                    : t("roadsideHelp.newDriverLabel")}
+                {info ? info.ratingAverage.toFixed(1) : "—"} ({info?.ratingCount || 0})
               </Text>
             </View>
           </View>
@@ -620,11 +616,7 @@ export default function SchoolTripResultsScreen() {
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={13} color="#F58220" />
               <Text style={styles.ratingText}>
-                {!info
-                  ? "—"
-                  : info.ratingCount > 0
-                    ? `${info.ratingAverage.toFixed(1)} (${info.ratingCount})`
-                    : t("roadsideHelp.newDriverLabel")}
+                {info ? info.ratingAverage.toFixed(1) : "—"} ({info?.ratingCount || 0})
               </Text>
             </View>
           </View>

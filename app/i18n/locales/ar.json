@@ -758,7 +758,6 @@
     "invalidDate": "يرجى اختيار تاريخ صالح.",
     "invalidTime": "يرجى اختيار وقت صالح.",
     "invalidPrice": "يجب أن يكون السعر أكبر من 0.",
-    "invalidRating": "يرجى اختيار تقييم بين 1 و5 نجوم.",
     "invalidSeats": "يجب أن يكون عدد المقاعد بين 1 و8.",
     "invalidDateFuture": "يرجى اختيار تاريخ صالح اليوم أو في المستقبل.",
     "pastTime": "لا يمكنك حجز وقت قد مضى.",
@@ -919,7 +918,6 @@
     "ridePerson": "رحلة (شخص)",
     "getRideToDestination": "احصل على رحلة إلى وجهتك",
     "startTripOnlyOnTripDate": "يمكنك بدء هذه الرحلة فقط في تاريخ الرحلة.",
-    "tripNotCompletedYet": "لم تنتهِ هذه الرحلة بعد.",
     "tripDatePassed": "لقد مضى تاريخ هذه الرحلة.",
     "tripDateUnavailable": "تاريخ الرحلة غير متوفر.",
     "rideNavigationTitle": "ملاحة الرحلة",
@@ -1182,7 +1180,6 @@
   "driverCreate": {
     "newTripTitle": "إنشاء رحلة جديدة",
     "newTripSubtitle": "حدّد سيارتك، الوجهة، التاريخ، الوقت، السعر، والمقاعد المتاحة",
-    "vehicleDetails": "تفاصيل المركبة",
     "carModel": "طراز السيارة",
     "enterCarModel": "أدخل طراز سيارتك",
     "carColor": "لون السيارة",

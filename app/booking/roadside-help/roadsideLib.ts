@@ -982,35 +982,19 @@ export const submitRoadsideRating = async (
   const user = auth.currentUser;
   if (!user) throw new Error(i18n.t("auth.pleaseLoginFirst"));
 
-  if (!booking.driverId || booking.driverId === user.uid) {
+  if (!booking.driverId) {
     throw new Error(i18n.t("roadsideHelp.missingDriverIdField"));
-  }
-
-  const cleanRating = Math.round(rating);
-  if (!Number.isInteger(cleanRating) || cleanRating < 1 || cleanRating > 5) {
-    throw new Error(i18n.t("validation.invalidRating"));
   }
 
   const cleanComment = comment.trim();
 
   const bookingRef = doc(db, "bookings", bookingId);
   const driverRef = doc(db, "users", booking.driverId);
-  // bookingId AS the review doc id — see firestore.rules' driverReviews
-  // `allow create`, which requires this to match and rejects a second
-  // rating attempt for the same booking outright.
-  const reviewRef = doc(db, "driverReviews", bookingId);
+  const reviewRef = doc(collection(db, "driverReviews"));
   const offerRef = booking.offerId
     ? doc(db, "roadsideOffers", booking.offerId)
     : null;
 
-  const ratingWritePaths = {
-    review: `driverReviews/${bookingId}`,
-    booking: `bookings/${bookingId}`,
-    driver: `users/${booking.driverId}`,
-  };
-  console.log("[rating] transaction started", ratingWritePaths);
-
-  try {
   await runTransaction(db, async (transaction) => {
     const bookingSnap = await transaction.get(bookingRef);
 
@@ -1020,23 +1004,9 @@ export const submitRoadsideRating = async (
 
     const bookingData: any = bookingSnap.data();
 
-    // Never trust the already-loaded `booking` object — re-verify ownership
-    // + real completion against the current server state.
-    if (bookingData.passengerId !== user.uid) {
-      throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
-    }
-    if (bookingData.tripStatus !== "completed" || bookingData.status !== "completed") {
-      throw new Error(i18n.t("booking.tripNotCompletedYet"));
-    }
-
     // Prevent duplicate ratings — each Roadside Help request can be rated
     // only once.
     if (bookingData.ratingSubmitted === true) {
-      return;
-    }
-
-    const reviewSnap = await transaction.get(reviewRef);
-    if (reviewSnap.exists()) {
       return;
     }
 
@@ -1048,16 +1018,15 @@ export const submitRoadsideRating = async (
     const reqSnap = reqRef ? await transaction.get(reqRef) : null;
 
     const oldCount = Number(driverData.ratingCount) || 0;
-    const oldSum = Number(driverData.ratingSum) || 0;
+    const oldSum =
+      Number(driverData.ratingSum) ||
+      Number(driverData.ratingAverage || 0) * oldCount;
 
     const newCount = oldCount + 1;
-    const newSum = oldSum + cleanRating;
-    // Stored RAW (never toFixed()'d) — firestore.rules checks
-    // ratingAverage == ratingSum / ratingCount for exact equality.
-    const newAverage = newSum / newCount;
+    const newSum = oldSum + rating;
+    const newAverage = Number((newSum / newCount).toFixed(2));
 
     transaction.set(reviewRef, {
-      bookingId,
       requestId: booking.requestId || "",
       offerId: booking.offerId || "",
       category: "roadside",
@@ -1068,20 +1037,15 @@ export const submitRoadsideRating = async (
       passengerId: user.uid,
       passengerName: bookingData.passengerName || user.displayName || "Passenger",
 
-      rating: cleanRating,
+      rating,
       comment: cleanComment,
       reviewComment: cleanComment,
-
-      from: "",
-      to: "",
-      date: "",
-      time: "",
 
       createdAt: serverTimestamp(),
     });
 
     transaction.update(bookingRef, {
-      rating: cleanRating,
+      rating,
       reviewComment: cleanComment,
       ratingSubmitted: true,
       needsPassengerRating: false,
@@ -1091,7 +1055,7 @@ export const submitRoadsideRating = async (
 
     if (offerRef) {
       transaction.update(offerRef, {
-        rating: cleanRating,
+        rating,
         reviewComment: cleanComment,
         ratingSubmitted: true,
         ratedAt: serverTimestamp(),
@@ -1103,7 +1067,7 @@ export const submitRoadsideRating = async (
     // sync with My Bookings so both screens agree the rating is done.
     if (reqSnap && reqSnap.exists()) {
       transaction.update(reqRef!, {
-        rating: cleanRating,
+        rating,
         reviewComment: cleanComment,
         ratingSubmitted: true,
         needsPassengerRating: false,
@@ -1123,10 +1087,4 @@ export const submitRoadsideRating = async (
       { merge: true },
     );
   });
-
-    console.log("[rating] transaction succeeded", { bookingId });
-  } catch (error) {
-    console.log("[rating] transaction failed", { ...ratingWritePaths, error });
-    throw error;
-  }
 };

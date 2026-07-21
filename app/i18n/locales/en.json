@@ -742,7 +742,6 @@
     "invalidDate": "Please choose a valid date.",
     "invalidTime": "Please choose a valid time.",
     "invalidPrice": "Price must be more than 0.",
-    "invalidRating": "Please choose a rating between 1 and 5 stars.",
     "invalidSeats": "Seats must be between 1 and 8.",
     "invalidDateFuture": "Please choose a valid date today or in the future.",
     "pastTime": "You cannot book a time that already passed.",
@@ -903,7 +902,6 @@
     "ridePerson": "Ride (Person)",
     "getRideToDestination": "Get a ride to your destination",
     "startTripOnlyOnTripDate": "You can start this trip only on the trip date.",
-    "tripNotCompletedYet": "This trip hasn't been completed yet.",
     "tripDatePassed": "This trip date has passed.",
     "tripDateUnavailable": "Trip date is unavailable.",
     "rideNavigationTitle": "Ride Navigation",
@@ -1166,7 +1164,6 @@
   "driverCreate": {
     "newTripTitle": "Create a New Trip",
     "newTripSubtitle": "Set your car, destination, date, time, price, and available seats",
-    "vehicleDetails": "Vehicle Details",
     "carModel": "Car Model",
     "enterCarModel": "Enter your car model",
     "carColor": "Car Color",

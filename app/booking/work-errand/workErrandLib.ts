@@ -1066,9 +1066,6 @@ export type NormalizedApplication = {
   rating: number | null;
   reviewComment: string;
   ratedAtSeconds: number;
-  // 0 until finishJob actually stamps completedAt — the rating gate
-  // requires this to be > 0, never just tripStatus === "completed" alone.
-  completedAtSeconds: number;
 
   // Work only — the reverse payment gate (driver pays passenger after
   // completion). Always false/"unpaid" for errand.
@@ -1146,7 +1143,6 @@ export const normalizeApplication = (
     rating: asNumber(data.rating),
     reviewComment: data.reviewComment || "",
     ratedAtSeconds: data.ratedAt?.seconds || 0,
-    completedAtSeconds: data.completedAt?.seconds || 0,
 
     workCompleted: data.workCompleted === true,
     driverPaymentStatus: data.driverPaymentStatus || "unpaid",
@@ -1225,37 +1221,16 @@ export const submitApplicationRating = async (
   // providerId must be the driver's real Firebase UID — never the job
   // listing id or this application's own id (guards against a wiring bug
   // accidentally saving the wrong id as driverId on the review).
-  if (
-    !app.providerId ||
-    app.providerId === id ||
-    app.providerId === app.sourceId ||
-    app.providerId === user.uid
-  ) {
+  if (!app.providerId || app.providerId === id || app.providerId === app.sourceId) {
     throw new Error(i18n.t("workErrand.missingDriverId"));
-  }
-
-  const cleanRating = Math.round(rating);
-  if (!Number.isInteger(cleanRating) || cleanRating < 1 || cleanRating > 5) {
-    throw new Error(i18n.t("validation.invalidRating"));
   }
 
   const cleanComment = comment.trim();
 
   const appRef = doc(db, COLLECTION[kind], id);
   const driverRef = doc(db, "users", app.providerId);
-  // bookingId AS the review doc id — see firestore.rules' driverReviews
-  // `allow create`, which requires this to match and rejects a second
-  // rating attempt for the same application outright.
-  const reviewRef = doc(db, "driverReviews", id);
+  const reviewRef = doc(collection(db, "driverReviews"));
 
-  const ratingWritePaths = {
-    review: `driverReviews/${id}`,
-    booking: `${COLLECTION[kind]}/${id}`,
-    driver: `users/${app.providerId}`,
-  };
-  console.log("[rating] transaction started", ratingWritePaths);
-
-  try {
   await runTransaction(db, async (transaction) => {
     const appSnap = await transaction.get(appRef);
 
@@ -1265,25 +1240,7 @@ export const submitApplicationRating = async (
 
     const appData: any = appSnap.data();
 
-    // Never trust the already-loaded `app` object — re-verify ownership +
-    // real completion against the current server state. "work" applications
-    // use applicantId (never passengerId); "errand" applications use
-    // passengerId — see the two payload shapes in requestWorkOrErrand above.
-    const callerOwnsThis =
-      appData.applicantId === user.uid || appData.passengerId === user.uid;
-
-    if (!callerOwnsThis) {
-      throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
-    }
-    if (appData.tripStatus !== "completed" || appData.status !== "completed") {
-      throw new Error(i18n.t("booking.tripNotCompletedYet"));
-    }
     if (appData.ratingSubmitted === true) {
-      return;
-    }
-
-    const reviewSnap = await transaction.get(reviewRef);
-    if (reviewSnap.exists()) {
       return;
     }
 
@@ -1291,13 +1248,13 @@ export const submitApplicationRating = async (
     const driverData: any = driverSnap.exists() ? driverSnap.data() : {};
 
     const oldCount = Number(driverData.ratingCount) || 0;
-    const oldSum = Number(driverData.ratingSum) || 0;
+    const oldSum =
+      Number(driverData.ratingSum) ||
+      Number(driverData.ratingAverage || 0) * oldCount;
 
     const newCount = oldCount + 1;
-    const newSum = oldSum + cleanRating;
-    // Stored RAW (never toFixed()'d) — firestore.rules checks
-    // ratingAverage == ratingSum / ratingCount for exact equality.
-    const newAverage = newSum / newCount;
+    const newSum = oldSum + rating;
+    const newAverage = Number((newSum / newCount).toFixed(2));
 
     transaction.set(reviewRef, {
       bookingId: id,
@@ -1312,7 +1269,7 @@ export const submitApplicationRating = async (
       passengerId: user.uid,
       passengerName: app.customerName || user.displayName || "Passenger",
 
-      rating: cleanRating,
+      rating,
       comment: cleanComment,
       reviewComment: cleanComment,
 
@@ -1325,7 +1282,7 @@ export const submitApplicationRating = async (
     });
 
     transaction.update(appRef, {
-      rating: cleanRating,
+      rating,
       reviewComment: cleanComment,
       ratingSubmitted: true,
       needsPassengerRating: false,
@@ -1344,12 +1301,6 @@ export const submitApplicationRating = async (
       { merge: true },
     );
   });
-
-    console.log("[rating] transaction succeeded", { bookingId: id });
-  } catch (error) {
-    console.log("[rating] transaction failed", { ...ratingWritePaths, error });
-    throw error;
-  }
 };
 
 // ---------------------------------------------------------------------------

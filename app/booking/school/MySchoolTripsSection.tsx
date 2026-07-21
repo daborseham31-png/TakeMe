@@ -65,7 +65,6 @@ import {
   RideRequest,
   SCHOOL_BOOKINGS_COLLECTION,
   SCHOOL_TRIPS_COLLECTION,
-  schoolTripDirectionLabel,
   SchoolBooking,
   SchoolTrip,
   subscribeMyRideRequests,
@@ -77,7 +76,10 @@ type Props = {
   uid: string | null;
 };
 
-const directionLabel = schoolTripDirectionLabel;
+const directionLabel = (
+  t: (key: string) => string,
+  direction: "to_school" | "from_school",
+) => (direction === "to_school" ? t("schoolTrip.outboundBadge") : t("schoolTrip.returnBadge"));
 
 // Same status vocabulary/keys as app/booking/live-tracking.tsx's
 // getStatusKey — one shared meaning for "driver_on_way" etc. everywhere in
@@ -405,8 +407,6 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
               const canTrack = booking.tripStatus === "in_progress";
               const needsRating =
                 booking.status === "completed" &&
-                booking.tripStatus === "completed" &&
-                booking.completedAtSeconds > 0 &&
                 booking.needsPassengerRating &&
                 !booking.ratingSubmitted;
               const showVerificationCode =
@@ -449,15 +449,6 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
                     {t("driver.driverLabel", { defaultValue: "Driver" })}: {booking.driverName} ·{" "}
                     {booking.seats} {t("schoolTrip.seatWord")} · {booking.totalPrice} ₪
                   </Text>
-                  {booking.car || booking.carColor || booking.carPlate ? (
-                    <Text style={styles.metaText}>
-                      <Ionicons name="car-outline" size={12} color="#7C5F46" />{" "}
-                      {[booking.car, booking.carColor].filter(Boolean).join(" · ")}
-                      {booking.carPlate ? (
-                        <Text style={styles.ltrText}> · {booking.carPlate}</Text>
-                      ) : null}
-                    </Text>
-                  ) : null}
                   {childSummary ? <Text style={styles.childSummaryText}>{childSummary}</Text> : null}
 
                   {needsReplacement ? (
@@ -783,7 +774,6 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 12, color: "#7C5F46", fontWeight: "700", textTransform: "capitalize" },
   routeText: { fontWeight: "800", color: "#111827", fontSize: 14, marginBottom: 4 },
   metaText: { fontSize: 12.5, color: "#7C5F46", fontWeight: "600", marginBottom: 2 },
-  ltrText: { writingDirection: "ltr" },
   childSummaryText: { fontSize: 12.5, color: "#F58220", fontWeight: "800", marginTop: 2 },
   cancelButton: { marginTop: 8, alignSelf: "flex-start" },
   cancelButtonText: { color: "#B91C1C", fontWeight: "800", fontSize: 12.5 },

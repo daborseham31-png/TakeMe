@@ -17,10 +17,8 @@ import { auth, db } from "../../../firebase";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
-import AutocompleteTextField from "../../components/AutocompleteTextField";
 import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
-import { recordUsedFormValues, useSavedFormValues } from "./savedFormValuesLib";
 import YesNoField from "./YesNoField";
 import {
   getDigitsOnly,
@@ -60,7 +58,6 @@ export default function ErrandJobScreen() {
   const [errandEndTime, setErrandEndTime] = useState("");
   const [showEndTimePicker, setShowEndTimePicker] = useState(false);
   const [errandPrice, setErrandPrice] = useState("");
-  const savedValues = useSavedFormValues();
   const [errandSeats, setErrandSeats] = useState("1");
 
   const handleSubmit = async () => {
@@ -214,8 +211,6 @@ export default function ErrandJobScreen() {
         createdAt: serverTimestamp(),
       });
 
-      recordUsedFormValues({ price: String(cleanPrice) });
-
       Alert.alert(t("common.success"), t("driver.errandCreated"));
       router.replace("/(tabs)/home" as any);
     } catch (error: any) {
@@ -329,16 +324,18 @@ export default function ErrandJobScreen() {
 
           <View style={styles.twoColumns}>
             <View style={styles.column}>
-              <AutocompleteTextField
-                label={t("booking.price")}
-                value={errandPrice}
-                onChangeText={(text) => setErrandPrice(getDigitsOnly(text))}
-                suggestions={savedValues.prices}
-                placeholder={t("booking.enterPrice")}
-                icon="cash-outline"
-                keyboardType="numeric"
-                formatSuggestion={(v) => `${v} ₪`}
-              />
+              <Text style={styles.label}>{t("booking.price")}</Text>
+              <View style={styles.inputRow}>
+                <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
+                <TextInput
+                  style={styles.rowInput}
+                  placeholder={t("booking.enterPrice")}
+                  placeholderTextColor="#8B7B6B"
+                  keyboardType="numeric"
+                  value={errandPrice}
+                  onChangeText={(text) => setErrandPrice(getDigitsOnly(text))}
+                />
+              </View>
             </View>
 
             <View style={styles.column}>

@@ -12,10 +12,10 @@
 // (see (tabs)/_layout.tsx, home.tsx, bookings.tsx, notifications.tsx,
 // messages.tsx, admin/_layout.tsx, ...) — that part doesn't need repeating
 // here. What this DOES own, explicitly and in order, is the non-listener
-// resource (foreground GPS tracking) and the actual navigation, so the app
-// is never left rendering an authenticated screen with a null auth.currentUser:
-//   1. Stop foreground location tracking (driverLocationTask.ts) — not a
-//      React listener, never torn down by an auth-state effect.
+// resource (background location) and the actual navigation, so the app is
+// never left rendering an authenticated screen with a null auth.currentUser:
+//   1. Stop background/foreground location tracking (driverLocationTask.ts)
+//      — not a React listener, never torn down by an auth-state effect.
 //   2. Sign out of Firebase Auth.
 //   3. Only then navigate to the Login screen.
 // ---------------------------------------------------------------------------

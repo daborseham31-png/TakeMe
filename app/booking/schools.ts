@@ -319,7 +319,6 @@ const RAW_SCHOOLS: [string, string, string, string, number, number][] = [
     31.744023,
     34.773445,
   ],
-
   ["611053", "אחוות אחים", "קרית מלאכי", "ashdod", 31.73099, 34.746967],
   ["416008", "אילן רמון", "גן יבנה", "ashdod", 31.793373, 34.702334],
   ["620070", "אילנות", "אשדוד", "ashdod", 31.812227, 34.64535],
@@ -10639,10 +10638,7 @@ export function searchSchools(
   }
 
   const byName = (a: SchoolLocation, b: SchoolLocation) =>
-    displayText(a).localeCompare(
-      displayText(b),
-      language === "he" ? "he" : language,
-    );
+    displayText(a).localeCompare(displayText(b), language === "he" ? "he" : language);
 
   return [...starts.sort(byName), ...contains.sort(byName)].slice(
     0,
@@ -10676,19 +10672,10 @@ const LOCALIZED_NAME_FOR_LANGUAGE: Record<
 // the same translation. Sourced from the terms that actually appear in the
 // real dataset above — extend here (never invent a new city/school name) if
 // a future data refresh introduces a term not yet covered.
-const SCHOOL_TERM_DICTIONARY: [
-  string,
-  { ar: string; en: string; ru: string },
-][] = [
+const SCHOOL_TERM_DICTIONARY: [string, { ar: string; en: string; ru: string }][] = [
   ["תלמוד תורה", { ar: "تلمود توراة", en: "Talmud Torah", ru: "Талмуд-Тора" }],
-  [
-    "חטיבת ביניים",
-    { ar: "متوسطة", en: "Middle School", ru: "Неполная средняя школа" },
-  ],
-  [
-    "על יסודי",
-    { ar: "فوق ابتدائية", en: "Post-Elementary", ru: "Неполная средняя" },
-  ],
+  ["חטיבת ביניים", { ar: "متوسطة", en: "Middle School", ru: "Неполная средняя школа" }],
+  ["על יסודי", { ar: "فوق ابتدائية", en: "Post-Elementary", ru: "Неполная средняя" }],
   ["בית ספר", { ar: "مدرسة", en: "School", ru: "Школа" }],
   ["אולפנה", { ar: "أولفانا", en: "Ulpana", ru: "Ульпана" }],
   ['חט"ב', { ar: "متوسطة", en: "Middle School", ru: "Неполная средняя школа" }],
@@ -10702,14 +10689,7 @@ const SCHOOL_TERM_DICTIONARY: [
   ["אולפן", { ar: "أولبان", en: "Ulpan", ru: "Ульпан" }],
   ["סמינר", { ar: "معهد ديني", en: "Seminary", ru: "Семинария" }],
   ["ישיבה", { ar: "يشيفا", en: "Yeshiva", ru: "Йешива" }],
-  [
-    "מיוחד",
-    {
-      ar: "تربية خاصة",
-      en: "Special Education",
-      ru: "Специальное образование",
-    },
-  ],
+  ["מיוחד", { ar: "تربية خاصة", en: "Special Education", ru: "Специальное образование" }],
   ["דמוקרטי", { ar: "ديمقراطية", en: "Democratic", ru: "Демократическая" }],
   ["ניסויי", { ar: "تجريبية", en: "Experimental", ru: "Экспериментальная" }],
   ["פנימיה", { ar: "داخلية", en: "Boarding School", ru: "Интернат" }],
@@ -10720,11 +10700,8 @@ const SCHOOL_TERM_DICTIONARY: [
 
 // Splits on every occurrence of `needle` and rejoins with `replacement` —
 // same semantics as String.replaceAll without requiring the ES2021 target.
-const replaceAllOccurrences = (
-  text: string,
-  needle: string,
-  replacement: string,
-) => (needle ? text.split(needle).join(replacement) : text);
+const replaceAllOccurrences = (text: string, needle: string, replacement: string) =>
+  needle ? text.split(needle).join(replacement) : text;
 
 // Real, human-readable name for `school` in `language`. Returns the
 // authoritative Hebrew name unchanged for "he" (and as the fallback for any

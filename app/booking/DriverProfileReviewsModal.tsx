@@ -134,7 +134,7 @@ export default function DriverProfileReviewsModal({
                     {ratingAverage.toFixed(1)} · {t("rides.reviewsCount", { count: ratingCount })}
                   </Text>
                 ) : (
-                  <Text style={styles.ratingText}>{t("roadsideHelp.newDriverLabel")}</Text>
+                  <Text style={styles.ratingText}>{t("rides.noRatingsYet")}</Text>
                 )}
               </View>
             </View>

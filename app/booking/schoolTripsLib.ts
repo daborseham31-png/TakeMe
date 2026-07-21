@@ -49,43 +49,6 @@ import { notify } from "./work-errand/workErrandLib";
 
 export type SchoolTripDirection = "to_school" | "from_school";
 
-// The ONE place a raw, possibly-non-canonical direction value (an older or
-// differently-named field on a school trip/booking record) gets resolved to
-// the two real values — reused everywhere a direction badge/label is
-// derived (normalizeSchoolTrip/normalizeSchoolBooking below,
-// homeFeedLib.ts's Home card, TripFeedCard.tsx's badge) so there is only
-// ever one mapping, never a second copy that could drift.
-//
-// Deliberately does NOT fall back to "whichever leg has the earlier time"
-// — a trip's own stored direction (however it's spelled) is always a
-// stronger, more direct signal than inferring from departure time, which
-// this never does.
-const OUTBOUND_DIRECTION_VALUES = new Set(["to_school", "outbound", "going", "departure"]);
-const RETURN_DIRECTION_VALUES = new Set(["from_school", "return", "returning", "coming_back", "arrival"]);
-
-export const normalizeSchoolTripDirection = (value: any): SchoolTripDirection => {
-  const key = String(value ?? "").trim().toLowerCase();
-
-  if (RETURN_DIRECTION_VALUES.has(key)) return "from_school";
-  if (OUTBOUND_DIRECTION_VALUES.has(key)) return "to_school";
-
-  // No recognizable value at all (very old/malformed record) — "to_school"
-  // is the same default this collection has always used elsewhere (see the
-  // pre-existing inline `data.direction === "from_school" ? ... : "to_school"`
-  // this helper replaces), not a new assumption introduced here.
-  return "to_school";
-};
-
-// The ONE place a direction badge's display text is derived — reused by
-// MySchoolTripsSection.tsx (booking/trip cards) and TripFeedCard.tsx (Home
-// feed cards) instead of each screen keeping its own copy. Never shows a
-// combined "outbound and return" label — every card this labels represents
-// exactly one leg (see AGENTS.md's school-trip direction-badge spec).
-export const schoolTripDirectionLabel = (
-  t: (key: string) => string,
-  direction: SchoolTripDirection,
-): string => (direction === "to_school" ? t("schoolTrip.outboundBadge") : t("schoolTrip.returnBadge"));
-
 export type SchoolTripStatus = "active" | "full" | "cancelled" | "completed";
 
 export type LatLng = { latitude: number; longitude: number };
@@ -141,17 +104,6 @@ export interface SchoolTrip {
   driverPhone: string;
   tripType: "school";
   direction: SchoolTripDirection;
-
-  // Vehicle details — the SAME field names the legacy driverRoutes-based
-  // weekly school/personal flow already uses (car/carColor/carPlate; see
-  // RideForm.tsx), reused here rather than inventing a second vehicle
-  // schema. Always present as a string (never undefined) on a trip created
-  // through this file's own create functions; an older trip predating this
-  // field simply normalizes to "" — see normalizeSchoolTrip's
-  // backwards-compatible field fallbacks below.
-  car: string;
-  carColor: string;
-  carPlate: string;
 
   // The general trip areas (e.g. "Nazareth" / "Mashhad") — NEVER the school
   // itself. Kept fully separate from schoolName/schoolAddress/schoolLocation
@@ -323,13 +275,6 @@ export interface SchoolBooking {
   driverId: string;
   driverName: string;
   driverPhone: string;
-  // Copied from the trip at booking time (same reasoning as
-  // fromLocation/toLocation below — a booking must keep showing the right
-  // vehicle even if the driver's trip doc or profile changes later). Always
-  // a string, "" for a booking predating this field.
-  car: string;
-  carColor: string;
-  carPlate: string;
 
   schoolId: string;
   schoolName: string;
@@ -376,10 +321,6 @@ export interface SchoolBooking {
   needsPassengerRating: boolean;
   ratingSubmitted: boolean;
   rating: number | null;
-  // 0 until the trip is actually finished and completedAt is stamped on
-  // THIS booking — the rating gate requires this to be > 0, never just
-  // tripStatus === "completed" alone.
-  completedAtSeconds: number;
 
   // ---------------------------------------------------------------------
   // Passenger verification code — a short, driver-checked code so the
@@ -585,27 +526,6 @@ const toDriverLocation = (raw: any): DriverLiveLocation | null => {
   };
 };
 
-// Backwards-compatible vehicle-field readers — reused by
-// normalizeSchoolTrip and normalizeSchoolBooking below. New writes always
-// use the canonical car/carColor/carPlate names (same names the legacy
-// driverRoutes-based weekly flow already uses — see RideForm.tsx), but a
-// trip/booking document could exist with one of these older/alternate
-// shapes, so every plausible field name is checked before falling back to
-// "".
-const readVehicleModel = (data: any): string =>
-  data.car || data.carModel || data.vehicleModel || data.vehicle?.model || "";
-
-const readVehicleColor = (data: any): string =>
-  data.carColor || data.vehicleColor || data.vehicle?.color || "";
-
-const readVehiclePlate = (data: any): string =>
-  data.carPlate ||
-  data.carPlateNumber ||
-  data.plateNumber ||
-  data.vehiclePlateNumber ||
-  data.vehicle?.plateNumber ||
-  "";
-
 const toTripTrackingStatus = (value: any): TripTrackingStatus => {
   if (
     value === "driver_on_way" ||
@@ -624,11 +544,7 @@ export const normalizeSchoolTrip = (id: string, data: any): SchoolTrip => ({
   driverName: data.driverName || "Driver",
   driverPhone: data.driverPhone || "",
   tripType: "school",
-  direction: normalizeSchoolTripDirection(data.direction),
-
-  car: readVehicleModel(data),
-  carColor: readVehicleColor(data),
-  carPlate: readVehiclePlate(data),
+  direction: data.direction === "from_school" ? "from_school" : "to_school",
 
   fromArea: data.fromArea || data.fromAddress || "",
   fromAddress: data.fromAddress || data.fromArea || "",
@@ -716,7 +632,7 @@ export const normalizeSchoolBooking = (id: string, data: any): SchoolBooking => 
   id,
   bookingGroupId: data.bookingGroupId || "",
   tripId: data.tripId || "",
-  bookingDirection: normalizeSchoolTripDirection(data.bookingDirection),
+  bookingDirection: data.bookingDirection === "from_school" ? "from_school" : "to_school",
 
   passengerId: data.passengerId || "",
   passengerName: data.passengerName || "Passenger",
@@ -725,9 +641,6 @@ export const normalizeSchoolBooking = (id: string, data: any): SchoolBooking => 
   driverId: data.driverId || "",
   driverName: data.driverName || "Driver",
   driverPhone: data.driverPhone || "",
-  car: readVehicleModel(data),
-  carColor: readVehicleColor(data),
-  carPlate: readVehiclePlate(data),
 
   schoolId: data.schoolId || "",
   schoolName: data.schoolName || "",
@@ -762,7 +675,6 @@ export const normalizeSchoolBooking = (id: string, data: any): SchoolBooking => 
   needsPassengerRating: data.needsPassengerRating === true,
   ratingSubmitted: data.ratingSubmitted === true,
   rating: typeof data.rating === "number" ? data.rating : null,
-  completedAtSeconds: data.completedAt?.seconds || 0,
 
   // Always a string — a legacy booking predating this feature simply has no
   // code at all, never shown/verifiable (verificationStatus defaults to
@@ -822,11 +734,6 @@ export type CreateSchoolTripInput = {
   departureTime: string;
   pricePerSeat: number;
   totalSeats: number;
-  // Optional — a school trip created before this field existed simply has
-  // none; SchoolTripForm.tsx always collects all three today.
-  car?: string;
-  carColor?: string;
-  carPlate?: string;
 };
 
 type DriverIdentity = { driverId: string; driverName: string; driverPhone: string };
@@ -840,9 +747,6 @@ const buildTripDoc = (
   driverId: driver.driverId,
   driverName: driver.driverName,
   driverPhone: driver.driverPhone,
-  car: input.car || "",
-  carColor: input.carColor || "",
-  carPlate: input.carPlate || "",
   tripType: "school",
   direction,
 
@@ -897,9 +801,6 @@ const triggerMatchingIfReturn = (
     driverId: driver.driverId,
     driverName: driver.driverName,
     driverPhone: driver.driverPhone,
-    car: input.car || "",
-    carColor: input.carColor || "",
-    carPlate: input.carPlate || "",
     tripType: "school",
     direction: "from_school",
     fromArea: input.fromArea,
@@ -1468,9 +1369,6 @@ const bookSingleSchoolTrip = async (
       driverId: trip.driverId,
       driverName: trip.driverName,
       driverPhone: trip.driverPhone,
-      car: trip.car,
-      carColor: trip.carColor,
-      carPlate: trip.carPlate,
 
       schoolId: trip.schoolId,
       schoolName: trip.schoolName,
@@ -1921,23 +1819,13 @@ export const submitSchoolBookingRating = async (
   rating: number,
   comment: string,
 ) => {
-  const user = auth.currentUser;
-  if (!user) throw new Error(i18n.t("auth.pleaseLoginFirst"));
-
-  const cleanRating = Math.round(rating);
-  if (!Number.isInteger(cleanRating) || cleanRating < 1 || cleanRating > 5) {
-    throw new Error(i18n.t("validation.invalidRating"));
-  }
-
   const cleanComment = comment.trim();
 
-  if (!booking.driverId || booking.driverId === user.uid) {
+  if (!booking.driverId) {
     await updateDoc(doc(db, SCHOOL_BOOKINGS_COLLECTION, bookingId), {
-      rating: cleanRating,
-      reviewComment: cleanComment,
+      rating,
       ratingSubmitted: true,
       needsPassengerRating: false,
-      ratedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
     return;
@@ -1945,19 +1833,8 @@ export const submitSchoolBookingRating = async (
 
   const bookingRef = doc(db, SCHOOL_BOOKINGS_COLLECTION, bookingId);
   const driverRef = doc(db, "users", booking.driverId);
-  // bookingId AS the review doc id — see firestore.rules' driverReviews
-  // `allow create`, which requires this to match and rejects a second
-  // rating attempt for the same booking outright.
-  const reviewRef = doc(db, "driverReviews", bookingId);
+  const reviewRef = doc(collection(db, "driverReviews"));
 
-  const ratingWritePaths = {
-    review: `driverReviews/${bookingId}`,
-    booking: `${SCHOOL_BOOKINGS_COLLECTION}/${bookingId}`,
-    driver: `users/${booking.driverId}`,
-  };
-  console.log("[rating] transaction started", ratingWritePaths);
-
-  try {
   await runTransaction(db, async (transaction) => {
     const bookingSnap = await transaction.get(bookingRef);
 
@@ -1967,20 +1844,7 @@ export const submitSchoolBookingRating = async (
 
     const bookingData: any = bookingSnap.data();
 
-    // Never trust the already-loaded `booking` object — re-verify ownership
-    // + real completion against the current server state.
-    if (bookingData.passengerId !== user.uid) {
-      throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
-    }
-    if (bookingData.tripStatus !== "completed" || bookingData.status !== "completed") {
-      throw new Error(i18n.t("booking.tripNotCompletedYet"));
-    }
     if (bookingData.ratingSubmitted === true) {
-      return;
-    }
-
-    const reviewSnap = await transaction.get(reviewRef);
-    if (reviewSnap.exists()) {
       return;
     }
 
@@ -1988,21 +1852,20 @@ export const submitSchoolBookingRating = async (
     const driverData: any = driverSnap.exists() ? driverSnap.data() : {};
 
     const oldCount = Number(driverData.ratingCount) || 0;
-    const oldSum = Number(driverData.ratingSum) || 0;
+    const oldSum =
+      Number(driverData.ratingSum) || Number(driverData.ratingAverage || 0) * oldCount;
 
     const newCount = oldCount + 1;
-    const newSum = oldSum + cleanRating;
-    // Stored RAW (never toFixed()'d) — firestore.rules checks
-    // ratingAverage == ratingSum / ratingCount for exact equality.
-    const newAverage = newSum / newCount;
+    const newSum = oldSum + rating;
+    const newAverage = Number((newSum / newCount).toFixed(2));
 
     transaction.set(reviewRef, {
       bookingId,
       driverId: booking.driverId,
       driverName: booking.driverName || "Driver",
-      passengerId: user.uid,
+      passengerId: booking.passengerId || null,
       passengerName: booking.passengerName || "Passenger",
-      rating: cleanRating,
+      rating,
       comment: cleanComment,
       category: "school",
       from: booking.fromAddress || "",
@@ -2013,11 +1876,9 @@ export const submitSchoolBookingRating = async (
     });
 
     transaction.update(bookingRef, {
-      rating: cleanRating,
-      reviewComment: cleanComment,
+      rating,
       ratingSubmitted: true,
       needsPassengerRating: false,
-      ratedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
 
@@ -2032,12 +1893,6 @@ export const submitSchoolBookingRating = async (
       { merge: true },
     );
   });
-
-    console.log("[rating] transaction succeeded", { bookingId });
-  } catch (error) {
-    console.log("[rating] transaction failed", { ...ratingWritePaths, error });
-    throw error;
-  }
 };
 
 // ---------------------------------------------------------------------------
@@ -2078,7 +1933,7 @@ export const normalizeReplacementOffer = (id: string, data: any): ReplacementOff
   originalTripId: data.originalTripId || "",
   parentId: data.parentId || "",
   childEntryIds: Array.isArray(data.childEntryIds) ? data.childEntryIds : undefined,
-  direction: normalizeSchoolTripDirection(data.direction),
+  direction: data.direction === "from_school" ? "from_school" : "to_school",
   seatsNeeded: Number(data.seatsNeeded) || 1,
   candidateTripIds: Array.isArray(data.candidateTripIds) ? data.candidateTripIds : [],
   status: (["pending", "offered", "accepted", "declined", "expired"].includes(data.status)
@@ -2259,9 +2114,6 @@ export const acceptReplacementOffer = async (
       driverId: trip.driverId,
       driverName: trip.driverName,
       driverPhone: trip.driverPhone,
-      car: trip.car,
-      carColor: trip.carColor,
-      carPlate: trip.carPlate,
 
       schoolId: trip.schoolId,
       schoolName: trip.schoolName,
