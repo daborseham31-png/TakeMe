@@ -8,7 +8,6 @@ import { auth, db } from "../../../firebase";
 // initialized global i18next instance directly rather than the
 // useTranslation() hook — see app/i18n/index.ts.
 import i18n from "../../i18n";
-import { normalizeToWesternDigits } from "../../i18n/digits";
 
 // ---------------------------------------------------------------------------
 // Shared constants
@@ -31,11 +30,8 @@ export const normalize = (value: string) => {
   return value.trim().toLowerCase();
 };
 
-// Normalizes Arabic-Indic/Persian digits to Western first, so a value typed
-// on an RTL keyboard (e.g. "٠٤٢٧") still comes out as digits ("0427")
-// instead of being silently stripped to nothing.
 export const getDigitsOnly = (value: string) => {
-  return normalizeToWesternDigits(value).replace(/\D/g, "");
+  return value.replace(/\D/g, "");
 };
 
 // Vehicle/car plate number: digits only, 7-9 digits (matches the same rule
@@ -206,7 +202,7 @@ export const getDayFromDateText = (dateText: string) => {
 // ---------------------------------------------------------------------------
 
 export const normalizeTime = (value: string) => {
-  const match = normalizeToWesternDigits(value).trim().match(/^(\d{1,2}):(\d{2})$/);
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
 
   if (!match) return null;
 
@@ -554,9 +550,6 @@ export const styles = StyleSheet.create({
     height: 48,
     alignItems: "center",
     justifyContent: "center",
-  },
-  ltrText: {
-    writingDirection: "ltr",
   },
   rowInput: {
     flex: 1,

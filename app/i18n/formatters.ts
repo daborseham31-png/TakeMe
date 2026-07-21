@@ -36,16 +36,18 @@ export function formatLocalizedDate(
   }
 }
 
-// Deliberately NOT Intl.DateTimeFormat — some ICU builds render "ar" hour/
-// minute digits as Arabic-Indic (٠١٢...), which this app must never show or
-// save (see app/i18n/digits.ts). Manual padStart formatting always produces
-// plain Western digits regardless of `language`, exactly like every other
-// time value in the app (see InfiniteTimeWheelPicker / TimeInput).
 export function formatLocalizedTime(
   date: Date,
-  _language: SupportedLanguage,
+  language: SupportedLanguage,
 ): string {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  try {
+    return new Intl.DateTimeFormat(INTL_LOCALE[language], {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return date.toISOString().slice(11, 16);
+  }
 }
 
 // Most screens store dates as a stable "YYYY-MM-DD" string (see

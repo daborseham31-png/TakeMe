@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { doc, onSnapshot } from "firebase/firestore";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -11,11 +11,10 @@ import {
   Text,
   View,
 } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import MapView, { Marker } from "react-native-maps";
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";
-import { TRIP_LOCATIONS_COLLECTION } from "../booking/schoolTripsLib";
 import { useLanguage } from "../i18n/LanguageProvider";
 
 type LatLng = {
@@ -45,39 +44,23 @@ const getStatusKey = (booking: any) => {
   return "rides.waitingForDriver";
 };
 
-// Show a "location hasn't updated recently" warning once this many ms pass
-// with no new tick — within the 15-30s window requested.
-const STALE_AFTER_MS = 20000;
-
 export default function LiveTrackingScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
   const id = typeof params.id === "string" ? params.id : "";
 
-  // A school trip's live location is shared by every passenger booked on it
-  // (see app/driver/ride-navigation.tsx's top-of-file comment), so `id`
-  // here is the tripId, not a booking id, whenever source=schoolTrips —
-  // tripLocations/{id} matches either case directly (see
-  // driverLocationTask.ts / schoolTripsLib.ts).
+  // A school trip's live location lives on the schoolTrips/{id} doc itself
+  // (one car, shared by every passenger booked on it — see
+  // app/driver/ride-navigation.tsx's top-of-file comment), so `id` here is
+  // the tripId, not a booking id, whenever source=schoolTrips.
   const isSchoolTripsSource = String(params.source || "") === "schoolTrips";
   const bookingCollection = isSchoolTripsSource ? "schoolTrips" : "bookings";
 
   const mapRef = useRef<MapView | null>(null);
-  const driverMarkerRef = useRef<any>(null);
-  const lastAnimatedCoordRef = useRef<LatLng | null>(null);
-  const hasCenteredOnceRef = useRef(false);
-  const userHasPannedRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState<any | null>(null);
-  const [locationError, setLocationError] = useState(false);
-
-  // The driver's real GPS — read from its own tripLocations doc via a
-  // dedicated real-time listener (never a static/simulated value, never
-  // re-fetched by reloading this screen). Firestore rules restrict this
-  // read to the assigned driver + authorized passenger(s) only.
-  const [driverDoc, setDriverDoc] = useState<any | null>(null);
 
   useEffect(() => {
     if (!id) {
@@ -113,30 +96,10 @@ export default function LiveTrackingScreen() {
     return unsub;
   }, [id]);
 
-  useEffect(() => {
-    if (!id) {
-      setDriverDoc(null);
-      return;
-    }
-
-    const unsub = onSnapshot(
-      doc(db, TRIP_LOCATIONS_COLLECTION, id),
-      (snap) => {
-        setDriverDoc(snap.exists() ? snap.data() : null);
-        setLocationError(false);
-      },
-      // A permission-denied or offline read lands here — surfaced as a
-      // small inline notice below rather than a blank/crashed screen.
-      () => setLocationError(true),
-    );
-
-    return unsub;
-  }, [id]);
-
-  const driverLocation = useMemo(() => toLatLng(driverDoc), [driverDoc]);
-  const driverUpdatedAtMs: number | null = driverDoc?.updatedAt?.seconds
-    ? driverDoc.updatedAt.seconds * 1000
-    : null;
+  const driverLocation = useMemo(
+    () => toLatLng(booking?.driverLocation),
+    [booking],
+  );
 
   const pickupLocation = useMemo(() => {
     return (
@@ -149,7 +112,7 @@ export default function LiveTrackingScreen() {
     );
   }, [booking]);
 
-  const destinationLocation = useMemo(() => {
+  const schoolLocation = useMemo(() => {
     return (
       toLatLng(booking?.schoolCoords) ||
       toLatLng(booking?.destinationCoords) ||
@@ -157,58 +120,21 @@ export default function LiveTrackingScreen() {
     );
   }, [booking]);
 
-  const mapCenter = driverLocation || pickupLocation || destinationLocation;
+  const mapCenter = driverLocation || pickupLocation || schoolLocation;
 
-  // Smoothly animates the marker to each new fix instead of teleporting it
-  // — the FIRST fix places it directly (nothing to animate from yet), every
-  // fix after that calls the imperative animate API so the movement itself
-  // is visible rather than a jump-cut. Never re-renders/reloads the map for
-  // this — only the marker's own position changes.
   useEffect(() => {
-    if (!driverLocation) return;
+    if (!driverLocation || !mapRef.current) return;
 
-    if (lastAnimatedCoordRef.current && driverMarkerRef.current) {
-      (driverMarkerRef.current as any).animateMarkerToCoordinate?.(driverLocation, 1000);
-    }
-
-    lastAnimatedCoordRef.current = driverLocation;
-  }, [driverLocation]);
-
-  // Auto-frame the map ONCE, the first time a driver fix arrives, so the
-  // passenger doesn't open to an empty ocean tile — never again after that,
-  // so manual pan/zoom is never fought (see recenter() for the explicit,
-  // on-demand alternative).
-  useEffect(() => {
-    if (!driverLocation || !mapRef.current || hasCenteredOnceRef.current || userHasPannedRef.current) {
-      return;
-    }
-
-    hasCenteredOnceRef.current = true;
     mapRef.current.animateToRegion(
-      { latitude: driverLocation.latitude, longitude: driverLocation.longitude, latitudeDelta: 0.015, longitudeDelta: 0.015 },
+      {
+        latitude: driverLocation.latitude,
+        longitude: driverLocation.longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      },
       700,
     );
   }, [driverLocation]);
-
-  const recenter = useCallback(() => {
-    if (!driverLocation || !mapRef.current) return;
-
-    userHasPannedRef.current = false;
-    mapRef.current.animateToRegion(
-      { latitude: driverLocation.latitude, longitude: driverLocation.longitude, latitudeDelta: 0.015, longitudeDelta: 0.015 },
-      500,
-    );
-  }, [driverLocation]);
-
-  // Ticks once a second purely to re-evaluate the "stale" / "last updated"
-  // text below against the current time — never touches the map itself.
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const interval = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const isStale = !!driverUpdatedAtMs && nowMs - driverUpdatedAtMs > STALE_AFTER_MS;
 
   if (loading) {
     return (
@@ -234,7 +160,7 @@ export default function LiveTrackingScreen() {
     );
   }
 
-  const trackingActive = (booking.tripStatus || booking.status) === "in_progress";
+  const trackingActive = booking.trackingEnabled === true;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -269,13 +195,6 @@ export default function LiveTrackingScreen() {
           </Text>
         </View>
 
-        {locationError ? (
-          <View style={styles.warningBox}>
-            <Ionicons name="cloud-offline-outline" size={16} color="#B91C1C" />
-            <Text style={styles.warningText}>{t("rides.locationTemporarilyUnavailable")}</Text>
-          </View>
-        ) : null}
-
         {mapCenter ? (
           <View style={styles.mapWrapper}>
             <MapView
@@ -287,19 +206,7 @@ export default function LiveTrackingScreen() {
                 latitudeDelta: 0.03,
                 longitudeDelta: 0.03,
               }}
-              onPanDrag={() => {
-                userHasPannedRef.current = true;
-              }}
             >
-              {pickupLocation && destinationLocation ? (
-                <Polyline
-                  coordinates={[pickupLocation, destinationLocation]}
-                  strokeColor="#F58220"
-                  strokeWidth={3}
-                  lineDashPattern={[8, 6]}
-                />
-              ) : null}
-
               {pickupLocation ? (
                 <Marker
                   coordinate={pickupLocation}
@@ -312,9 +219,9 @@ export default function LiveTrackingScreen() {
                 </Marker>
               ) : null}
 
-              {destinationLocation ? (
+              {schoolLocation ? (
                 <Marker
-                  coordinate={destinationLocation}
+                  coordinate={schoolLocation}
                   title={t("rides.schoolMarkerTitle")}
                   description={t("rides.schoolMarkerDesc")}
                 >
@@ -326,11 +233,9 @@ export default function LiveTrackingScreen() {
 
               {driverLocation ? (
                 <Marker
-                  ref={driverMarkerRef}
-                  coordinate={lastAnimatedCoordRef.current ?? driverLocation}
+                  coordinate={driverLocation}
                   title={t("rides.driverMarkerTitle")}
                   description={t("rides.driverMarkerDesc")}
-                  anchor={{ x: 0.5, y: 0.5 }}
                 >
                   <View style={styles.driverMarker}>
                     <Ionicons name="car" size={20} color="#FFFFFF" />
@@ -338,12 +243,6 @@ export default function LiveTrackingScreen() {
                 </Marker>
               ) : null}
             </MapView>
-
-            {driverLocation ? (
-              <Pressable style={styles.recenterButton} onPress={recenter} hitSlop={8}>
-                <Ionicons name="locate" size={20} color="#F58220" />
-              </Pressable>
-            ) : null}
           </View>
         ) : (
           <View style={styles.noMapBox}>
@@ -353,13 +252,6 @@ export default function LiveTrackingScreen() {
             </Text>
           </View>
         )}
-
-        {isStale ? (
-          <View style={styles.warningBox}>
-            <Ionicons name="warning-outline" size={16} color="#B91C1C" />
-            <Text style={styles.warningText}>{t("rides.driverLocationStale")}</Text>
-          </View>
-        ) : null}
 
         <View style={styles.card}>
           <View style={styles.infoRow}>
@@ -386,14 +278,16 @@ export default function LiveTrackingScreen() {
           {booking.time ? (
             <View style={styles.infoRow}>
               <Ionicons name="time-outline" size={16} color="#7C5F46" />
-              <Text style={[styles.infoText, styles.ltrText]}>{booking.time}</Text>
+              <Text style={styles.infoText}>{booking.time}</Text>
             </View>
           ) : null}
 
-          {driverUpdatedAtMs ? (
-            <Text style={[styles.updatedText, isStale && styles.updatedTextStale]}>
+          {booking.driverLocationUpdatedAt?.seconds ? (
+            <Text style={styles.updatedText}>
               {t("rides.lastUpdate", {
-                time: new Date(driverUpdatedAtMs).toLocaleTimeString("en-US", { hour12: false }),
+                time: new Date(
+                  booking.driverLocationUpdatedAt.seconds * 1000,
+                ).toLocaleTimeString(),
               })}
             </Text>
           ) : (
@@ -478,21 +372,6 @@ const styles = StyleSheet.create({
   statusWaiting: {
     color: "#B86115",
   },
-  warningBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#FEE2E2",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-  },
-  warningText: {
-    flex: 1,
-    color: "#B91C1C",
-    fontWeight: "800",
-    fontSize: 12.5,
-  },
   mapWrapper: {
     height: 420,
     borderRadius: 22,
@@ -504,22 +383,6 @@ const styles = StyleSheet.create({
   map: {
     width: "100%",
     height: "100%",
-  },
-  recenterButton: {
-    position: "absolute",
-    right: 14,
-    bottom: 14,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 3,
   },
   driverMarker: {
     width: 44,
@@ -586,17 +449,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     flexShrink: 1,
   },
-  ltrText: {
-    writingDirection: "ltr",
-  },
   updatedText: {
     marginTop: 8,
     color: "#7C5F46",
     fontWeight: "700",
     fontSize: 13,
-  },
-  updatedTextStale: {
-    color: "#B91C1C",
   },
   emptyTitle: {
     color: "#111827",

@@ -389,12 +389,7 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
                       })
                     : null;
 
-              // Live Tracking only once this exact booking's own trip has
-              // actually started (a correct passenger code moved it from
-              // "arrived_pickup" to "in_progress" — see
-              // verifyPassengerCodeAndStartTrip in schoolTripsLib.ts).
-              // Never during booked/driver_on_way/arrived_pickup/completed.
-              const canTrack = booking.tripStatus === "in_progress";
+              const canTrack = booking.trackingEnabled && booking.tripStatus === "arrived_pickup";
               const needsRating =
                 booking.status === "completed" &&
                 booking.needsPassengerRating &&

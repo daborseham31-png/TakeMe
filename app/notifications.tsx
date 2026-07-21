@@ -91,7 +91,6 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
   ride_arrived: "location-outline",
   ride_completed: "trophy-outline",
   ride_trip_completed: "star-outline",
-  trip_started: "navigate-outline",
 
   roadside_offer_received: "construct-outline",
   roadside_offer_accepted: "checkmark-done-outline",
@@ -245,21 +244,6 @@ export default function NotificationsScreen() {
           rideRequestId: n.requestId || "",
           childEntryId: n.childEntryId || "",
           childName: n.childName || "",
-        },
-      } as any);
-      return;
-    }
-
-    // The driver verified the passenger's code and the trip has started —
-    // open Live Tracking directly (bookingId holds the TRIP id here, same
-    // convention as school_trip_match above — see
-    // verifyPassengerCodeAndStartTrip in schoolTripsLib.ts).
-    if (n.type === "trip_started") {
-      router.push({
-        pathname: "/booking/live-tracking",
-        params: {
-          id: n.bookingId || n.applicationId || "",
-          source: "schoolTrips",
         },
       } as any);
       return;
