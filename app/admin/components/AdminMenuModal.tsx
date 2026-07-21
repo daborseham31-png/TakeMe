@@ -8,12 +8,11 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { signOut } from "firebase/auth";
 import React from "react";
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
-import { auth } from "../../../firebase";
+import { signOutAndRedirectToLogin } from "../../authLib";
 import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 
 type MenuItem = {
@@ -63,8 +62,7 @@ export default function AdminMenuModal({ visible, onClose, activeKey }: Props) {
         text: t("admin.logOutConfirmTitle"),
         style: "destructive",
         onPress: async () => {
-          await signOut(auth);
-          router.replace("/");
+          await signOutAndRedirectToLogin();
         },
       },
     ]);

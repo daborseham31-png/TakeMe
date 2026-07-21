@@ -57,7 +57,7 @@ export default function ChatScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
-    if (!convId) {
+    if (!convId || !auth.currentUser) {
       setLoading(false);
       return;
     }

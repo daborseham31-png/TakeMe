@@ -157,13 +157,26 @@ export default function RideNavigationScreen() {
       return;
     }
 
-    const unsub = onSnapshot(doc(db, TRIP_LOCATIONS_COLLECTION, id), (snap) => {
-      const data = snap.data();
-      const lat = Number(data?.latitude);
-      const lng = Number(data?.longitude);
+    const unsub = onSnapshot(
+      doc(db, TRIP_LOCATIONS_COLLECTION, id),
+      (snap) => {
+        const data = snap.data();
+        const lat = Number(data?.latitude);
+        const lng = Number(data?.longitude);
 
-      setLiveDriverLocation(Number.isFinite(lat) && Number.isFinite(lng) ? { latitude: lat, longitude: lng } : null);
-    });
+        setLiveDriverLocation(Number.isFinite(lat) && Number.isFinite(lng) ? { latitude: lat, longitude: lng } : null);
+      },
+      (error) => {
+        console.log("Listener failed:", {
+          feature: "ride-navigation.tripLocations",
+          collection: TRIP_LOCATIONS_COLLECTION,
+          docId: id,
+          code: error.code,
+          message: error.message,
+        });
+        setLiveDriverLocation(null);
+      },
+    );
 
     return unsub;
   }, [id]);
@@ -189,6 +202,16 @@ export default function RideNavigationScreen() {
       ),
       (snap) => {
         setSchoolPassengerBookings(snap.docs.map((d) => normalizeSchoolBooking(d.id, d.data())));
+      },
+      (error) => {
+        console.log("Listener failed:", {
+          feature: "ride-navigation.schoolPassengerBookings",
+          collection: SCHOOL_BOOKINGS_COLLECTION,
+          tripId: id,
+          code: error.code,
+          message: error.message,
+        });
+        setSchoolPassengerBookings([]);
       },
     );
 

@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
-import { signOut } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
@@ -22,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { auth, db } from "../../firebase";
 import { createReport } from "../admin/adminReportsLib";
 import { ReportCategory } from "../admin/adminTypes";
+import { signOutAndRedirectToLogin } from "../authLib";
 import { useLanguage } from "../i18n/LanguageProvider";
 import LanguageSelectorModal from "../i18n/LanguageSelectorModal";
 import { SUPPORTED_LANGUAGES } from "../i18n/languages";
@@ -120,8 +120,7 @@ export default function ProfileScreen() {
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
-    router.replace("/");
+    await signOutAndRedirectToLogin();
   };
 
   const submitReport = async () => {

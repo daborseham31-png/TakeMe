@@ -167,6 +167,16 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
                 .filter((b) => !b.deletedForDriver),
             );
           },
+          (error) => {
+            console.log("Listener failed:", {
+              feature: "MySchoolTripsSection.driverBookings",
+              collection: SCHOOL_BOOKINGS_COLLECTION,
+              userId: uid,
+              code: error.code,
+              message: error.message,
+            });
+            setBookings([]);
+          },
         ),
       );
       setRideRequests([]);
