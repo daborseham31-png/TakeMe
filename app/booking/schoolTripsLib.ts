@@ -169,6 +169,12 @@ export interface SchoolTrip {
   // itself (only surfaced through the booking's own cancellation fields).
   cancellationReason?: string;
 
+  // Hides a finished trip from the driver's own My Bookings list only (see
+  // hideSchoolTrip) — same "soft delete, own side only" convention as
+  // SchoolBooking's deletedForPassenger/deletedForDriver below. A trip has
+  // no passenger-side equivalent since it's driver-owned.
+  deletedForDriver: boolean;
+
   createdAtSeconds: number;
   updatedAtSeconds: number;
 }
@@ -575,6 +581,7 @@ export const normalizeSchoolTrip = (id: string, data: any): SchoolTrip => ({
   driverLocation: toDriverLocation(data.driverLocation),
   driverLocationUpdatedAtSeconds: data.driverLocationUpdatedAt?.seconds || 0,
   finishedByDriver: data.finishedByDriver === true,
+  deletedForDriver: data.deletedForDriver === true,
 
   createdAtSeconds: data.createdAt?.seconds || 0,
   updatedAtSeconds: data.updatedAt?.seconds || 0,
@@ -825,6 +832,7 @@ const triggerMatchingIfReturn = (
     driverLocation: null,
     driverLocationUpdatedAtSeconds: 0,
     finishedByDriver: false,
+    deletedForDriver: false,
     createdAtSeconds: 0,
     updatedAtSeconds: 0,
   }).catch((error) => {
@@ -891,6 +899,38 @@ export const createSchoolRoundTrip = async (
 };
 
 // ---------------------------------------------------------------------------
+// Cancellation window — once a trip is this close to departure, or the
+// driver has already started it (tripStatus moved past "booked"), neither
+// side can cancel anymore; the trip has to run to completion instead. Pure
+// function (no Firestore access) so it can gate the Cancel button in the UI
+// AND be re-checked server-side-equivalent inside cancelSchoolBooking/
+// cancelSchoolTrip below before either actually writes anything.
+// ---------------------------------------------------------------------------
+
+const CANCEL_LOCK_HOURS_BEFORE_DEPARTURE = 2;
+
+export const getSchoolCancelBlockedReason = (
+  date: string,
+  departureTime: string,
+  tripStatus: TripTrackingStatus,
+): string | null => {
+  if (tripStatus !== "booked") {
+    return i18n.t("schoolTrip.cannotCancelDriverEnRoute");
+  }
+
+  const start = new Date(`${date}T${departureTime || "00:00"}:00`);
+  if (Number.isNaN(start.getTime())) return null;
+
+  const lockAt = new Date(
+    start.getTime() - CANCEL_LOCK_HOURS_BEFORE_DEPARTURE * 60 * 60 * 1000,
+  );
+
+  return Date.now() >= lockAt.getTime()
+    ? i18n.t("schoolTrip.cannotCancelWithinTwoHours")
+    : null;
+};
+
+// ---------------------------------------------------------------------------
 // Driver: cancel a single leg (AGENTS.md #12: cancelling one direction must
 // never touch the other linked trip).
 // ---------------------------------------------------------------------------
@@ -902,9 +942,28 @@ export const createSchoolRoundTrip = async (
 // enumerates/updates bookings itself (that matching/notification logic runs
 // server-side, per the driver-cancellation-replacement feature).
 export const cancelSchoolTrip = async (tripId: string, reason?: string) => {
-  await updateDoc(doc(db, SCHOOL_TRIPS_COLLECTION, tripId), {
+  const tripRef = doc(db, SCHOOL_TRIPS_COLLECTION, tripId);
+  const tripSnap = await getDoc(tripRef);
+
+  if (tripSnap.exists()) {
+    const trip = normalizeSchoolTrip(tripSnap.id, tripSnap.data());
+    const blocked = getSchoolCancelBlockedReason(trip.date, trip.departureTime, trip.tripStatus);
+    if (blocked) throw new Error(blocked);
+  }
+
+  await updateDoc(tripRef, {
     status: "cancelled" as SchoolTripStatus,
     ...(reason ? { cancellationReason: reason } : {}),
+    updatedAt: serverTimestamp(),
+  });
+};
+
+// Hides a finished (cancelled/completed) trip from the driver's own list —
+// see SchoolTrip.deletedForDriver above. Never touches status/availableSeats
+// or anything a passenger's booking depends on.
+export const hideSchoolTrip = async (tripId: string) => {
+  await updateDoc(doc(db, SCHOOL_TRIPS_COLLECTION, tripId), {
+    deletedForDriver: true,
     updatedAt: serverTimestamp(),
   });
 };
@@ -1759,6 +1818,13 @@ export const cancelSchoolBooking = async (bookingId: string) => {
       return;
     }
 
+    const blocked = getSchoolCancelBlockedReason(
+      booking.date,
+      booking.departureTime,
+      booking.tripStatus,
+    );
+    if (blocked) throw new Error(blocked);
+
     tripId = booking.tripId;
     driverId = booking.driverId;
     passengerName = booking.passengerName;
@@ -1804,6 +1870,19 @@ export const cancelSchoolBooking = async (bookingId: string) => {
       targetTab: "driver",
     });
   }
+};
+
+// Hides a finished (completed/cancelled) booking from one side's own My
+// Bookings list only — same soft-delete convention as hideGeneralBooking in
+// bookingsLib.ts. Never touches status/seats or the other participant's view.
+export const hideSchoolBooking = async (
+  bookingId: string,
+  viewer: "passenger" | "driver",
+) => {
+  await updateDoc(doc(db, SCHOOL_BOOKINGS_COLLECTION, bookingId), {
+    [viewer === "passenger" ? "deletedForPassenger" : "deletedForDriver"]: true,
+    updatedAt: serverTimestamp(),
+  });
 };
 
 // ---------------------------------------------------------------------------

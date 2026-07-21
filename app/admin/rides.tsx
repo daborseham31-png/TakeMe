@@ -1,6 +1,7 @@
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useMemo, useState } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { subscribeAllRides } from "./adminRidesLib";
@@ -14,7 +15,7 @@ import { useAdminCollection } from "./useAdminCollection";
 
 type CategoryFilter = "all" | RideCategory;
 type StatusFilter = "all" | RideStatus;
-type SortKey = "newest" | "oldest" | "date" | "price";
+type SortKey = "newest" | "oldest";
 
 const CATEGORY_OPTION_KEYS: { key: CategoryFilter; labelKey: string }[] = [
   { key: "all", labelKey: "admin.allFilter" },
@@ -35,8 +36,6 @@ const STATUS_OPTION_KEYS: { key: StatusFilter; labelKey: string }[] = [
 const SORT_OPTION_KEYS: { key: SortKey; labelKey: string }[] = [
   { key: "newest", labelKey: "admin.sortLabel.newest" },
   { key: "oldest", labelKey: "admin.sortLabel.oldest" },
-  { key: "date", labelKey: "admin.sortLabel.nearestDate" },
-  { key: "price", labelKey: "admin.sortLabel.price" },
 ];
 
 const statusColor = (status: RideStatus) => {
@@ -53,6 +52,7 @@ export default function AdminRidesScreen() {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sort, setSort] = useState<SortKey>("newest");
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
 
   const categoryOptions = useMemo(
     () => CATEGORY_OPTION_KEYS.map((o) => ({ key: o.key, label: t(o.labelKey) })),
@@ -84,12 +84,11 @@ export default function AdminRidesScreen() {
       return categoryMatches && statusMatches && searchMatches && !ride.removed;
     });
 
-    return [...list].sort((a, b) => {
-      if (sort === "newest") return b.createdAtSeconds - a.createdAtSeconds;
-      if (sort === "oldest") return a.createdAtSeconds - b.createdAtSeconds;
-      if (sort === "price") return (b.price ?? 0) - (a.price ?? 0);
-      return (a.date || "9999").localeCompare(b.date || "9999");
-    });
+    return [...list].sort((a, b) =>
+      sort === "newest"
+        ? b.createdAtSeconds - a.createdAtSeconds
+        : a.createdAtSeconds - b.createdAtSeconds,
+    );
   }, [rides, search, categoryFilter, statusFilter, sort]);
 
   const renderRide = ({ item }: { item: AdminRideRow }) => (
@@ -132,8 +131,52 @@ export default function AdminRidesScreen() {
         <SearchBar value={search} onChangeText={setSearch} placeholder={t("admin.searchDriverOriginDest")} />
         <FilterChips options={categoryOptions} value={categoryFilter} onChange={setCategoryFilter} />
         <FilterChips options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
-        <FilterChips options={sortOptions} value={sort} onChange={setSort} />
+
+        <Pressable style={styles.sortRow} onPress={() => setSortMenuOpen(true)}>
+          <Text style={styles.sortRowText}>
+            {t("admin.sortByLabel")}{" "}
+            <Text style={styles.sortRowValue}>
+              {sortOptions.find((o) => o.key === sort)?.label}
+            </Text>
+          </Text>
+          <Ionicons name="swap-vertical-outline" size={18} color={adminColors.textMuted} />
+        </Pressable>
       </View>
+
+      <Modal
+        visible={sortMenuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSortMenuOpen(false)}
+      >
+        <Pressable style={styles.sortBackdrop} onPress={() => setSortMenuOpen(false)}>
+          <View style={styles.sortSheet}>
+            {sortOptions.map((option) => {
+              const active = option.key === sort;
+
+              return (
+                <Pressable
+                  key={option.key}
+                  style={styles.sortOptionRow}
+                  onPress={() => {
+                    setSort(option.key);
+                    setSortMenuOpen(false);
+                  }}
+                >
+                  <Text style={[styles.sortOptionText, active && styles.sortOptionTextActive]}>
+                    {option.label}
+                  </Text>
+                  <Ionicons
+                    name={active ? "radio-button-on" : "radio-button-off"}
+                    size={20}
+                    color={active ? adminColors.primary : adminColors.border}
+                  />
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Modal>
 
       {loading ? (
         <LoadingState label={t("admin.loadingRides")} />
@@ -231,5 +274,54 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     color: adminColors.textMuted,
     fontWeight: "700",
+  },
+  sortRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: adminColors.card,
+    borderWidth: 1,
+    borderColor: adminColors.border,
+    borderRadius: adminRadius.md,
+  },
+  sortRowText: {
+    fontSize: 13,
+    color: adminColors.textMuted,
+    fontWeight: "700",
+  },
+  sortRowValue: {
+    color: adminColors.text,
+    fontWeight: "900",
+  },
+  sortBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "center",
+    paddingHorizontal: adminSpacing.lg,
+  },
+  sortSheet: {
+    backgroundColor: adminColors.card,
+    borderRadius: adminRadius.lg,
+    paddingVertical: 6,
+    paddingHorizontal: adminSpacing.lg,
+  },
+  sortOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: adminColors.divider,
+  },
+  sortOptionText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: adminColors.text,
+  },
+  sortOptionTextActive: {
+    color: adminColors.primary,
+    fontWeight: "900",
   },
 });
