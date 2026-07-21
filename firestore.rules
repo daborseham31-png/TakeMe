@@ -356,12 +356,7 @@ service cloud.firestore {
     match /schoolReplacementOffers/{offerId} {
       // Only the affected parent ever reads their own offers — this
       // document exists purely to drive their own review screen.
-      // `resource == null` guard: fetchReplacementOfferByBookingId /
-      // fetchReplacementOffer (schoolTripsLib.ts) can be called for a
-      // booking that was never actually driver-cancelled, i.e. no offer
-      // doc exists — same dereference-on-null pitfall fixed on
-      // tripLocations above, caught here during the same review.
-      allow read: if isSignedIn() && (resource == null || resource.data.parentId == request.auth.uid);
+      allow read: if isSignedIn() && resource.data.parentId == request.auth.uid;
 
       // Only the onSchoolTripCancelled Cloud Function creates these (Admin
       // SDK, bypasses these rules regardless) — no client ever creates one
@@ -397,21 +392,7 @@ service cloud.firestore {
     // verifyPassengerCodeAndStartTrip in schoolTripsLib.ts).
     // -----------------------------------------------------------------
     match /tripLocations/{targetId} {
-      // `resource` is null for a document that doesn't exist yet — every
-      // trip/booking has one of these BEFORE tracking ever starts (driver
-      // hasn't arrived/been verified yet), and ride-navigation.tsx /
-      // live-tracking.tsx both subscribe to this path the moment their
-      // screen opens, regardless of trip status. Dereferencing
-      // resource.data without checking existence first throws a rules
-      // evaluation error — which Firestore reports to the client as the
-      // same generic "Missing or insufficient permissions" as a real
-      // denial — for EVERY signed-in user, including the legitimate
-      // driver/passenger. Allowing the not-yet-created case through (there
-      // is nothing to protect on a document with no data) is what actually
-      // fixes this; the client already renders "no location yet" for a
-      // missing snapshot either way.
       allow read: if isSignedIn() && (
-        resource == null ||
         resource.data.driverId == request.auth.uid ||
         resource.data.get("passengerId", null) == request.auth.uid ||
         request.auth.uid in resource.data.get("authorizedPassengerIds", [])
