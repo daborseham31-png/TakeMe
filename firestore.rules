@@ -177,10 +177,7 @@ service cloud.firestore {
         request.resource.data.availableSeats == request.resource.data.totalSeats;
 
       // Legitimate non-owner-agnostic update shapes:
-      //   1) The owning driver changes status (e.g. cancelling a leg) and
-      //      optionally stamps WHY — cancellationReason is read server-side
-      //      by the onSchoolTripCancelled Cloud Function to propagate onto
-      //      affected bookings and to build the replacement offer.
+      //   1) The owning driver changes status only (e.g. cancelling a leg).
       //   2) ANY signed-in user's booking/cancellation transaction moves
       //      availableSeats within [0, totalSeats] and status between
       //      active/full — never any other field (price, driverId, date,
@@ -201,8 +198,7 @@ service cloud.firestore {
         (
           resource.data.driverId == request.auth.uid &&
           request.resource.data.driverId == resource.data.driverId &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(["status", "cancellationReason", "updatedAt"])
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "updatedAt"])
         ) ||
         (
           request.resource.data.diff(resource.data).affectedKeys()
@@ -235,33 +231,21 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
         request.resource.data.passengerId == request.auth.uid;
 
-      // Five legitimate update shapes:
+      // Three legitimate update shapes:
       //   1) The booking passenger cancels it — driver/trip/price/seat
-      //      fields are immutable after creation. Also expires the
-      //      passenger's own verification code (it can never be reused).
+      //      fields are immutable after creation.
       //   2) The owning driver syncs this booking's own tripStatus mirror
       //      (and, once, its rating-eligibility flags) from the SAME trip-
       //      lifecycle transition as the schoolTrips write above — see
       //      ride-navigation.tsx's updateSchoolTripStatus batch sync.
       //   3) The booking passenger submits their own post-trip rating.
-      //   4) The owning driver checks the passenger's verification code —
-      //      see verifySchoolBookingCode in schoolTripsLib.ts. Status may
-      //      only ever be one of the real VerificationStatus values; the
-      //      driver can never write the code itself, only the check
-      //      outcome/attempt-count/lockout fields.
-      //   5) The booking passenger (parent) accepts a driver-cancellation
-      //      replacement offer for THIS (old) booking — see
-      //      acceptReplacementOffer in schoolTripsLib.ts. Everything else
-      //      about the old booking (seats, price, trip, driver) is frozen;
-      //      only the replacement-linkage fields change.
       allow update: if isSignedIn() && (
         (
           resource.data.passengerId == request.auth.uid &&
           request.resource.data.passengerId == resource.data.passengerId &&
           request.resource.data.driverId == resource.data.driverId &&
           request.resource.data.tripId == resource.data.tripId &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(["status", "tripStatus", "verificationStatus", "updatedAt"])
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "tripStatus", "updatedAt"])
         ) ||
         (
           resource.data.driverId == request.auth.uid &&
@@ -284,52 +268,8 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(["rating", "ratingSubmitted", "needsPassengerRating", "updatedAt"]) &&
           request.resource.data.ratingSubmitted == true
-        ) ||
-        (
-          resource.data.driverId == request.auth.uid &&
-          request.resource.data.driverId == resource.data.driverId &&
-          request.resource.data.passengerId == resource.data.passengerId &&
-          request.resource.data.tripId == resource.data.tripId &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "verificationStatus", "verifiedAt", "verifiedByDriverId",
-            "verificationAttempts", "verificationLockedUntil", "updatedAt"
-          ]) &&
-          request.resource.data.verificationStatus in ["pending", "verified", "failed", "expired"]
-        ) ||
-        (
-          resource.data.passengerId == request.auth.uid &&
-          request.resource.data.passengerId == resource.data.passengerId &&
-          request.resource.data.driverId == resource.data.driverId &&
-          request.resource.data.tripId == resource.data.tripId &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "bookingStatus", "replacedByBookingId", "replacementTripId",
-            "replacementConfirmedAt", "updatedAt"
-          ])
         )
       );
-
-      allow delete: if false;
-    }
-
-    match /schoolReplacementOffers/{offerId} {
-      // Only the affected parent ever reads their own offers — this
-      // document exists purely to drive their own review screen.
-      allow read: if isSignedIn() && resource.data.parentId == request.auth.uid;
-
-      // Only the onSchoolTripCancelled Cloud Function creates these (Admin
-      // SDK, bypasses these rules regardless) — no client ever creates one
-      // directly.
-      allow create: if false;
-
-      // The owning parent accepts or declines — nothing else about the
-      // offer (candidateTripIds, seatsNeeded, the original booking/trip it
-      // points at) is ever client-editable.
-      allow update: if isSignedIn() &&
-        resource.data.parentId == request.auth.uid &&
-        request.resource.data.parentId == resource.data.parentId &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(["status", "acceptedTripId", "acceptedBookingId", "updatedAt"]) &&
-        request.resource.data.status in ["accepted", "declined"];
 
       allow delete: if false;
     }

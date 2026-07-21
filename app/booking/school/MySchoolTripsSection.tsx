@@ -106,10 +106,6 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
   const [ratingComment, setRatingComment] = useState("");
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
 
-  const [cancelTripTarget, setCancelTripTarget] = useState<SchoolTrip | null>(null);
-  const [cancelReasonInput, setCancelReasonInput] = useState("");
-  const [cancelSubmitting, setCancelSubmitting] = useState(false);
-
   useEffect(() => {
     if (!uid) {
       setBookings([]);
@@ -214,59 +210,24 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
     ]);
   };
 
-  // A trip with no active bookings cancels with the original plain confirm
-  // (no passenger is affected, no reason needed). A trip WITH bookings
-  // requires a reason and shows how many passengers are affected — see the
-  // cancel-with-reason modal below; the reason is stamped onto the trip
-  // doc and read server-side by the onSchoolTripCancelled Cloud Function to
-  // search for replacement trips for those passengers (AGENTS.md).
   const handleCancelTrip = (trip: SchoolTrip) => {
-    const affectedCount = bookings.filter(
-      (b) => b.tripId === trip.id && b.status === "booked",
-    ).length;
-
-    if (affectedCount === 0) {
-      Alert.alert(t("booking.cancelBookingTitle"), t("schoolTrip.cancelTripConfirm"), [
-        { text: t("common.cancel"), style: "cancel" },
-        {
-          text: t("booking.cancelBookingTitle"),
-          style: "destructive",
-          onPress: async () => {
-            setBusyId(trip.id);
-            try {
-              await cancelSchoolTrip(trip.id);
-            } catch (error: any) {
-              Alert.alert(t("common.error"), error?.message || t("errors.generic"));
-            } finally {
-              setBusyId(null);
-            }
-          },
+    Alert.alert(t("booking.cancelBookingTitle"), t("schoolTrip.cancelTripConfirm"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("booking.cancelBookingTitle"),
+        style: "destructive",
+        onPress: async () => {
+          setBusyId(trip.id);
+          try {
+            await cancelSchoolTrip(trip.id);
+          } catch (error: any) {
+            Alert.alert(t("common.error"), error?.message || t("errors.generic"));
+          } finally {
+            setBusyId(null);
+          }
         },
-      ]);
-      return;
-    }
-
-    setCancelTripTarget(trip);
-    setCancelReasonInput("");
-  };
-
-  const closeCancelTripModal = () => {
-    setCancelTripTarget(null);
-    setCancelReasonInput("");
-  };
-
-  const confirmCancelTripWithReason = async () => {
-    if (!cancelTripTarget || !cancelReasonInput.trim() || cancelSubmitting) return;
-
-    setCancelSubmitting(true);
-    try {
-      await cancelSchoolTrip(cancelTripTarget.id, cancelReasonInput.trim());
-      closeCancelTripModal();
-    } catch (error: any) {
-      Alert.alert(t("common.error"), error?.message || t("errors.generic"));
-    } finally {
-      setCancelSubmitting(false);
-    }
+      },
+    ]);
   };
 
   const handleCancelRequest = (request: RideRequest) => {
@@ -394,13 +355,6 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
                 booking.status === "completed" &&
                 booking.needsPassengerRating &&
                 !booking.ratingSubmitted;
-              const showVerificationCode =
-                booking.status === "booked" &&
-                booking.verificationStatus === "pending" &&
-                !!booking.verificationCode;
-              const needsReplacement =
-                booking.bookingStatus === "replacement_pending" ||
-                booking.bookingStatus === "replacement_offered";
 
               return (
                 <View key={booking.id} style={styles.legCard}>
@@ -435,35 +389,6 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
                     {booking.seats} {t("schoolTrip.seatWord")} · {booking.totalPrice} ₪
                   </Text>
                   {childSummary ? <Text style={styles.childSummaryText}>{childSummary}</Text> : null}
-
-                  {needsReplacement ? (
-                    <View style={styles.replacementBanner}>
-                      <Ionicons name="alert-circle-outline" size={16} color="#B91C1C" />
-                      <Text style={styles.replacementBannerText}>
-                        {booking.bookingStatus === "replacement_offered"
-                          ? t("booking.replacementOffersAvailable")
-                          : t("booking.replacementSearching")}
-                      </Text>
-                      <Pressable
-                        onPress={() =>
-                          router.push({
-                            pathname: "/booking/school/replacement-offer",
-                            params: { originalBookingId: booking.id },
-                          } as any)
-                        }
-                      >
-                        <Text style={styles.replacementBannerLink}>{t("booking.reviewOffers")}</Text>
-                      </Pressable>
-                    </View>
-                  ) : null}
-
-                  {showVerificationCode ? (
-                    <View style={styles.verificationCodeBox}>
-                      <Text style={styles.verificationCodeLabel}>{t("booking.verificationCode")}</Text>
-                      <Text style={styles.verificationCodeValue}>{booking.verificationCode}</Text>
-                      <Text style={styles.verificationCodeHint}>{t("booking.giveCodeToDriver")}</Text>
-                    </View>
-                  ) : null}
 
                   {canTrack ? (
                     <Pressable style={styles.trackButton} onPress={() => handleTrackDriver(booking)}>
@@ -661,55 +586,6 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
           </View>
         </View>
       </Modal>
-
-      <Modal
-        visible={!!cancelTripTarget}
-        animationType="fade"
-        transparent
-        onRequestClose={closeCancelTripModal}
-      >
-        <View style={styles.ratingOverlay}>
-          <View style={styles.ratingSheet}>
-            <Ionicons name="warning-outline" size={32} color="#B91C1C" />
-            <Text style={styles.ratingTitle}>{t("schoolTrip.cancelTripButton")}</Text>
-            <Text style={styles.ratingSubtitle}>
-              {t("schoolTrip.cancelTripAffectedWarning", {
-                count: cancelTripTarget
-                  ? bookings.filter((b) => b.tripId === cancelTripTarget.id && b.status === "booked").length
-                  : 0,
-              })}
-            </Text>
-
-            <TextInput
-              style={styles.commentInput}
-              placeholder={t("schoolTrip.cancellationReasonPlaceholder")}
-              placeholderTextColor="#8B7B6B"
-              value={cancelReasonInput}
-              onChangeText={setCancelReasonInput}
-              multiline
-            />
-
-            <Pressable
-              style={[
-                styles.ratingSubmitButton,
-                (!cancelReasonInput.trim() || cancelSubmitting) && { opacity: 0.5 },
-              ]}
-              onPress={confirmCancelTripWithReason}
-              disabled={!cancelReasonInput.trim() || cancelSubmitting}
-            >
-              {cancelSubmitting ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.ratingSubmitText}>{t("schoolTrip.cancelTripButton")}</Text>
-              )}
-            </Pressable>
-
-            <Pressable style={styles.ratingCancelButton} onPress={closeCancelTripModal}>
-              <Text style={styles.ratingCancelText}>{t("common.cancel")}</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -801,35 +677,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   startButtonText: { color: "#FFFFFF", fontWeight: "900", fontSize: 12.5 },
-  replacementBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#FEE2E2",
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 8,
-  },
-  replacementBannerText: { flex: 1, color: "#B91C1C", fontWeight: "700", fontSize: 12.5 },
-  replacementBannerLink: { color: "#B91C1C", fontWeight: "900", fontSize: 12.5, textDecorationLine: "underline" },
-  verificationCodeBox: {
-    backgroundColor: "#FFF8F2",
-    borderWidth: 1,
-    borderColor: "#FFE2C5",
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 8,
-    alignItems: "center",
-  },
-  verificationCodeLabel: { fontSize: 12, color: "#7C5F46", fontWeight: "800" },
-  verificationCodeValue: {
-    fontSize: 28,
-    fontWeight: "900",
-    color: "#111827",
-    letterSpacing: 6,
-    marginVertical: 4,
-  },
-  verificationCodeHint: { fontSize: 11.5, color: "#B86115", fontWeight: "700", textAlign: "center" },
   ratingOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.35)",
