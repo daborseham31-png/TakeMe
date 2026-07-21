@@ -55,7 +55,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
-import { canStartTrip, getStartTripBlockedReason } from "../bookingsLib";
+import { canStartTrip, dismissRatingNotifications, getStartTripBlockedReason } from "../bookingsLib";
 import {
   cancelRideRequest,
   cancelSchoolBooking,
@@ -75,6 +75,15 @@ import {
 type Props = {
   tab: "passenger" | "driver";
   uid: string | null;
+  // Set only from a tapped rating notification whose bookingId this
+  // component's own `bookings` (SCHOOL_BOOKINGS_COLLECTION) might contain —
+  // see bookings.tsx's pendingRatingBookingId, which passes the same id down
+  // here after failing to find it among its own ride/booking/application
+  // arrays. onConsumePendingRating tells the parent this component has had
+  // its one shot (found-and-opened or not), so it clears the id and this
+  // never runs again for the same notification tap.
+  pendingRatingBookingId?: string | null;
+  onConsumePendingRating?: () => void;
 };
 
 const directionLabel = schoolTripDirectionLabel;
@@ -90,7 +99,12 @@ const trackingStatusKey = (status: SchoolBooking["tripStatus"] | SchoolTrip["tri
   return "rides.waitingForDriver";
 };
 
-export default function MySchoolTripsSection({ tab, uid }: Props) {
+export default function MySchoolTripsSection({
+  tab,
+  uid,
+  pendingRatingBookingId,
+  onConsumePendingRating,
+}: Props) {
   const { t } = useTranslation();
 
   const [bookings, setBookings] = useState<SchoolBooking[]>([]);
@@ -199,6 +213,34 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
       }))
       .sort((a, b) => (a.legs[0]?.date < b.legs[0]?.date ? -1 : 1));
   }, [bookings, tab]);
+
+  // Same one-shot targeted-open behaviour as bookings.tsx's own effect (see
+  // its comment) — this component's `bookings` (SCHOOL_BOOKINGS_COLLECTION,
+  // new-style school trips) is invisible to that parent effect, so it's
+  // given the same pendingRatingBookingId as a prop and searches its own
+  // data independently. Either this finds it or the parent already didn't —
+  // exactly one of the two ever actually contains a given bookingId.
+  useEffect(() => {
+    if (!pendingRatingBookingId) return;
+    if (tab !== "passenger") return;
+    if (loading) return;
+    if (ratingBooking) return;
+
+    const match = bookings.find((b) => b.id === pendingRatingBookingId);
+
+    if (match) {
+      const eligible =
+        match.status === "completed" &&
+        match.tripStatus === "completed" &&
+        match.completedAtSeconds > 0 &&
+        match.needsPassengerRating === true &&
+        match.ratingSubmitted !== true;
+
+      if (eligible) openRatingModal(match);
+    }
+
+    onConsumePendingRating?.();
+  }, [pendingRatingBookingId, tab, loading, bookings, ratingBooking]);
 
   const handleCancelBooking = (booking: SchoolBooking) => {
     if (booking.status !== "booked") return;
@@ -337,6 +379,7 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
     setRatingSubmitting(true);
     try {
       await submitSchoolBookingRating(ratingBooking.id, ratingBooking, ratingStars, ratingComment);
+      await dismissRatingNotifications(ratingBooking.id);
       closeRatingModal();
     } catch (error: any) {
       Alert.alert(t("common.error"), error?.message || t("errors.generic"));

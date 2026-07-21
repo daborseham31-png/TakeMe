@@ -809,20 +809,24 @@ export const finishRoadsideHelp = async (bookingId: string) => {
     });
   });
 
+  // One notification at Complete Trip, same trigger point and rating-gate
+  // shape as every other category (finishRide/updateTripStatus/finishJob) —
+  // never gated on payment, which is a fully independent step the passenger
+  // can still complete any time via the "Pay Now" button already shown on
+  // their roadside card in My Bookings.
   if (passengerId) {
     await notify({
       receiverId: passengerId,
       senderId: user.uid,
-      type: "roadside_payment_required",
-      title: "Roadside Help completed",
-      message: `${driverName} finished helping you. Please complete payment and rate your helper.`,
+      type: "roadside_rating_required",
+      title: "Trip completed",
+      message: `Your Roadside Help with ${driverName} is completed. Please rate your helper.`,
       category: "roadside",
       requestId,
       offerId,
       bookingId,
       driverId: user.uid,
-      amount: agreedPrice ?? undefined,
-      targetPage: "roadside-payment",
+      targetTab: "passenger",
     });
   }
 };
@@ -852,7 +856,6 @@ export const payRoadsideHelp = async (
   let driverName = "your helper";
   let passengerName = "The passenger";
   let amount = 0;
-  let needsRating = false;
 
   await runTransaction(db, async (transaction) => {
     const bookingSnap = await transaction.get(bookingRef);
@@ -872,9 +875,6 @@ export const payRoadsideHelp = async (
     driverId = booking.driverId || "";
     driverName = booking.driverName || driverName;
     passengerName = booking.passengerName || passengerName;
-    needsRating =
-      booking.needsPassengerRating === true &&
-      booking.ratingSubmitted !== true;
 
     const reqRef = doc(db, "roadsideRequests", requestId);
     const reqSnap = await transaction.get(reqRef);
@@ -932,24 +932,6 @@ export const payRoadsideHelp = async (
       passengerId: user.uid,
       amount,
       targetTab: "driver",
-    });
-  }
-
-  // Payment just gated the rating modal open — if it's still pending, tell
-  // the passenger it's time to rate their helper.
-  if (needsRating) {
-    await notify({
-      receiverId: user.uid,
-      senderId: driverId || undefined,
-      type: "roadside_rating_required",
-      title: "Rate your helper",
-      message: `Please rate your Roadside Help experience with ${driverName}.`,
-      category: "roadside",
-      requestId,
-      offerId,
-      bookingId,
-      driverId,
-      targetTab: "passenger",
     });
   }
 

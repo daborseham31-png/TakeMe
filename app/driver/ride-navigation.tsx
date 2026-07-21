@@ -538,6 +538,20 @@ export default function RideNavigationScreen() {
   // progress from a single subscription, without a second live read. Never
   // a second start/arrive/finish implementation — same transitions,
   // same notify() calls, just fanned out to N passengers instead of 1.
+  //
+  // The trip doc write and every affected booking's write commit as ONE
+  // atomic writeBatch — never a separate updateDoc followed by a separate
+  // batch.commit(). Firestore rejects a WHOLE batch if any single write in
+  // it fails its security rule, so splitting them risked (and, before
+  // "completedAt" was added to schoolBookings' allowed field list in
+  // firestore.rules, actually caused) exactly the bug this fixes: the trip
+  // doc committing "completed" while the batch of booking writes then threw
+  // permission-denied and never committed at all — the driver's screen and
+  // Firestore itself showed "completed", but every passenger's own booking
+  // silently stayed stuck at "in_progress" forever (no completedAt, no
+  // rating eligibility, no notification). With one batch, either everything
+  // above commits together or NONE of it does, so the UI can only ever
+  // reflect a state that was actually fully written.
   const updateSchoolTripStatus = async (nextStatus: TripStatus) => {
     const tripPayload: any = {
       tripStatus: nextStatus,
@@ -568,14 +582,9 @@ export default function RideNavigationScreen() {
       tripPayload.status = "completed";
     }
 
-    await updateDoc(doc(db, SCHOOL_TRIPS_COLLECTION, id), tripPayload);
-
-    if (nextStatus === "completed") {
-      await stopDriverLocationTracking();
-    }
-
     // Same driverId-filter requirement as the schoolPassengerBookings
-    // subscription above — see its comment.
+    // subscription above — see its comment. Read BEFORE any write, so a
+    // failure here never leaves a half-built batch.
     const bookingsSnap = await getDocs(
       query(
         collection(db, SCHOOL_BOOKINGS_COLLECTION),
@@ -585,31 +594,52 @@ export default function RideNavigationScreen() {
       ),
     );
 
-    if (!bookingsSnap.empty) {
-      const batch = writeBatch(db);
+    const batch = writeBatch(db);
+    batch.update(doc(db, SCHOOL_TRIPS_COLLECTION, id), tripPayload);
 
-      bookingsSnap.docs.forEach((bookingSnap) => {
-        const bookingPayload: any = {
-          tripStatus: nextStatus,
-          updatedAt: serverTimestamp(),
-        };
+    bookingsSnap.docs.forEach((bookingSnap) => {
+      const bookingPayload: any = {
+        tripStatus: nextStatus,
+        updatedAt: serverTimestamp(),
+      };
 
-        if (nextStatus === "completed") {
-          bookingPayload.status = "completed";
-          bookingPayload.finishedByDriver = true;
-          bookingPayload.needsPassengerRating = true;
-          bookingPayload.ratingSubmitted = false;
-          bookingPayload.rating = null;
-          // The trip doc itself already gets its own completedAt above —
-          // each booking needs its OWN stamp too: the rating gate checks
-          // completedAt on the booking, not the (driver-only-readable) trip.
-          bookingPayload.completedAt = serverTimestamp();
-        }
+      if (nextStatus === "completed") {
+        bookingPayload.status = "completed";
+        bookingPayload.finishedByDriver = true;
+        bookingPayload.needsPassengerRating = true;
+        bookingPayload.ratingSubmitted = false;
+        bookingPayload.rating = null;
+        // The trip doc itself already gets its own completedAt above —
+        // each booking needs its OWN stamp too: the rating gate checks
+        // completedAt on the booking, not the (driver-only-readable) trip.
+        bookingPayload.completedAt = serverTimestamp();
+      }
 
-        batch.update(bookingSnap.ref, bookingPayload);
-      });
+      batch.update(bookingSnap.ref, bookingPayload);
+    });
 
+    try {
       await batch.commit();
+    } catch (error) {
+      console.log("updateSchoolTripStatus: batch commit failed", {
+        stage: "schoolTrips+schoolBookings atomic batch",
+        tripId: id,
+        nextStatus,
+        affectedBookingIds: bookingsSnap.docs.map((d) => d.id),
+        error,
+      });
+      // Nothing committed — the trip and every booking are exactly as they
+      // were before this call, so the caller's catch block can surface the
+      // error without any local state ever having claimed completion.
+      throw error;
+    }
+
+    // Only stop broadcasting the driver's live location once the "completed"
+    // write has actually been confirmed by Firestore — never before, so a
+    // failed/rolled-back finish never silently ends tracking for a trip
+    // that (from the passengers' own data) never actually finished.
+    if (nextStatus === "completed") {
+      await stopDriverLocationTracking();
     }
 
     // One notification per BOOKING (not per unique passenger) — a parent
@@ -767,10 +797,26 @@ export default function RideNavigationScreen() {
           text: t("booking.finishTripTitle"),
           style: "destructive",
           onPress: async () => {
+            // busy already disables the Finish Trip button (see its
+            // `disabled` prop below) — this guard also blocks a second
+            // Alert confirm tap landing here while a first request is
+            // still in flight.
+            if (busy) return;
+
             try {
               setBusy(true);
+              // Fully awaited — the screen's own displayed tripStatus comes
+              // from the live booking/trip Firestore listener, never from
+              // local state set ahead of this call, so the UI can only ever
+              // show "completed" once this has actually resolved.
               await updateTripStatus("completed");
             } catch (error: any) {
+              console.log("handleFinishTrip: finish trip failed", {
+                stage: "updateTripStatus(completed)",
+                id,
+                isSchoolTripsSource,
+                error,
+              });
               Alert.alert(t("common.error"), error?.message || t("booking.couldNotUpdate"));
             } finally {
               setBusy(false);

@@ -731,11 +731,13 @@ export const finishJob = async (
     receiverId: data.customerId,
     type: "completed",
     title: kind === "work" ? "Work completed" : "Errand completed",
-    message: `"${data.title}" has been completed. Thank you!`,
+    message: `"${data.title}" has been completed. Please rate your driver.`,
     applicationId: id,
+    bookingId: id,
     kind,
     category: data.category,
     status: "completed",
+    targetTab: "passenger",
   });
 };
 

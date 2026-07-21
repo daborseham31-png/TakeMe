@@ -17,12 +17,17 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
+  query,
   serverTimestamp,
   updateDoc,
+  where,
+  writeBatch,
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";
+import { notify } from "./work-errand/workErrandLib";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -473,18 +478,93 @@ export const updatePassengerBookingDriverLocation = async (
 // Mark a trip / booking as completed (manual only)
 // ---------------------------------------------------------------------------
 
+// collectionName is either "bookings" (a specific passenger's booking doc —
+// same rating gate as finishRide/updateTripStatus/finishJob/
+// finishRoadsideHelp) or one of the driver-owned listing collections
+// (driverRoutes/workJobs/errandJobs — no single passenger to rate, so those
+// keep the old needsPassengerRating:false/no-notification behavior).
 export const markCompleted = async (
   collectionName: string,
   id: string,
 ) => {
-  await updateDoc(doc(db, collectionName, id), {
+  let passengerId: string | null = null;
+  let category = "";
+
+  if (collectionName === "bookings") {
+    const snap = await getDoc(doc(db, collectionName, id));
+    const data: any = snap.exists() ? snap.data() : {};
+    passengerId = data.passengerId || null;
+    category = data.category || "";
+  }
+
+  const payload: any = {
     status: "completed",
     tripStatus: "completed",
     trackingEnabled: false,
-    needsPassengerRating: false,
     completedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+    needsPassengerRating: !!passengerId,
+    ratingSubmitted: false,
+  };
+
+  await updateDoc(doc(db, collectionName, id), payload);
+
+  if (passengerId) {
+    await notify({
+      receiverId: passengerId,
+      type: "ride_trip_completed",
+      title: "Trip completed",
+      message: "Your trip is completed. Please rate your driver.",
+      bookingId: id,
+      category,
+      status: "completed",
+      targetTab: "passenger",
+    });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// After a rating is successfully submitted, silence the notification that
+// prompted it so tapping it again can never reopen the modal (spec item 5) —
+// query by bookingId + receiver (never all of a user's notifications), then
+// only touch the ones whose type is actually a rating request so an
+// unrelated on_the_way/arrived notification for the same booking is left
+// alone. Soft-deleted (`deleted: true`) — same convention as
+// notifications.tsx's own deleteOne/clearAll, never a hard delete.
+// ---------------------------------------------------------------------------
+
+export const RATING_NOTIFICATION_TYPES = new Set([
+  "ride_trip_completed",
+  "completed",
+  "roadside_rating_required",
+]);
+
+export const dismissRatingNotifications = async (bookingId: string) => {
+  const uid = auth.currentUser?.uid;
+  if (!uid || !bookingId) return;
+
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, "notifications"),
+        where("bookingId", "==", bookingId),
+        where("receiverId", "==", uid),
+      ),
+    );
+
+    const toDismiss = snap.docs.filter((d) =>
+      RATING_NOTIFICATION_TYPES.has(d.data().type),
+    );
+
+    if (toDismiss.length === 0) return;
+
+    const batch = writeBatch(db);
+    toDismiss.forEach((d) => batch.update(d.ref, { deleted: true }));
+    await batch.commit();
+  } catch {
+    // Best-effort — the rating itself already succeeded; a stray
+    // still-tappable notification is not worth failing the flow over.
+  }
 };
 
 // ---------------------------------------------------------------------------

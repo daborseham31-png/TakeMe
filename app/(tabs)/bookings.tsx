@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, useLocalSearchParams } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -34,6 +33,7 @@ import MySchoolTripsSection from "../booking/school/MySchoolTripsSection";
 import {
   BookingItem,
   canStartTrip,
+  dismissRatingNotifications,
   DriverCollection,
   DriverTripItem,
   getCategoryMeta,
@@ -42,6 +42,7 @@ import {
   markCompleted,
   normalizeBooking,
   normalizeDriverTrip,
+  RATING_NOTIFICATION_TYPES,
   sortMyBookings,
 } from "../booking/bookingsLib";
 import {
@@ -86,31 +87,6 @@ import type { TFunction } from "i18next";
 import { translateCategoryLabel, translateProblemType, translateStatus, translateStoredDayName } from "../i18n/formatters";
 
 type Tab = "passenger" | "driver";
-
-// Which completed-and-unrated booking ids the auto-popup has already shown
-// (whether that happened this session or a past one) — persisted so the
-// popup never nags the passenger again for the same booking just because
-// they reopen the app or revisit this screen while it's still unrated. The
-// passenger can always rate it later via the manual "Rate" button, which
-// stays visible regardless of this set.
-const AUTO_PROMPTED_RATING_IDS_KEY = "takeme.autoPromptedRatingBookingIds";
-
-const loadAutoPromptedRatingIds = async (): Promise<Set<string>> => {
-  try {
-    const raw = await AsyncStorage.getItem(AUTO_PROMPTED_RATING_IDS_KEY);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch {
-    return new Set();
-  }
-};
-
-const persistAutoPromptedRatingIds = async (ids: Set<string>): Promise<void> => {
-  try {
-    await AsyncStorage.setItem(AUTO_PROMPTED_RATING_IDS_KEY, JSON.stringify(Array.from(ids)));
-  } catch {
-    // Best-effort — worst case the popup can auto-open once more later.
-  }
-};
 
 const getParamString = (value: string | string[] | undefined) => {
   if (Array.isArray(value)) return value[0];
@@ -311,26 +287,14 @@ export default function BookingsScreen() {
     [],
   );
 
-  // null while still loading from AsyncStorage — the auto-open scan below
-  // must wait for this instead of running against an empty set, or every
-  // already-shown-and-dismissed booking would look "new" again for one
-  // frame on every cold start.
-  const [autoPromptedRatingIds, setAutoPromptedRatingIds] = useState<Set<string> | null>(
-    null,
-  );
-
-  useEffect(() => {
-    loadAutoPromptedRatingIds().then(setAutoPromptedRatingIds);
-  }, []);
-
-  const markRatingAutoPrompted = (id: string) => {
-    setAutoPromptedRatingIds((prev) => {
-      const next = new Set(prev || []);
-      next.add(id);
-      persistAutoPromptedRatingIds(next);
-      return next;
-    });
-  };
+  // Set only from a tapped rating notification (see the params effect below)
+  // — the ONLY way the rating modal opens on its own now. Cleared the moment
+  // this component (or MySchoolTripsSection, for new-style school trips) has
+  // had its one shot at finding + opening the matching booking, so it never
+  // fires again on a later re-render.
+  const [pendingRatingBookingId, setPendingRatingBookingId] = useState<
+    string | null
+  >(null);
 
   const [ratingStars, setRatingStars] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
@@ -393,7 +357,21 @@ export default function BookingsScreen() {
     if (targetId) {
       setPendingScrollAppId(targetId);
     }
-  }, [params.tab, params.bookingId, params.applicationId, params.requestId]);
+
+    // A rating notification always carries a real bookingId (never
+    // applicationId/requestId alone — see rideBookingLib.finishRide,
+    // ride-navigation's updateTripStatus/updateSchoolTripStatus,
+    // workErrandLib.finishJob, roadsideLib.finishRoadsideHelp,
+    // bookingsLib.markCompleted) — only trigger the targeted open-modal
+    // effect below for that exact case, never for on_the_way/arrived/etc.
+    // notifications that also happen to carry a bookingId.
+    const notificationType = getParamString(params.type);
+    const ratingBookingId = getParamString(params.bookingId);
+
+    if (ratingBookingId && notificationType && RATING_NOTIFICATION_TYPES.has(notificationType)) {
+      setPendingRatingBookingId(ratingBookingId);
+    }
+  }, [params.tab, params.bookingId, params.applicationId, params.requestId, params.type]);
 
   useEffect(() => {
     if (!uid) return;
@@ -1644,6 +1622,7 @@ const submitRating = async () => {
       // any local UI state — the stars / "Rate Driver" -> "Book Again"
       // swap must never show unless the transaction really succeeded.
       await submitSchoolRating(bookingToRate, stars, comment);
+      await dismissRatingNotifications(ratedId);
 
       setRatedSchoolBookingIds((prev) =>
         prev.includes(ratedId) ? prev : [...prev, ratedId],
@@ -1682,6 +1661,7 @@ const submitRating = async () => {
         stars,
         comment,
       );
+      await dismissRatingNotifications(ratedId);
 
       setRatedSchoolBookingIds((prev) =>
         prev.includes(ratedId) ? prev : [...prev, ratedId],
@@ -1719,6 +1699,7 @@ const submitRating = async () => {
       const comment = ratingComment.trim();
 
       await submitRoadsideRating(bookingToRate.id, bookingToRate, stars, comment);
+      await dismissRatingNotifications(ratedId);
 
       setRatedSchoolBookingIds((prev) =>
         prev.includes(ratedId) ? prev : [...prev, ratedId],
@@ -1751,6 +1732,7 @@ const submitRating = async () => {
       const comment = ratingComment.trim();
 
       await submitRideRating(bookingToRate.id, bookingToRate, stars, comment);
+      await dismissRatingNotifications(ratedId);
 
       setRatedSchoolBookingIds((prev) =>
         prev.includes(ratedId) ? prev : [...prev, ratedId],
@@ -1784,86 +1766,72 @@ const submitRating = async () => {
   }
 };
 
+// The rating modal now NEVER opens on its own just because a completed,
+// unrated booking exists in the list — only a tapped rating notification
+// (pendingRatingBookingId, set from the params effect above) can open it,
+// and only for the exact booking that notification named. This effect gets
+// exactly one shot per pending id: whether or not a match is found (and
+// whether or not it's still eligible), it clears pendingRatingBookingId so
+// it can never reopen the modal again for the same tap — MySchoolTripsSection
+// (new-style school trips, a separate schoolBookings collection this
+// component has no visibility into) gets the same id as a prop and runs the
+// same one-shot search independently; only one of the two will ever actually
+// find it.
 useEffect(() => {
+  if (!pendingRatingBookingId) return;
   if (tab !== "passenger") return;
-  // Still loading the persisted "already auto-prompted" set — never scan
-  // against an empty Set, or a booking shown (and dismissed unrated) in a
-  // past session would look brand new for one frame on every cold start.
-  if (autoPromptedRatingIds === null) return;
-  if (
-    ratingBooking ||
-    schoolRatingBooking ||
-    appRatingBooking ||
-    roadsideRatingBooking ||
-    ratingBusy
-  ) {
+  // Wait for this screen's own Firestore subscriptions to resolve at least
+  // once — giving up while still loading would wrongly treat a booking that
+  // just hasn't arrived yet as "not found here, must be MySchoolTripsSection".
+  if (loading) return;
+  if (ratingBooking || schoolRatingBooking || appRatingBooking || roadsideRatingBooking) {
     return;
   }
 
-  // Only a booking id this device has genuinely never auto-prompted before
-  // is a candidate — this is what makes the popup react to a booking newly
-  // becoming eligible (a real in_progress → completed transition, or the
-  // first load after it completed while the app was closed) instead of
-  // re-triggering just because a completed-and-unrated booking still sits
-  // in the list on every re-render/re-open.
-  const notYetAutoPrompted = (item: { id: string }) => !autoPromptedRatingIds.has(item.id);
+  const targetId = pendingRatingBookingId;
 
-  const pendingRideRating = passengerRides.find(
-    (r) => bookingNeedsRating(r) && notYetAutoPrompted(r),
-  );
-
-  if (pendingRideRating) {
-    openRatingModal(pendingRideRating);
-    markRatingAutoPrompted(pendingRideRating.id);
+  const ride = passengerRides.find((r) => r.id === targetId);
+  if (ride) {
+    if (bookingNeedsRating(ride)) openRatingModal(ride);
+    setPendingRatingBookingId(null);
     return;
   }
 
-  // Roadside is scanned separately below (openRoadsideRatingModal, distinct
-  // title/subtitle) — everything else in `bookings` (School, ...) uses the
-  // generic modal text.
-  const pendingSchoolRating = bookings.find(
-    (b) => b.category !== "roadside" && bookingNeedsRating(b) && notYetAutoPrompted(b),
-  );
-
-  if (pendingSchoolRating) {
-    openSchoolRatingModal(pendingSchoolRating);
-    markRatingAutoPrompted(pendingSchoolRating.id);
+  const roadsideBooking = bookings.find((b) => b.id === targetId && b.category === "roadside");
+  if (roadsideBooking) {
+    if (bookingNeedsRating(roadsideBooking)) openRoadsideRatingModal(roadsideBooking);
+    setPendingRatingBookingId(null);
     return;
   }
 
-  // Roadside rates right after "Finished Help", same trigger point as every
-  // other category — payment is a separate, independent step and no longer
-  // gates the rating modal.
-  const pendingRoadsideRating = bookings.find(
-    (b) => b.category === "roadside" && bookingNeedsRating(b) && notYetAutoPrompted(b),
-  );
-
-  if (pendingRoadsideRating) {
-    openRoadsideRatingModal(pendingRoadsideRating);
-    markRatingAutoPrompted(pendingRoadsideRating.id);
+  const legacyBooking = bookings.find((b) => b.id === targetId && b.category !== "roadside");
+  if (legacyBooking) {
+    if (bookingNeedsRating(legacyBooking)) openSchoolRatingModal(legacyBooking);
+    setPendingRatingBookingId(null);
     return;
   }
 
-  const pendingAppRating = passengerApps.find(
-    (a) => bookingNeedsRating(a) && notYetAutoPrompted(a),
-  );
-
-  if (pendingAppRating) {
-    openAppRatingModal(pendingAppRating);
-    markRatingAutoPrompted(pendingAppRating.id);
+  const app = passengerApps.find((a) => a.id === targetId);
+  if (app) {
+    if (bookingNeedsRating(app)) openAppRatingModal(app);
+    setPendingRatingBookingId(null);
+    return;
   }
+
+  // Not one of this screen's own bookings — leave pendingRatingBookingId set
+  // so it's still passed to MySchoolTripsSection below; it clears it via
+  // onConsumePendingRating once it has had its own shot.
 }, [
+  pendingRatingBookingId,
+  tab,
+  loading,
   bookings,
   passengerRides,
   passengerApps,
-  tab,
   ratingBooking,
   schoolRatingBooking,
   appRatingBooking,
   roadsideRatingBooking,
-  ratingBusy,
-  ratedSchoolBookingIds,
-  autoPromptedRatingIds,
 ]);
 
 
@@ -3166,7 +3134,12 @@ useEffect(() => {
           ) : null}
         </View>
 
-        <MySchoolTripsSection tab={tab} uid={uid} />
+        <MySchoolTripsSection
+          tab={tab}
+          uid={uid}
+          pendingRatingBookingId={pendingRatingBookingId}
+          onConsumePendingRating={() => setPendingRatingBookingId(null)}
+        />
 
         {loading ? (
           <View style={styles.loadingBox}>

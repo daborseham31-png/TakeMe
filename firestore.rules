@@ -374,13 +374,23 @@ service cloud.firestore {
           request.resource.data.verificationStatus == "expired"
         ) ||
         (
+          // Finish Trip stamps completedAt on EACH affected booking (not
+          // just the schoolTrips doc) — the rating gate reads
+          // completedAtSeconds off the booking itself (bookings.tsx /
+          // MySchoolTripsSection.tsx), never off the trip. Omitting
+          // "completedAt" here previously denied the whole batch.update in
+          // updateSchoolTripStatus (ride-navigation.tsx) the moment a trip
+          // had any still-booked passenger — every write in a Firestore
+          // batch must independently satisfy this rule, so one denied
+          // field in ANY of the affected schoolBookings docs failed the
+          // ENTIRE batch, including the schoolTrips write that preceded it.
           resource.data.driverId == request.auth.uid &&
           request.resource.data.driverId == resource.data.driverId &&
           request.resource.data.passengerId == resource.data.passengerId &&
           request.resource.data.tripId == resource.data.tripId &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             "tripStatus", "status", "finishedByDriver", "needsPassengerRating",
-            "ratingSubmitted", "rating", "updatedAt"
+            "ratingSubmitted", "rating", "completedAt", "updatedAt"
           ]) &&
           request.resource.data.tripStatus in
             ["booked", "driver_on_way", "arrived_pickup", "completed"] &&

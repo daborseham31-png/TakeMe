@@ -8,7 +8,10 @@
 // Collections used:
 //   - bookings        (one doc per booked personal ride; category "personal_ride")
 //   - driverReviews   (one doc per completed ride the passenger rated)
-//   - users/{driverId}(ratingAverage + ratingCount summary, updated on complete)
+//   - users/{driverId}(ratingAverage + ratingCount summary — updated server-side
+//                       by functions/index.js's onDriverReviewCreated, never by
+//                       this client, which has no write access to another
+//                       user's profile)
 //   - notifications   (per-user in-app updates; reuses notify() from workErrandLib)
 //
 // Payment is mock/demo only: the full card number and CVV are NEVER stored –
@@ -342,12 +345,15 @@ export const finishRide = async (bookingId: string, booking: RideBooking) => {
 // create`, which additionally requires request.resource.data.bookingId to
 // equal this same id. That, plus this transaction's own self-verification
 // below (never trust the caller's already-loaded `booking` object alone —
-// re-read it fresh inside the transaction), is what firestore.rules'
-// strict users/{driverId} rating-update branch relies on: it can only bound
-// the ARITHMETIC of the aggregate diff (exactly one new 1-5 rating, exact
-// average), since that write's own payload never carries a bookingId to
-// verify — the booking-ownership/completed/not-already-rated checks live
-// here and in the driverReviews rule instead.
+// re-read it fresh inside the transaction), is what the driverReviews rule
+// relies on for the booking-ownership/completed/not-already-rated checks.
+//
+// This transaction deliberately does NOT touch users/{driverId} — a
+// passenger has no write access to another user's profile (firestore.rules'
+// users update rule only allows the owner or an admin), so crediting
+// ratingCount/ratingSum/ratingAverage there is done server-side instead, by
+// functions/index.js's onDriverReviewCreated trigger reacting to the
+// driverReviews doc this transaction creates.
 export const submitRideRating = async (
   bookingId: string,
   booking: RideBooking,
@@ -387,13 +393,11 @@ export const submitRideRating = async (
   }
 
   const bookingRef = doc(db, "bookings", bookingId);
-  const driverRef = doc(db, "users", booking.driverId);
   const reviewRef = doc(db, "driverReviews", bookingId);
 
   const ratingWritePaths = {
     review: `driverReviews/${bookingId}`,
     booking: `bookings/${bookingId}`,
-    driver: `users/${booking.driverId}`,
   };
   console.log("[rating] transaction started", ratingWritePaths);
 
@@ -427,19 +431,6 @@ export const submitRideRating = async (
         return;
       }
 
-      const driverSnap = await transaction.get(driverRef);
-      const driverData: any = driverSnap.exists() ? driverSnap.data() : {};
-
-      const oldCount = Number(driverData.ratingCount) || 0;
-      const oldSum = Number(driverData.ratingSum) || 0;
-
-      const newCount = oldCount + 1;
-      const newSum = oldSum + cleanRating;
-      // Stored RAW (never toFixed()'d) — firestore.rules only bounds
-      // ratingAverage to [0,5], never checks it against an exact formula,
-      // so rounding here is safe and purely cosmetic either way.
-      const newAverage = newSum / newCount;
-
       transaction.set(reviewRef, {
         bookingId,
         driverId: booking.driverId,
@@ -464,17 +455,6 @@ export const submitRideRating = async (
         ratedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-
-      transaction.set(
-        driverRef,
-        {
-          ratingCount: newCount,
-          ratingSum: newSum,
-          ratingAverage: newAverage,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
     });
 
     console.log("[rating] transaction succeeded", { bookingId });
