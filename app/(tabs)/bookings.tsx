@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, useLocalSearchParams } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -85,6 +86,31 @@ import type { TFunction } from "i18next";
 import { translateCategoryLabel, translateProblemType, translateStatus, translateStoredDayName } from "../i18n/formatters";
 
 type Tab = "passenger" | "driver";
+
+// Which completed-and-unrated booking ids the auto-popup has already shown
+// (whether that happened this session or a past one) — persisted so the
+// popup never nags the passenger again for the same booking just because
+// they reopen the app or revisit this screen while it's still unrated. The
+// passenger can always rate it later via the manual "Rate" button, which
+// stays visible regardless of this set.
+const AUTO_PROMPTED_RATING_IDS_KEY = "takeme.autoPromptedRatingBookingIds";
+
+const loadAutoPromptedRatingIds = async (): Promise<Set<string>> => {
+  try {
+    const raw = await AsyncStorage.getItem(AUTO_PROMPTED_RATING_IDS_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+const persistAutoPromptedRatingIds = async (ids: Set<string>): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(AUTO_PROMPTED_RATING_IDS_KEY, JSON.stringify(Array.from(ids)));
+  } catch {
+    // Best-effort — worst case the popup can auto-open once more later.
+  }
+};
 
 const getParamString = (value: string | string[] | undefined) => {
   if (Array.isArray(value)) return value[0];
@@ -284,6 +310,27 @@ export default function BookingsScreen() {
   const [ratedSchoolBookingIds, setRatedSchoolBookingIds] = useState<string[]>(
     [],
   );
+
+  // null while still loading from AsyncStorage — the auto-open scan below
+  // must wait for this instead of running against an empty set, or every
+  // already-shown-and-dismissed booking would look "new" again for one
+  // frame on every cold start.
+  const [autoPromptedRatingIds, setAutoPromptedRatingIds] = useState<Set<string> | null>(
+    null,
+  );
+
+  useEffect(() => {
+    loadAutoPromptedRatingIds().then(setAutoPromptedRatingIds);
+  }, []);
+
+  const markRatingAutoPrompted = (id: string) => {
+    setAutoPromptedRatingIds((prev) => {
+      const next = new Set(prev || []);
+      next.add(id);
+      persistAutoPromptedRatingIds(next);
+      return next;
+    });
+  };
 
   const [ratingStars, setRatingStars] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
@@ -1388,8 +1435,20 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
       return false;
     }
 
+    // tripStatus is the real completion signal; `status` is a second,
+    // independently-written field on every one of these types (BookingItem/
+    // RideBooking/SchoolBooking/NormalizedApplication all set both together
+    // at the same finish/completion call) — require them to agree instead
+    // of trusting either alone, so a partial/legacy write can never open
+    // this popup early.
     return (
-      (item.status === "completed" || item.tripStatus === "completed") &&
+      item.tripStatus === "completed" &&
+      item.status === "completed" &&
+      // Never just a status string — the trip must actually carry a real
+      // completion timestamp (item.completedAtSeconds > 0 means Firestore
+      // resolved a real completedAt, not merely a field that was set to
+      // "completed" without the corresponding serverTimestamp() write).
+      item.completedAtSeconds > 0 &&
       item.needsPassengerRating === true &&
       item.ratingSubmitted !== true &&
       typeof item.rating !== "number" &&
@@ -1437,19 +1496,41 @@ const submitSchoolRating = async (
     throw new Error(t("auth.pleaseLoginFirst"));
   }
 
+  const cleanStars = Math.round(stars);
+  if (!Number.isInteger(cleanStars) || cleanStars < 1 || cleanStars > 5) {
+    throw new Error(t("validation.invalidRating"));
+  }
+
   const item: any = booking;
 
   // driverId must be the driver's real Firebase UID — never this booking's
   // own id or its routeId — so the rating is never attributed to the wrong
   // profile.
-  if (!item.driverId || item.driverId === booking.id || item.driverId === item.routeId) {
+  if (
+    !item.driverId ||
+    item.driverId === booking.id ||
+    item.driverId === item.routeId ||
+    item.driverId === user.uid
+  ) {
     throw new Error(t("roadsideHelp.missingDriverIdField"));
   }
 
   const bookingRef = doc(db, "bookings", booking.id);
   const driverRef = doc(db, "users", item.driverId);
-  const reviewRef = doc(collection(db, "driverReviews"));
+  // bookingId AS the review doc id — see firestore.rules' driverReviews
+  // `allow create`, which requires this to match and rejects a second
+  // rating attempt for the same booking outright (create on an
+  // already-existing doc id always fails).
+  const reviewRef = doc(db, "driverReviews", booking.id);
 
+  const ratingWritePaths = {
+    review: `driverReviews/${booking.id}`,
+    booking: `bookings/${booking.id}`,
+    driver: `users/${item.driverId}`,
+  };
+  console.log("[rating] transaction started", ratingWritePaths);
+
+  try {
   await runTransaction(db, async (transaction) => {
     const bookingSnap = await transaction.get(bookingRef);
 
@@ -1459,7 +1540,20 @@ const submitSchoolRating = async (
 
     const bookingData: any = bookingSnap.data();
 
+    // Never trust the already-loaded `booking` object — re-verify ownership
+    // + real completion against the current server state.
+    if (bookingData.passengerId !== user.uid) {
+      throw new Error(t("workErrand.mustBeLoggedIn"));
+    }
+    if (bookingData.tripStatus !== "completed" || bookingData.status !== "completed") {
+      throw new Error(t("booking.tripNotCompletedYet"));
+    }
     if (bookingData.ratingSubmitted === true) {
+      return;
+    }
+
+    const reviewSnap = await transaction.get(reviewRef);
+    if (reviewSnap.exists()) {
       return;
     }
 
@@ -1470,8 +1564,10 @@ const submitSchoolRating = async (
     const oldSum = Number(driverData.ratingSum || 0);
 
     const newCount = oldCount + 1;
-    const newSum = oldSum + stars;
-    const newAverage = Number((newSum / newCount).toFixed(2));
+    const newSum = oldSum + cleanStars;
+    // Stored RAW (never toFixed()'d) — firestore.rules checks
+    // ratingAverage == ratingSum / ratingCount for exact equality.
+    const newAverage = newSum / newCount;
 
     transaction.set(reviewRef, {
       bookingId: booking.id,
@@ -1484,7 +1580,7 @@ const submitSchoolRating = async (
       passengerId: user.uid,
       passengerName: item.passengerName || user.displayName || "Passenger",
 
-      rating: stars,
+      rating: cleanStars,
       comment: comment.trim(),
 
       from: item.from || "",
@@ -1496,7 +1592,7 @@ const submitSchoolRating = async (
     });
 
     transaction.update(bookingRef, {
-      rating: stars,
+      rating: cleanStars,
       reviewComment: comment.trim(),
       ratingSubmitted: true,
       needsPassengerRating: false,
@@ -1515,6 +1611,12 @@ const submitSchoolRating = async (
       { merge: true },
     );
   });
+
+    console.log("[rating] transaction succeeded", { bookingId: booking.id });
+  } catch (error) {
+    console.log("[rating] transaction failed", { ...ratingWritePaths, error });
+    throw error;
+  }
 };
 
   const openRatingModal = (r: RideBooking) => {
@@ -1538,8 +1640,11 @@ const submitRating = async () => {
       const stars = ratingStars;
       const comment = ratingComment.trim();
 
-      // Close the rating popup immediately and block it from reopening
-      // while Firestore is saving the rating.
+      // Wait for Firestore to actually accept the rating before touching
+      // any local UI state — the stars / "Rate Driver" -> "Book Again"
+      // swap must never show unless the transaction really succeeded.
+      await submitSchoolRating(bookingToRate, stars, comment);
+
       setRatedSchoolBookingIds((prev) =>
         prev.includes(ratedId) ? prev : [...prev, ratedId],
       );
@@ -1561,8 +1666,6 @@ const submitRating = async () => {
       setSchoolRatingBooking(null);
       setRatingStars(0);
       setRatingComment("");
-
-      await submitSchoolRating(bookingToRate, stars, comment);
       return;
     }
 
@@ -1572,8 +1675,14 @@ const submitRating = async () => {
       const stars = ratingStars;
       const comment = ratingComment.trim();
 
-      // Close the rating popup immediately and block it from reopening
-      // while Firestore is saving the rating.
+      await submitApplicationRating(
+        appToRate.kind,
+        appToRate.id,
+        appToRate,
+        stars,
+        comment,
+      );
+
       setRatedSchoolBookingIds((prev) =>
         prev.includes(ratedId) ? prev : [...prev, ratedId],
       );
@@ -1600,14 +1709,6 @@ const submitRating = async () => {
       setAppRatingBooking(null);
       setRatingStars(0);
       setRatingComment("");
-
-      await submitApplicationRating(
-        appToRate.kind,
-        appToRate.id,
-        appToRate,
-        stars,
-        comment,
-      );
       return;
     }
 
@@ -1617,8 +1718,8 @@ const submitRating = async () => {
       const stars = ratingStars;
       const comment = ratingComment.trim();
 
-      // Close the rating popup immediately and block it from reopening
-      // while Firestore is saving the rating.
+      await submitRoadsideRating(bookingToRate.id, bookingToRate, stars, comment);
+
       setRatedSchoolBookingIds((prev) =>
         prev.includes(ratedId) ? prev : [...prev, ratedId],
       );
@@ -1640,8 +1741,6 @@ const submitRating = async () => {
       setRoadsideRatingBooking(null);
       setRatingStars(0);
       setRatingComment("");
-
-      await submitRoadsideRating(bookingToRate.id, bookingToRate, stars, comment);
       return;
     }
 
@@ -1651,8 +1750,8 @@ const submitRating = async () => {
       const stars = ratingStars;
       const comment = ratingComment.trim();
 
-      // Close the rating popup immediately and block it from reopening
-      // while Firestore is saving the rating.
+      await submitRideRating(bookingToRate.id, bookingToRate, stars, comment);
+
       setRatedSchoolBookingIds((prev) =>
         prev.includes(ratedId) ? prev : [...prev, ratedId],
       );
@@ -1674,10 +1773,11 @@ const submitRating = async () => {
       setRatingBooking(null);
       setRatingStars(0);
       setRatingComment("");
-
-      await submitRideRating(bookingToRate.id, bookingToRate, stars, comment);
     }
   } catch (error: any) {
+    // Rating modal / stars / "Rate Driver" button are all left exactly as
+    // they were — nothing above this point touched local state, since
+    // every branch now awaits the transaction FIRST.
     Alert.alert(t("common.error"), error?.message || t("booking.couldNotSubmitRating"));
   } finally {
     setRatingBusy(false);
@@ -1686,6 +1786,10 @@ const submitRating = async () => {
 
 useEffect(() => {
   if (tab !== "passenger") return;
+  // Still loading the persisted "already auto-prompted" set — never scan
+  // against an empty Set, or a booking shown (and dismissed unrated) in a
+  // past session would look brand new for one frame on every cold start.
+  if (autoPromptedRatingIds === null) return;
   if (
     ratingBooking ||
     schoolRatingBooking ||
@@ -1696,10 +1800,21 @@ useEffect(() => {
     return;
   }
 
-  const pendingRideRating = passengerRides.find((r) => bookingNeedsRating(r));
+  // Only a booking id this device has genuinely never auto-prompted before
+  // is a candidate — this is what makes the popup react to a booking newly
+  // becoming eligible (a real in_progress → completed transition, or the
+  // first load after it completed while the app was closed) instead of
+  // re-triggering just because a completed-and-unrated booking still sits
+  // in the list on every re-render/re-open.
+  const notYetAutoPrompted = (item: { id: string }) => !autoPromptedRatingIds.has(item.id);
+
+  const pendingRideRating = passengerRides.find(
+    (r) => bookingNeedsRating(r) && notYetAutoPrompted(r),
+  );
 
   if (pendingRideRating) {
     openRatingModal(pendingRideRating);
+    markRatingAutoPrompted(pendingRideRating.id);
     return;
   }
 
@@ -1707,11 +1822,12 @@ useEffect(() => {
   // title/subtitle) — everything else in `bookings` (School, ...) uses the
   // generic modal text.
   const pendingSchoolRating = bookings.find(
-    (b) => b.category !== "roadside" && bookingNeedsRating(b),
+    (b) => b.category !== "roadside" && bookingNeedsRating(b) && notYetAutoPrompted(b),
   );
 
   if (pendingSchoolRating) {
     openSchoolRatingModal(pendingSchoolRating);
+    markRatingAutoPrompted(pendingSchoolRating.id);
     return;
   }
 
@@ -1719,18 +1835,22 @@ useEffect(() => {
   // other category — payment is a separate, independent step and no longer
   // gates the rating modal.
   const pendingRoadsideRating = bookings.find(
-    (b) => b.category === "roadside" && bookingNeedsRating(b),
+    (b) => b.category === "roadside" && bookingNeedsRating(b) && notYetAutoPrompted(b),
   );
 
   if (pendingRoadsideRating) {
     openRoadsideRatingModal(pendingRoadsideRating);
+    markRatingAutoPrompted(pendingRoadsideRating.id);
     return;
   }
 
-  const pendingAppRating = passengerApps.find((a) => bookingNeedsRating(a));
+  const pendingAppRating = passengerApps.find(
+    (a) => bookingNeedsRating(a) && notYetAutoPrompted(a),
+  );
 
   if (pendingAppRating) {
     openAppRatingModal(pendingAppRating);
+    markRatingAutoPrompted(pendingAppRating.id);
   }
 }, [
   bookings,
@@ -1743,6 +1863,7 @@ useEffect(() => {
   roadsideRatingBooking,
   ratingBusy,
   ratedSchoolBookingIds,
+  autoPromptedRatingIds,
 ]);
 
 

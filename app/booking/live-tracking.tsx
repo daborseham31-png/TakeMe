@@ -369,6 +369,18 @@ export default function LiveTrackingScreen() {
             </Text>
           </View>
 
+          {booking.car || booking.carColor || booking.carPlate ? (
+            <View style={styles.infoRow}>
+              <Ionicons name="car-outline" size={16} color="#7C5F46" />
+              <Text style={styles.infoText}>
+                {[booking.car, booking.carColor].filter(Boolean).join(" · ")}
+                {booking.carPlate ? (
+                  <Text style={styles.ltrText}> · {booking.carPlate}</Text>
+                ) : null}
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.infoRow}>
             <Ionicons name="location-outline" size={16} color="#7C5F46" />
             <Text style={styles.infoText}>

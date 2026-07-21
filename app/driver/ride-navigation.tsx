@@ -361,9 +361,10 @@ export default function RideNavigationScreen() {
 
     const tripStatus = getTripStatus(booking);
 
-    // Personal Ride: live location updates run while the driver has arrived
-    // for pickup, up until Finish Trip (unchanged — there is no passenger
-    // verification step for Personal Ride).
+    // Personal Ride never reaches tripStatus "in_progress" through this
+    // screen's own flow (booked → driver_on_way → arrived_pickup →
+    // completed, with no passenger-verification step), so its tracking
+    // window is arrived_pickup → Finish Trip.
     //
     // School Trips: must NOT start merely because the driver pressed "I
     // arrived" — only once at least one passenger's code has been verified
@@ -378,20 +379,37 @@ export default function RideNavigationScreen() {
     const target = getTrackingTarget();
     if (!target) return;
 
-    // startDriverLocationTracking is idempotent for the same target (and
-    // internally guarantees only one background registration ever exists),
-    // so re-running this on every relevant state change — including this
-    // screen simply remounting after the app was relaunched mid-trip — is
-    // always safe. Deliberately NO cleanup/stop here: background tracking
-    // must keep running even if this screen unmounts (driver navigates
-    // away, backgrounds the app, locks the phone) — only an explicit status
-    // transition (Finish Trip below) or sign-out stops it.
-    captureDriverLocationOnce(target);
-    startDriverLocationTracking(target).then((result) => {
-      if (!result.started) {
-        Alert.alert(t("booking.locationPermissionTitle"), t("booking.allowLocationForTracking"));
+    // startDriverLocationTracking is foreground-only (a single
+    // watchPositionAsync subscription — see driverLocationTask.ts) and
+    // idempotent for the same target, de-duping concurrent callers via its
+    // own start-lock, so re-running this on every relevant state change —
+    // including this screen simply remounting, or this effect firing twice
+    // in quick succession from two separate Firestore listeners right after
+    // passenger verification — is always safe. Deliberately NO cleanup/stop
+    // on unmount: navigating to another tab must not interrupt tracking —
+    // the JS process, and this subscription with it, keeps running as long
+    // as the driver keeps the app open at all — only an explicit status
+    // transition (Finish/Cancel Trip below), the target actually changing,
+    // or sign-out stops it.
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await captureDriverLocationOnce(target);
+        if (cancelled) return;
+
+        const result = await startDriverLocationTracking(target);
+        if (!cancelled && !result.started) {
+          Alert.alert(t("booking.locationPermissionTitle"), t("booking.allowLocationForTracking"));
+        }
+      } catch (error) {
+        console.log("ride-navigation: failed to start driver location tracking", error);
       }
-    });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, booking, isSchoolTripsSource, anySchoolPassengerInProgress]);
 
@@ -582,6 +600,10 @@ export default function RideNavigationScreen() {
           bookingPayload.needsPassengerRating = true;
           bookingPayload.ratingSubmitted = false;
           bookingPayload.rating = null;
+          // The trip doc itself already gets its own completedAt above —
+          // each booking needs its OWN stamp too: the rating gate checks
+          // completedAt on the booking, not the (driver-only-readable) trip.
+          bookingPayload.completedAt = serverTimestamp();
         }
 
         batch.update(bookingSnap.ref, bookingPayload);

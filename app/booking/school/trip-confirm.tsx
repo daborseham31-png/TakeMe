@@ -211,8 +211,11 @@ export default function SchoolTripConfirmScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.driverName}>{trip.driverName}</Text>
               <Text style={styles.ratingText}>
-                ★ {driverRating ? driverRating.ratingAverage.toFixed(1) : "—"} (
-                {driverRating?.ratingCount || 0})
+                {!driverRating
+                  ? "—"
+                  : driverRating.ratingCount > 0
+                    ? `★ ${driverRating.ratingAverage.toFixed(1)} (${driverRating.ratingCount})`
+                    : t("roadsideHelp.newDriverLabel")}
               </Text>
             </View>
           </View>
@@ -235,6 +238,15 @@ export default function SchoolTripConfirmScreen() {
             <Ionicons name="cash-outline" size={16} color="#7C5F46" />
             <Text style={styles.detailText}>{trip.pricePerSeat} ₪ / {t("schoolTrip.seatWord")}</Text>
           </View>
+          {trip.car || trip.carColor || trip.carPlate ? (
+            <View style={styles.detailRow}>
+              <Ionicons name="car-outline" size={16} color="#7C5F46" />
+              <Text style={styles.detailText}>
+                {[trip.car, trip.carColor].filter(Boolean).join(" · ")}
+                {trip.carPlate ? <Text style={{ writingDirection: "ltr" }}> · {trip.carPlate}</Text> : null}
+              </Text>
+            </View>
+          ) : null}
 
           {isFull ? (
             <View style={styles.fullBanner}>

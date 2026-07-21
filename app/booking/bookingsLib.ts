@@ -565,6 +565,9 @@ export type BookingItem = {
   finishedByDriver: boolean;
 
   createdAtSeconds: number;
+  // 0 until the trip/job is actually finished and completedAt is stamped —
+  // the rating gate requires this to be > 0, never just a status string.
+  completedAtSeconds: number;
   searchText: string;
 
   // Roadside-only extras (category === "roadside").
@@ -647,6 +650,7 @@ export const normalizeBooking = (id: string, data: any): BookingItem => {
     finishedByDriver: data.finishedByDriver === true,
 
     createdAtSeconds: data.createdAt?.seconds || 0,
+    completedAtSeconds: data.completedAt?.seconds || 0,
     problemTypes,
     description: data.description || "",
     address,

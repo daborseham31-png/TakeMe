@@ -3,11 +3,6 @@ import { StatusBar } from "expo-status-bar";
 import React from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 
-// Registers the background location TaskManager task (TaskManager.defineTask
-// must run at module/top-level scope) — imported once here purely for its
-// side effect, regardless of which screen is currently mounted. See
-// app/driverLocationTask.ts.
-import "./driverLocationTask";
 import { LanguageProvider, useLanguage } from "./i18n/LanguageProvider";
 
 // Blocks the very first render until the saved/detected app language has
