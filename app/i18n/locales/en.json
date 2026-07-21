@@ -671,7 +671,8 @@
     "notificationMessagePlaceholder": "Notification message",
     "sendNotificationButton": "Send Notification",
     "recentlySentTitle": "Recently sent",
-    "sentNotificationsEmptyHint": "Notifications you send will show up here."
+    "sentNotificationsEmptyHint": "Notifications you send will show up here.",
+    "sortByLabel": "Sort by"
   },
   "profile": {
     "tabTitle": "Profile",
@@ -1059,7 +1060,8 @@
     "noLocationsFound": "No locations found",
     "dayNoLongerAvailable": "This driver no longer has {{day}} available.",
     "dayNotEnoughSeats": "{{day}} no longer has enough seats. Please choose another driver.",
-    "notEnoughSeatsAvailable": "Not enough seats available. Please choose another driver."
+    "notEnoughSeatsAvailable": "Not enough seats available. Please choose another driver.",
+    "finishedTripsSection": "Finished trips"
   },
   "school": {
     "headerTitle": "School Ride",
@@ -1161,7 +1163,10 @@
     "continueToPayment": "Continue to payment",
     "rateDriverButton": "Rate driver",
     "startTripButton": "Start trip",
-    "continueTripButton": "Continue trip"
+    "continueTripButton": "Continue trip",
+    "cannotCancelDriverEnRoute": "You can no longer cancel — the driver is already on the way.",
+    "cannotCancelWithinTwoHours": "You can no longer cancel — it's less than 2 hours before departure.",
+    "finishedTripsSection": "Finished trips"
   },
   "driverCreate": {
     "newTripTitle": "Create a New Trip",
@@ -1344,7 +1349,8 @@
     "onlyEmployerCanPay": "Only the employer who booked this job can pay.",
     "cannotCancelAnymore": "This booking can no longer be cancelled.",
     "cannotCancelWithinHour": "You cannot cancel less than 1 hour before the start time.",
-    "missingDriverId": "Missing driver id."
+    "missingDriverId": "Missing driver id.",
+    "cannotCancelWithinTwoHours": "You cannot cancel less than 2 hours before the start time."
   },
   "roadsideHelp": {
     "subtitle": "Get help with car trouble nearby",

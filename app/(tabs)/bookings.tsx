@@ -759,6 +759,18 @@ const bookedRouteIds = useMemo(() => {
     [combinedDriverRows, q],
   );
 
+  // Already sorted by sortMyBookings (active first, nearest date first /
+  // completed last, most recent first) — filtering here just splits the
+  // list for the "Finished trips" header without a second sort call.
+  const activePassengerRows = useMemo(
+    () => filteredPassengerRows.filter((row) => !isCompletedItem(row)),
+    [filteredPassengerRows],
+  );
+  const finishedPassengerRows = useMemo(
+    () => filteredPassengerRows.filter((row) => isCompletedItem(row)),
+    [filteredPassengerRows],
+  );
+
   // Both lists are simple filters of the already-sorted filteredDriverRows
   // (sortMyBookings already put non-completed first / nearest-date-first /
   // completed-last across the whole list — filtering preserves that
@@ -1937,7 +1949,9 @@ useEffect(() => {
 
           <View style={styles.cardTopActions}>
             {renderRideStatus(r.status)}
-            {renderDeleteButton(() => confirmHideRideBooking(r, viewer))}
+            {r.status === "completed"
+              ? renderDeleteButton(() => confirmHideRideBooking(r, viewer))
+              : null}
           </View>
         </View>
 
@@ -2185,9 +2199,9 @@ useEffect(() => {
 
           <View style={styles.cardTopActions}>
             {renderBookingTripStatus(b)}
-            {renderDeleteButton(() =>
-              confirmHideGeneralBooking(b, viewer),
-            )}
+            {done
+              ? renderDeleteButton(() => confirmHideGeneralBooking(b, viewer))
+              : null}
           </View>
         </View>
 
@@ -2368,7 +2382,7 @@ useEffect(() => {
               trip.status,
               waitingForBooking ? t("booking.waitingForBookingLabel") : undefined,
             )}
-            {renderDeleteButton(() => confirmDeleteTrip(trip))}
+            {done ? renderDeleteButton(() => confirmDeleteTrip(trip)) : null}
           </View>
         </View>
 
@@ -2524,9 +2538,11 @@ useEffect(() => {
                 </Text>
               </View>
             )}
-            {renderDeleteButton(() =>
-              confirmHideGeneralBooking(b, viewer, t("booking.roadsideHelpLowercase")),
-            )}
+            {!isAccepted
+              ? renderDeleteButton(() =>
+                  confirmHideGeneralBooking(b, viewer, t("booking.roadsideHelpLowercase")),
+                )
+              : null}
           </View>
         </View>
 
@@ -2774,7 +2790,9 @@ useEffect(() => {
               </Text>
             </View>
 
-            {renderDeleteButton(() => confirmHideApplication(a, viewer))}
+            {done || dead
+              ? renderDeleteButton(() => confirmHideApplication(a, viewer))
+              : null}
           </View>
         </View>
 
@@ -3166,9 +3184,26 @@ useEffect(() => {
             </Text>
           </View>
         ) : tab === "passenger" ? (
-          <View style={styles.list}>
-            {renderCombinedRows(filteredPassengerRows, "passenger")}
-          </View>
+          <>
+            <View style={styles.list}>
+              {renderCombinedRows(activePassengerRows, "passenger")}
+            </View>
+
+            {finishedPassengerRows.length > 0 ? (
+              <>
+                <View style={styles.sectionSeparator} />
+
+                <View style={styles.sectionHeaderRow}>
+                  <Ionicons name="checkmark-done-outline" size={16} color="#7C5F46" />
+                  <Text style={styles.sectionHeaderText}>{t("booking.finishedTripsSection")}</Text>
+                </View>
+
+                <View style={styles.list}>
+                  {renderCombinedRows(finishedPassengerRows, "passenger")}
+                </View>
+              </>
+            ) : null}
+          </>
         ) : (
           <>
             <View style={styles.sectionHeaderRow}>

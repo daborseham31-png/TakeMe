@@ -91,10 +91,29 @@ export default function AdminNotificationsScreen() {
           createdAtSeconds: createdAt?.seconds || 0,
         };
       })
-      .sort((a, b) => b.createdAtSeconds - a.createdAtSeconds)
-      .slice(0, 10);
+      .sort((a, b) => b.createdAtSeconds - a.createdAtSeconds);
 
-    setSent(items);
+    // A broadcast (audience other than a single user) writes one
+    // `notifications` doc per recipient so each user gets their own inbox
+    // entry — that's the real per-user delivery mechanism, not a bug. But it
+    // means this admin-facing recap would otherwise show the same send once
+    // per recipient (e.g. 21 rows for one message to "everyone"). Collapse
+    // rows that share the same title/message/type and were written within
+    // the same few seconds (one broadcast, possibly split across a few
+    // batch.commit() chunks) back down to a single recap entry.
+    const seen = new Set<string>();
+    const deduped: SentNotification[] = [];
+
+    for (const item of items) {
+      const bucket = Math.floor(item.createdAtSeconds / 5);
+      const key = `${item.type}|${item.title}|${item.message}|${bucket}`;
+
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(item);
+    }
+
+    setSent(deduped.slice(0, 10));
   };
 
   useEffect(() => {

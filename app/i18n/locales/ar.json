@@ -413,7 +413,6 @@
     "retry": "إعادة المحاولة",
     "confirmButton": "تأكيد",
     "enterReasonPlaceholder": "أدخل سببًا",
-
     "reasonRequired": "السبب مطلوب.",
     "searchPlaceholder": "بحث…",
     "reportsAndSupport": "التقارير والدعم",
@@ -687,7 +686,8 @@
     "notificationMessagePlaceholder": "رسالة الإشعار",
     "sendNotificationButton": "إرسال الإشعار",
     "recentlySentTitle": "أُرسلت مؤخرًا",
-    "sentNotificationsEmptyHint": "ستظهر هنا الإشعارات التي ترسلها."
+    "sentNotificationsEmptyHint": "ستظهر هنا الإشعارات التي ترسلها.",
+    "sortByLabel": "الترتيب حسب"
   },
   "profile": {
     "tabTitle": "الملف الشخصي",
@@ -1075,7 +1075,8 @@
     "noLocationsFound": "لم يتم العثور على مواقع",
     "dayNoLongerAvailable": "لم يعد هذا السائق متاحًا يوم {{day}}.",
     "dayNotEnoughSeats": "لم تعد هناك مقاعد كافية يوم {{day}}. يرجى اختيار سائق آخر.",
-    "notEnoughSeatsAvailable": "لا توجد مقاعد كافية متاحة. يرجى اختيار سائق آخر."
+    "notEnoughSeatsAvailable": "لا توجد مقاعد كافية متاحة. يرجى اختيار سائق آخر.",
+    "finishedTripsSection": "رحلات انتهت"
   },
   "school": {
     "headerTitle": "رحلة مدرسية",
@@ -1177,7 +1178,10 @@
     "continueToPayment": "المتابعة إلى الدفع",
     "rateDriverButton": "تقييم السائق",
     "startTripButton": "بدء الرحلة",
-    "continueTripButton": "متابعة الرحلة"
+    "continueTripButton": "متابعة الرحلة",
+    "cannotCancelDriverEnRoute": "ما عاد فيك تلغي — السائق صار بالطريق.",
+    "cannotCancelWithinTwoHours": "ما عاد فيك تلغي — بقي أقل من ساعتين على موعد الانطلاق.",
+    "finishedTripsSection": "رحلات انتهت"
   },
   "driverCreate": {
     "newTripTitle": "إنشاء رحلة جديدة",
@@ -1360,7 +1364,8 @@
     "onlyEmployerCanPay": "فقط صاحب العمل الذي حجز هذه الوظيفة يمكنه الدفع.",
     "cannotCancelAnymore": "لم يعد بالإمكان إلغاء هذا الحجز.",
     "cannotCancelWithinHour": "لا يمكنك الإلغاء قبل أقل من ساعة واحدة من وقت البدء.",
-    "missingDriverId": "معرّف السائق مفقود."
+    "missingDriverId": "معرّف السائق مفقود.",
+    "cannotCancelWithinTwoHours": "لا يمكنك الإلغاء قبل أقل من ساعتين من وقت البدء."
   },
   "roadsideHelp": {
     "subtitle": "احصل على مساعدة في مشاكل السيارة القريبة منك",

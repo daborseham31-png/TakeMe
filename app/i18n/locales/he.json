@@ -675,7 +675,8 @@
     "notificationMessagePlaceholder": "הודעת ההתראה",
     "sendNotificationButton": "שלח התראה",
     "recentlySentTitle": "נשלחו לאחרונה",
-    "sentNotificationsEmptyHint": "התראות שתשלח יופיעו כאן."
+    "sentNotificationsEmptyHint": "התראות שתשלח יופיעו כאן.",
+    "sortByLabel": "מיין לפי"
   },
   "profile": {
     "tabTitle": "פרופיל",
@@ -1063,7 +1064,8 @@
     "noLocationsFound": "לא נמצאו מיקומים",
     "dayNoLongerAvailable": "לנהג זה כבר אין זמינות ביום {{day}}.",
     "dayNotEnoughSeats": "אין מספיק מקומות ביום {{day}}. יש לבחור נהג אחר.",
-    "notEnoughSeatsAvailable": "אין מספיק מקומות זמינים. יש לבחור נהג אחר."
+    "notEnoughSeatsAvailable": "אין מספיק מקומות זמינים. יש לבחור נהג אחר.",
+    "finishedTripsSection": "נסיעות שהסתיימו"
   },
   "school": {
     "headerTitle": "נסיעת בית ספר",
@@ -1165,7 +1167,10 @@
     "continueToPayment": "המשך לתשלום",
     "rateDriverButton": "דרג את הנהג",
     "startTripButton": "התחל נסיעה",
-    "continueTripButton": "המשך נסיעה"
+    "continueTripButton": "המשך נסיעה",
+    "cannotCancelDriverEnRoute": "אי אפשר יותר לבטל — הנהג כבר בדרך.",
+    "cannotCancelWithinTwoHours": "אי אפשר יותר לבטל — נותרו פחות משעתיים ליציאה.",
+    "finishedTripsSection": "נסיעות שהסתיימו"
   },
   "driverCreate": {
     "newTripTitle": "יצירת נסיעה חדשה",
@@ -1348,7 +1353,8 @@
     "onlyEmployerCanPay": "רק המעסיק שהזמין עבודה זו יכול לשלם.",
     "cannotCancelAnymore": "לא ניתן יותר לבטל הזמנה זו.",
     "cannotCancelWithinHour": "לא ניתן לבטל פחות משעה לפני שעת ההתחלה.",
-    "missingDriverId": "מזהה הנהג חסר."
+    "missingDriverId": "מזהה הנהג חסר.",
+    "cannotCancelWithinTwoHours": "אי אפשר לבטל פחות משעתיים לפני שעת ההתחלה."
   },
   "roadsideHelp": {
     "subtitle": "קבל עזרה עם תקלת רכב בקרבתך",

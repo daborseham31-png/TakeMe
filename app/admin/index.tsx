@@ -101,7 +101,12 @@ export default function AdminDashboardScreen() {
             <QuickAction icon="car-outline" label={t("admin.drivers")} onPress={() => router.push("/admin/drivers" as any)} />
             <QuickAction icon="navigate-outline" label={t("admin.rides")} onPress={() => router.push("/admin/rides" as any)} />
             <QuickAction icon="book-outline" label={t("admin.bookings")} onPress={() => router.push("/admin/bookings" as any)} />
-            <QuickAction icon="flag-outline" label={t("admin.reports")} onPress={() => router.push("/admin/reports" as any)} />
+            <QuickAction
+              icon="flag-outline"
+              label={t("admin.reports")}
+              badge={stats.openReports}
+              onPress={() => router.push("/admin/reports" as any)}
+            />
             <QuickAction
               icon="notifications-outline"
               label={t("admin.notifyAction")}
@@ -207,13 +212,22 @@ export default function AdminDashboardScreen() {
 const QuickAction = ({
   icon,
   label,
+  badge,
   onPress,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
+  badge?: number;
   onPress: () => void;
 }) => (
   <Pressable style={styles.quickActionButton} onPress={onPress}>
+    {!!badge && badge > 0 ? (
+      <View style={styles.quickActionBadge}>
+        <Text style={styles.quickActionBadgeText}>
+          {badge > 99 ? "99+" : badge}
+        </Text>
+      </View>
+    ) : null}
     <Ionicons name={icon} size={20} color={adminColors.primary} />
     <Text style={styles.quickActionText}>{label}</Text>
   </Pressable>
@@ -286,6 +300,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     color: adminColors.text,
+  },
+  quickActionBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: "#DC2626",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1,
+  },
+  quickActionBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "900",
   },
   recentRow: {
     flexDirection: "row",

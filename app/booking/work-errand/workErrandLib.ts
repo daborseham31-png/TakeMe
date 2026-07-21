@@ -875,10 +875,10 @@ export const cancelBlockedReason = (
   const start = toDateTime(item.date, item.startTime);
   if (!start) return null; // No valid start time → allow cancel.
 
-  const oneHourBefore = new Date(start.getTime() - 60 * 60 * 1000);
+  const twoHoursBefore = new Date(start.getTime() - 2 * 60 * 60 * 1000);
 
-  if (now.getTime() >= oneHourBefore.getTime()) {
-    return i18n.t("workErrand.cannotCancelWithinHour");
+  if (now.getTime() >= twoHoursBefore.getTime()) {
+    return i18n.t("workErrand.cannotCancelWithinTwoHours");
   }
 
   return null;
