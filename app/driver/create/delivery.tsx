@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -16,6 +16,8 @@ import { useTranslation } from "react-i18next";
 import { auth, db } from "../../../firebase";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
+import AutocompleteTextField from "../../components/AutocompleteTextField";
+import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
 import {
@@ -27,6 +29,7 @@ import {
   validateAccountInfo,
   validateDateAndTimeNotPassed,
 } from "./driverHelpers";
+import { recordUsedFormValues, useSavedFormValues } from "./savedFormValuesLib";
 
 type Mode = "" | "person" | "store";
 
@@ -106,6 +109,19 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
   const [car, setCar] = useState("");
   const [carColor, setCarColor] = useState("");
   const [carPlate, setCarPlate] = useState("");
+  const savedValues = useSavedFormValues();
+  const [prefilledVehicle, setPrefilledVehicle] = useState(false);
+  useEffect(() => {
+    if (prefilledVehicle) return;
+    if (!savedValues.carModels.length && !savedValues.carColors.length && !savedValues.plateNumbers.length) {
+      return;
+    }
+
+    setCar((current) => current || savedValues.carModels[0] || "");
+    setCarColor((current) => current || savedValues.carColors[0] || "");
+    setCarPlate((current) => current || savedValues.plateNumbers[0] || "");
+    setPrefilledVehicle(true);
+  }, [savedValues, prefilledVehicle]);
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -289,6 +305,8 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
         createdAt: serverTimestamp(),
       });
 
+      recordUsedFormValues({ carModel: car, carColor, plateNumber: carPlate, price: String(cleanPrice) });
+
       Alert.alert(t("common.success"), t("driver.deliveryCreated"));
       router.replace("/(tabs)/home" as any);
     } catch (error: any) {
@@ -313,42 +331,6 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
           <Text style={styles.title}>{t("driverCreate.deliverItemTitle")}</Text>
           <Text style={styles.subtitle}>{t("driverCreate.sendItemSubtitle")}</Text>
 
-          <Text style={styles.label}>{t("driverCreate.carModel")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="car-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("driverCreate.enterCarModel")}
-              placeholderTextColor="#8B7B6B"
-              value={car}
-              onChangeText={setCar}
-            />
-          </View>
-
-          <Text style={styles.label}>{t("driverCreate.carColor")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("driverCreate.enterCarColor")}
-              placeholderTextColor="#8B7B6B"
-              value={carColor}
-              onChangeText={setCarColor}
-            />
-          </View>
-
-          <Text style={styles.label}>{t("driverCreate.carPlateNumber")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("driverCreate.enterCarPlateNumber")}
-              placeholderTextColor="#8B7B6B"
-              keyboardType="number-pad"
-              value={carPlate}
-              onChangeText={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
-            />
-          </View>
 
           <IsraelLocationAutocomplete
             label={t("booking.from")}
@@ -414,18 +396,26 @@ function PersonalDeliverForm({ onBack }: { onBack: () => void }) {
             multiline
           />
 
-          <Text style={styles.label}>{t("booking.price")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("booking.enterPrice")}
-              placeholderTextColor="#8B7B6B"
-              keyboardType="numeric"
-              value={price}
-              onChangeText={(text) => setPrice(getDigitsOnly(text))}
-            />
-          </View>
+          <AutocompleteTextField
+            label={t("booking.price")}
+            value={price}
+            onChangeText={(text) => setPrice(getDigitsOnly(text))}
+            suggestions={savedValues.prices}
+            placeholder={t("booking.enterPrice")}
+            icon="cash-outline"
+            keyboardType="numeric"
+            formatSuggestion={(v) => `${v} ₪`}
+          />
+
+          <VehicleDetailsSection
+            car={car}
+            onChangeCar={setCar}
+            carColor={carColor}
+            onChangeCarColor={setCarColor}
+            carPlate={carPlate}
+            onChangeCarPlate={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
+            savedValues={savedValues}
+          />
 
           <Pressable
             style={[
@@ -454,6 +444,19 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
   const [car, setCar] = useState("");
   const [carColor, setCarColor] = useState("");
   const [carPlate, setCarPlate] = useState("");
+  const savedValues = useSavedFormValues();
+  const [prefilledVehicle, setPrefilledVehicle] = useState(false);
+  useEffect(() => {
+    if (prefilledVehicle) return;
+    if (!savedValues.carModels.length && !savedValues.carColors.length && !savedValues.plateNumbers.length) {
+      return;
+    }
+
+    setCar((current) => current || savedValues.carModels[0] || "");
+    setCarColor((current) => current || savedValues.carColors[0] || "");
+    setCarPlate((current) => current || savedValues.plateNumbers[0] || "");
+    setPrefilledVehicle(true);
+  }, [savedValues, prefilledVehicle]);
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -625,6 +628,8 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
         createdAt: serverTimestamp(),
       });
 
+      recordUsedFormValues({ carModel: car, carColor, plateNumber: carPlate, price: String(cleanPrice) });
+
       Alert.alert(t("common.success"), t("driver.deliveryCreated"));
       router.replace("/(tabs)/home" as any);
     } catch (error: any) {
@@ -651,42 +656,6 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             {t("driverCreate.storeDeliverySubtitle")}
           </Text>
 
-          <Text style={styles.label}>{t("driverCreate.carModel")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="car-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("driverCreate.enterCarModel")}
-              placeholderTextColor="#8B7B6B"
-              value={car}
-              onChangeText={setCar}
-            />
-          </View>
-
-          <Text style={styles.label}>{t("driverCreate.carColor")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("driverCreate.enterCarColor")}
-              placeholderTextColor="#8B7B6B"
-              value={carColor}
-              onChangeText={setCarColor}
-            />
-          </View>
-
-          <Text style={styles.label}>{t("driverCreate.carPlateNumber")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("driverCreate.enterCarPlateNumber")}
-              placeholderTextColor="#8B7B6B"
-              keyboardType="number-pad"
-              value={carPlate}
-              onChangeText={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
-            />
-          </View>
 
           <IsraelLocationAutocomplete
             label={t("booking.from")}
@@ -740,18 +709,26 @@ function StoreDeliverForm({ onBack }: { onBack: () => void }) {
             setShowPicker={setShowTimePicker}
           />
 
-          <Text style={styles.label}>{t("booking.price")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("booking.enterPrice")}
-              placeholderTextColor="#8B7B6B"
-              keyboardType="numeric"
-              value={price}
-              onChangeText={(text) => setPrice(getDigitsOnly(text))}
-            />
-          </View>
+          <AutocompleteTextField
+            label={t("booking.price")}
+            value={price}
+            onChangeText={(text) => setPrice(getDigitsOnly(text))}
+            suggestions={savedValues.prices}
+            placeholder={t("booking.enterPrice")}
+            icon="cash-outline"
+            keyboardType="numeric"
+            formatSuggestion={(v) => `${v} ₪`}
+          />
+
+          <VehicleDetailsSection
+            car={car}
+            onChangeCar={setCar}
+            carColor={carColor}
+            onChangeCarColor={setCarColor}
+            carPlate={carPlate}
+            onChangeCarPlate={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
+            savedValues={savedValues}
+          />
 
           <Pressable
             style={[

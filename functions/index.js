@@ -496,6 +496,76 @@ exports.onSchoolTripCancelled = onDocumentUpdated("schoolTrips/{tripId}", async 
 });
 
 // ---------------------------------------------------------------------------
+// Personal Ride rating aggregation — app/booking/rideBookingLib.ts's
+// submitRideRating() creates the driverReviews/{bookingId} doc and updates
+// the booking itself client-side, but has NO write access to another user's
+// users/{driverId} doc (firestore.rules' users update rule only allows the
+// owner or an admin) — so crediting ratingCount/ratingSum/ratingAverage onto
+// the driver's profile happens here instead, server-side via the Admin SDK,
+// which is never subject to security rules.
+//
+// Scoped to category === "personal_ride" only: driverReviews docs from the
+// other rating flows (school/roadside/work/errand — see schoolTripsLib.ts,
+// roadside-help/roadsideLib.ts, work-errand/workErrandLib.ts, and
+// app/(tabs)/bookings.tsx's submitSchoolRating) still credit users/{driverId}
+// themselves as one step of their own client-side transaction, under
+// firestore.rules' isValidDriverRatingCredit carve-out — aggregating those
+// here too would double-count. If those flows are ever migrated off that
+// carve-out, widen this trigger (and drop the carve-out) to cover them too.
+//
+// Idempotent against Cloud Functions' at-least-once trigger delivery: the
+// `aggregated` flag is checked and set in the SAME transaction as the
+// users/{driverId} credit, so a rare duplicate delivery of this trigger for
+// the same review doc is a no-op on its second run.
+// ---------------------------------------------------------------------------
+
+exports.onDriverReviewCreated = onDocumentCreated("driverReviews/{reviewId}", async (event) => {
+  const snap = event.data;
+  if (!snap) return;
+
+  const review = snap.data();
+  if (review.category !== "personal_ride") return;
+
+  const driverId = review.driverId;
+  const rating = Number(review.rating);
+
+  if (typeof driverId !== "string" || !driverId) return;
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) return;
+
+  const reviewRef = snap.ref;
+  const driverRef = db.collection("users").doc(driverId);
+
+  await db.runTransaction(async (transaction) => {
+    const freshReviewSnap = await transaction.get(reviewRef);
+    if (!freshReviewSnap.exists) return;
+    if (freshReviewSnap.data().aggregated === true) return;
+
+    const driverSnap = await transaction.get(driverRef);
+    const driverData = driverSnap.exists ? driverSnap.data() : {};
+
+    const oldCount = Number(driverData.ratingCount) || 0;
+    const oldSum = Number(driverData.ratingSum) || 0;
+
+    const newCount = oldCount + 1;
+    const newSum = oldSum + rating;
+    const newAverage = newSum / newCount;
+
+    transaction.set(
+      driverRef,
+      {
+        ratingCount: newCount,
+        ratingSum: newSum,
+        ratingAverage: newAverage,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    transaction.update(reviewRef, { aggregated: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Push notification delivery — fires once for every `notifications` doc
 // created anywhere in the app (client notify() calls in workErrandLib.ts,
 // this file's own onSchoolTripCancelled above, ride-navigation.tsx's

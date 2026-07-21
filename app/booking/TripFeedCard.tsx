@@ -11,6 +11,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { FeedCategory, FeedItem } from "./homeFeedLib";
+import { schoolTripDirectionLabel } from "./schoolTripsLib";
 
 // Language names are always shown in their own script, regardless of the
 // app's current UI language — these are never translated.
@@ -94,6 +95,32 @@ export default function TripFeedCard({
             {t(meta.labelKey)}
           </Text>
         </View>
+
+        {/* Which leg THIS specific card is — never both at once, even for a
+            trip originally created as outbound-and-return (see
+            schoolTripDirectionLabel in schoolTripsLib.ts). */}
+        {item.category === "schoolTrip" && item.direction ? (
+          <View
+            style={[
+              styles.directionBadge,
+              item.direction === "to_school" ? styles.directionBadgeOutbound : styles.directionBadgeReturn,
+            ]}
+          >
+            <Ionicons
+              name={item.direction === "to_school" ? "arrow-forward-circle" : "arrow-back-circle"}
+              size={13}
+              color={item.direction === "to_school" ? "#2563EB" : "#B86115"}
+            />
+            <Text
+              style={[
+                styles.directionBadgeText,
+                { color: item.direction === "to_school" ? "#2563EB" : "#B86115" },
+              ]}
+            >
+              {schoolTripDirectionLabel(t, item.direction)}
+            </Text>
+          </View>
+        ) : null}
 
         <View style={styles.topRowRight}>
           {typeof distanceKm === "number" ? (
@@ -235,7 +262,7 @@ export default function TripFeedCard({
       </View>
 
       {/* Car details — rides only */}
-      {(item.category === "personal" || item.category === "school") &&
+      {(item.category === "personal" || item.category === "school" || item.category === "schoolTrip") &&
       (item.car || item.carColor || item.carPlateLast3) ? (
         <View style={styles.metaRow}>
           {item.car ? (
@@ -302,7 +329,7 @@ export default function TripFeedCard({
               {item.ratingCount > 0 ? ` (${item.ratingCount})` : ""}
             </Text>
           ) : (
-            <Text style={styles.ratingText}>{t("rides.noRatingsYet")}</Text>
+            <Text style={styles.ratingText}>{t("roadsideHelp.newDriverLabel")}</Text>
           )}
         </View>
       </Pressable>
@@ -385,6 +412,24 @@ const styles = StyleSheet.create({
     color: "#B86115",
     fontWeight: "800",
     fontSize: 11,
+  },
+  directionBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  directionBadgeOutbound: {
+    backgroundColor: "#EFF6FF",
+  },
+  directionBadgeReturn: {
+    backgroundColor: "#FFF2E8",
+  },
+  directionBadgeText: {
+    fontWeight: "900",
+    fontSize: 11.5,
   },
   routeText: {
     fontSize: 16,

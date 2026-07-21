@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -22,6 +22,8 @@ import {
   WeekDayRow,
   WeeklyDriverDay,
 } from "../../booking/weeklyBookingLib";
+import AutocompleteTextField from "../../components/AutocompleteTextField";
+import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { fetchDriverEligibility } from "../driverEligibility";
 import DateInput, { TimeInput } from "./DateInput";
 import WeeklyDaysCard from "./WeeklyDaysCard";
@@ -37,6 +39,7 @@ import {
   validateAccountInfo,
   validateDateAndTimeNotPassed,
 } from "./driverHelpers";
+import { recordUsedFormValues, useSavedFormValues } from "./savedFormValuesLib";
 
 type RideCategory = "school" | "personal";
 
@@ -72,6 +75,23 @@ export default function RideForm({
   const [car, setCar] = useState("");
   const [carColor, setCarColor] = useState("");
   const [carPlate, setCarPlate] = useState("");
+  const savedValues = useSavedFormValues();
+
+  // Prefill from the driver's own most-recently-used vehicle (never price —
+  // it varies by route) the first time suggestions arrive, only into fields
+  // still empty at that point (never overwrites something already typed).
+  const [prefilledVehicle, setPrefilledVehicle] = useState(false);
+  useEffect(() => {
+    if (prefilledVehicle) return;
+    if (!savedValues.carModels.length && !savedValues.carColors.length && !savedValues.plateNumbers.length) {
+      return;
+    }
+
+    setCar((current) => current || savedValues.carModels[0] || "");
+    setCarColor((current) => current || savedValues.carColors[0] || "");
+    setCarPlate((current) => current || savedValues.plateNumbers[0] || "");
+    setPrefilledVehicle(true);
+  }, [savedValues, prefilledVehicle]);
 
   const [allowsPets, setAllowsPets] = useState(false);
 
@@ -337,6 +357,8 @@ export default function RideForm({
         createdAt: serverTimestamp(),
       });
 
+      recordUsedFormValues({ carModel: car, carColor, plateNumber: carPlate, price: String(cleanPrice) });
+
       Alert.alert(t("common.success"), t("driver.tripCreated"));
       router.replace("/(tabs)/home" as any);
     } catch (error: any) {
@@ -355,43 +377,6 @@ export default function RideForm({
           <Text style={styles.subtitle}>{t("driverCreate.newTripSubtitle")}</Text>
         </>
       ) : null}
-
-      <Text style={styles.label}>{t("driverCreate.carModel")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="car-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("driverCreate.enterCarModel")}
-              placeholderTextColor="#8B7B6B"
-              value={car}
-              onChangeText={setCar}
-            />
-          </View>
-
-          <Text style={styles.label}>{t("driverCreate.carColor")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="color-palette-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("driverCreate.enterCarColor")}
-              placeholderTextColor="#8B7B6B"
-              value={carColor}
-              onChangeText={setCarColor}
-            />
-          </View>
-
-          <Text style={styles.label}>{t("driverCreate.carPlateNumber")}</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="barcode-outline" size={18} color="#8B7B6B" />
-            <TextInput
-              style={styles.rowInput}
-              placeholder={t("driverCreate.enterCarPlateNumber")}
-              placeholderTextColor="#8B7B6B"
-              keyboardType="number-pad"
-              value={carPlate}
-              onChangeText={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
-            />
-          </View>
 
           {showPets && (
             <YesNoField
@@ -488,18 +473,16 @@ export default function RideForm({
 
               <View style={styles.twoColumns}>
                 <View style={styles.column}>
-                  <Text style={styles.label}>{t("booking.price")}</Text>
-                  <View style={styles.inputRow}>
-                    <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
-                    <TextInput
-                      style={styles.rowInput}
-                      placeholder={t("booking.enterPrice")}
-                      placeholderTextColor="#8B7B6B"
-                      keyboardType="numeric"
-                      value={price}
-                      onChangeText={(text) => setPrice(getDigitsOnly(text))}
-                    />
-                  </View>
+                  <AutocompleteTextField
+                    label={t("booking.price")}
+                    value={price}
+                    onChangeText={(text) => setPrice(getDigitsOnly(text))}
+                    suggestions={savedValues.prices}
+                    placeholder={t("booking.enterPrice")}
+                    icon="cash-outline"
+                    keyboardType="numeric"
+                    formatSuggestion={(v) => `${v} ₪`}
+                  />
                 </View>
 
                 <View style={styles.column}>
@@ -529,6 +512,16 @@ export default function RideForm({
               mode="driver"
             />
           )}
+
+          <VehicleDetailsSection
+            car={car}
+            onChangeCar={setCar}
+            carColor={carColor}
+            onChangeCarColor={setCarColor}
+            carPlate={carPlate}
+            onChangeCarPlate={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
+            savedValues={savedValues}
+          />
 
           <Pressable
             style={[

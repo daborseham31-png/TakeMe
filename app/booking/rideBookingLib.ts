@@ -8,7 +8,10 @@
 // Collections used:
 //   - bookings        (one doc per booked personal ride; category "personal_ride")
 //   - driverReviews   (one doc per completed ride the passenger rated)
-//   - users/{driverId}(ratingAverage + ratingCount summary, updated on complete)
+//   - users/{driverId}(ratingAverage + ratingCount summary — updated server-side
+//                       by functions/index.js's onDriverReviewCreated, never by
+//                       this client, which has no write access to another
+//                       user's profile)
 //   - notifications   (per-user in-app updates; reuses notify() from workErrandLib)
 //
 // Payment is mock/demo only: the full card number and CVV are NEVER stored –
@@ -334,12 +337,37 @@ export const finishRide = async (bookingId: string, booking: RideBooking) => {
 
 // Passenger: submit the post-trip rating. Closes out needsPassengerRating so
 // the popup never reopens for this booking.
+//
+// driverReviews/{bookingId} — the review doc's ID IS the bookingId (never an
+// auto-id) so a second rating attempt for the same booking is a `create` on
+// an already-existing document, which every client rejects outright before
+// even reaching Firestore — see firestore.rules' driverReviews `allow
+// create`, which additionally requires request.resource.data.bookingId to
+// equal this same id. That, plus this transaction's own self-verification
+// below (never trust the caller's already-loaded `booking` object alone —
+// re-read it fresh inside the transaction), is what the driverReviews rule
+// relies on for the booking-ownership/completed/not-already-rated checks.
+//
+// This transaction deliberately does NOT touch users/{driverId} — a
+// passenger has no write access to another user's profile (firestore.rules'
+// users update rule only allows the owner or an admin), so crediting
+// ratingCount/ratingSum/ratingAverage there is done server-side instead, by
+// functions/index.js's onDriverReviewCreated trigger reacting to the
+// driverReviews doc this transaction creates.
 export const submitRideRating = async (
   bookingId: string,
   booking: RideBooking,
   rating: number,
   comment: string,
 ) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("auth.pleaseLoginFirst"));
+
+  const cleanRating = Math.round(rating);
+  if (!Number.isInteger(cleanRating) || cleanRating < 1 || cleanRating > 5) {
+    throw new Error(i18n.t("validation.invalidRating"));
+  }
+
   const cleanComment = comment.trim();
 
   // driverId must be the driver's real Firebase UID — never this booking's
@@ -349,11 +377,12 @@ export const submitRideRating = async (
   const hasValidDriverId =
     !!booking.driverId &&
     booking.driverId !== bookingId &&
-    booking.driverId !== booking.routeId;
+    booking.driverId !== booking.routeId &&
+    booking.driverId !== user.uid;
 
   if (!hasValidDriverId) {
     await updateDoc(doc(db, "bookings", bookingId), {
-      rating,
+      rating: cleanRating,
       reviewComment: cleanComment || null,
       ratingSubmitted: true,
       needsPassengerRating: false,
@@ -364,70 +393,75 @@ export const submitRideRating = async (
   }
 
   const bookingRef = doc(db, "bookings", bookingId);
-  const driverRef = doc(db, "users", booking.driverId);
-  const reviewRef = doc(collection(db, "driverReviews"));
+  const reviewRef = doc(db, "driverReviews", bookingId);
 
-  await runTransaction(db, async (transaction) => {
-    const bookingSnap = await transaction.get(bookingRef);
+  const ratingWritePaths = {
+    review: `driverReviews/${bookingId}`,
+    booking: `bookings/${bookingId}`,
+  };
+  console.log("[rating] transaction started", ratingWritePaths);
 
-    if (!bookingSnap.exists()) {
-      throw new Error(i18n.t("rides.bookingNotFound"));
-    }
+  try {
+    await runTransaction(db, async (transaction) => {
+      const bookingSnap = await transaction.get(bookingRef);
 
-    const bookingData: any = bookingSnap.data();
+      if (!bookingSnap.exists()) {
+        throw new Error(i18n.t("rides.bookingNotFound"));
+      }
 
-    if (bookingData.ratingSubmitted === true) {
-      return;
-    }
+      const bookingData: any = bookingSnap.data();
 
-    const driverSnap = await transaction.get(driverRef);
-    const driverData: any = driverSnap.exists() ? driverSnap.data() : {};
+      // Never trust the `booking` object the caller already had in memory —
+      // re-verify ownership + real completion against the current server
+      // state, the same three conditions firestore.rules' driverReviews
+      // create rule independently re-checks from its own side.
+      if (bookingData.passengerId !== user.uid) {
+        throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
+      }
+      if (bookingData.tripStatus !== "completed" || bookingData.status !== "completed") {
+        throw new Error(i18n.t("booking.tripNotCompletedYet"));
+      }
+      if (bookingData.ratingSubmitted === true) {
+        return;
+      }
 
-    const oldCount = Number(driverData.ratingCount) || 0;
-    const oldSum =
-      Number(driverData.ratingSum) ||
-      Number(driverData.ratingAverage || 0) * oldCount;
+      const reviewSnap = await transaction.get(reviewRef);
+      if (reviewSnap.exists()) {
+        // Already rated (a retried/duplicate call) — idempotent no-op.
+        return;
+      }
 
-    const newCount = oldCount + 1;
-    const newSum = oldSum + rating;
-    const newAverage = Number((newSum / newCount).toFixed(2));
+      transaction.set(reviewRef, {
+        bookingId,
+        driverId: booking.driverId,
+        driverName: booking.driverName || "Driver",
+        passengerId: user.uid,
+        passengerName: booking.passengerName || "Passenger",
+        rating: cleanRating,
+        comment: cleanComment,
+        category: RIDE_CATEGORY,
+        from: booking.from || "",
+        to: booking.to || "",
+        date: booking.date || "",
+        time: booking.time || "",
+        createdAt: serverTimestamp(),
+      });
 
-    transaction.set(reviewRef, {
-      bookingId,
-      driverId: booking.driverId,
-      driverName: booking.driverName || "Driver",
-      passengerId: booking.passengerId || null,
-      passengerName: booking.passengerName || "Passenger",
-      rating,
-      comment: cleanComment,
-      category: RIDE_CATEGORY,
-      from: booking.from || "",
-      to: booking.to || "",
-      date: booking.date || "",
-      time: booking.time || "",
-      createdAt: serverTimestamp(),
-    });
-
-    transaction.update(bookingRef, {
-      rating,
-      reviewComment: cleanComment || null,
-      ratingSubmitted: true,
-      needsPassengerRating: false,
-      ratedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    transaction.set(
-      driverRef,
-      {
-        ratingCount: newCount,
-        ratingSum: newSum,
-        ratingAverage: newAverage,
+      transaction.update(bookingRef, {
+        rating: cleanRating,
+        reviewComment: cleanComment || null,
+        ratingSubmitted: true,
+        needsPassengerRating: false,
+        ratedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-  });
+      });
+    });
+
+    console.log("[rating] transaction succeeded", { bookingId });
+  } catch (error) {
+    console.log("[rating] transaction failed", { ...ratingWritePaths, error });
+    throw error;
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -483,6 +517,9 @@ export type RideBooking = {
   deletedForDriver: boolean;
 
   createdAtSeconds: number;
+  // 0 until Finish Trip actually stamps completedAt — the rating gate
+  // requires this to be > 0, never just tripStatus === "completed" alone.
+  completedAtSeconds: number;
   searchText: string;
 };
 
@@ -595,6 +632,7 @@ export const normalizeRideBooking = (id: string, data: any): RideBooking => {
     deletedForDriver: data.deletedForDriver === true,
 
     createdAtSeconds: data.createdAt?.seconds || 0,
+    completedAtSeconds: data.completedAt?.seconds || 0,
     searchText: [
       "personal ride",
       passengerName,

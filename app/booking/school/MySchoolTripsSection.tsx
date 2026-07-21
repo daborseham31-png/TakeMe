@@ -55,7 +55,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
-import { canStartTrip, getCategoryMeta, getStartTripBlockedReason } from "../bookingsLib";
+import { canStartTrip, dismissRatingNotifications, getCategoryMeta, getStartTripBlockedReason } from "../bookingsLib";
 import { translateCategoryLabel } from "../../i18n/formatters";
 import {
   cancelRideRequest,
@@ -69,6 +69,7 @@ import {
   RideRequest,
   SCHOOL_BOOKINGS_COLLECTION,
   SCHOOL_TRIPS_COLLECTION,
+  schoolTripDirectionLabel,
   SchoolBooking,
   SchoolTrip,
   subscribeMyRideRequests,
@@ -78,12 +79,18 @@ import {
 type Props = {
   tab: "passenger" | "driver";
   uid: string | null;
+  // Set only from a tapped rating notification whose bookingId this
+  // component's own `bookings` (SCHOOL_BOOKINGS_COLLECTION) might contain —
+  // see bookings.tsx's pendingRatingBookingId, which passes the same id down
+  // here after failing to find it among its own ride/booking/application
+  // arrays. onConsumePendingRating tells the parent this component has had
+  // its one shot (found-and-opened or not), so it clears the id and this
+  // never runs again for the same notification tap.
+  pendingRatingBookingId?: string | null;
+  onConsumePendingRating?: () => void;
 };
 
-const directionLabel = (
-  t: (key: string) => string,
-  direction: "to_school" | "from_school",
-) => (direction === "to_school" ? t("schoolTrip.outboundBadge") : t("schoolTrip.returnBadge"));
+const directionLabel = schoolTripDirectionLabel;
 
 // Same status vocabulary/keys as app/booking/live-tracking.tsx's
 // getStatusKey — one shared meaning for "driver_on_way" etc. everywhere in
@@ -96,7 +103,12 @@ const trackingStatusKey = (status: SchoolBooking["tripStatus"] | SchoolTrip["tri
   return "rides.waitingForDriver";
 };
 
-export default function MySchoolTripsSection({ tab, uid }: Props) {
+export default function MySchoolTripsSection({
+  tab,
+  uid,
+  pendingRatingBookingId,
+  onConsumePendingRating,
+}: Props) {
   const { t } = useTranslation();
 
   const [bookings, setBookings] = useState<SchoolBooking[]>([]);
@@ -231,6 +243,34 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
         return aFinished ? bTime - aTime : aTime - bTime;
       });
   }, [bookings, tab]);
+
+  // Same one-shot targeted-open behaviour as bookings.tsx's own effect (see
+  // its comment) — this component's `bookings` (SCHOOL_BOOKINGS_COLLECTION,
+  // new-style school trips) is invisible to that parent effect, so it's
+  // given the same pendingRatingBookingId as a prop and searches its own
+  // data independently. Either this finds it or the parent already didn't —
+  // exactly one of the two ever actually contains a given bookingId.
+  useEffect(() => {
+    if (!pendingRatingBookingId) return;
+    if (tab !== "passenger") return;
+    if (loading) return;
+    if (ratingBooking) return;
+
+    const match = bookings.find((b) => b.id === pendingRatingBookingId);
+
+    if (match) {
+      const eligible =
+        match.status === "completed" &&
+        match.tripStatus === "completed" &&
+        match.completedAtSeconds > 0 &&
+        match.needsPassengerRating === true &&
+        match.ratingSubmitted !== true;
+
+      if (eligible) openRatingModal(match);
+    }
+
+    onConsumePendingRating?.();
+  }, [pendingRatingBookingId, tab, loading, bookings, ratingBooking]);
 
   // Already sorted above (active first, nearest date first / finished last,
   // most recent first) — filtering here just splits the list for the
@@ -476,6 +516,7 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
     setRatingSubmitting(true);
     try {
       await submitSchoolBookingRating(ratingBooking.id, ratingBooking, ratingStars, ratingComment);
+      await dismissRatingNotifications(ratingBooking.id);
       closeRatingModal();
     } catch (error: any) {
       Alert.alert(t("common.error"), error?.message || t("errors.generic"));
@@ -586,6 +627,15 @@ export default function MySchoolTripsSection({ tab, uid }: Props) {
               {t("driver.driverLabel", { defaultValue: "Driver" })}: {booking.driverName} ·{" "}
               {booking.seats} {t("schoolTrip.seatWord")} · {booking.totalPrice} ₪
             </Text>
+            {booking.car || booking.carColor || booking.carPlate ? (
+              <Text style={styles.metaText}>
+                <Ionicons name="car-outline" size={12} color="#7C5F46" />{" "}
+                {[booking.car, booking.carColor].filter(Boolean).join(" · ")}
+                {booking.carPlate ? (
+                  <Text style={styles.ltrText}> · {booking.carPlate}</Text>
+                ) : null}
+              </Text>
+            ) : null}
             {childSummary ? <Text style={styles.childSummaryText}>{childSummary}</Text> : null}
 
             {needsReplacement ? (
@@ -1008,6 +1058,7 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 12, color: "#7C5F46", fontWeight: "700", textTransform: "capitalize" },
   routeText: { fontWeight: "800", color: "#111827", fontSize: 14, marginBottom: 4 },
   metaText: { fontSize: 12.5, color: "#7C5F46", fontWeight: "600", marginBottom: 2 },
+  ltrText: { writingDirection: "ltr" },
   childSummaryText: { fontSize: 12.5, color: "#F58220", fontWeight: "800", marginTop: 2 },
   cancelButton: { marginTop: 8, alignSelf: "flex-start" },
   cancelButtonText: { color: "#B91C1C", fontWeight: "800", fontSize: 12.5 },

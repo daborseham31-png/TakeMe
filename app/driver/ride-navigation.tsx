@@ -361,9 +361,10 @@ export default function RideNavigationScreen() {
 
     const tripStatus = getTripStatus(booking);
 
-    // Personal Ride: live location updates run while the driver has arrived
-    // for pickup, up until Finish Trip (unchanged — there is no passenger
-    // verification step for Personal Ride).
+    // Personal Ride never reaches tripStatus "in_progress" through this
+    // screen's own flow (booked → driver_on_way → arrived_pickup →
+    // completed, with no passenger-verification step), so its tracking
+    // window is arrived_pickup → Finish Trip.
     //
     // School Trips: must NOT start merely because the driver pressed "I
     // arrived" — only once at least one passenger's code has been verified
@@ -378,20 +379,37 @@ export default function RideNavigationScreen() {
     const target = getTrackingTarget();
     if (!target) return;
 
-    // startDriverLocationTracking is idempotent for the same target (and
-    // internally guarantees only one background registration ever exists),
-    // so re-running this on every relevant state change — including this
-    // screen simply remounting after the app was relaunched mid-trip — is
-    // always safe. Deliberately NO cleanup/stop here: background tracking
-    // must keep running even if this screen unmounts (driver navigates
-    // away, backgrounds the app, locks the phone) — only an explicit status
-    // transition (Finish Trip below) or sign-out stops it.
-    captureDriverLocationOnce(target);
-    startDriverLocationTracking(target).then((result) => {
-      if (!result.started) {
-        Alert.alert(t("booking.locationPermissionTitle"), t("booking.allowLocationForTracking"));
+    // startDriverLocationTracking is foreground-only (a single
+    // watchPositionAsync subscription — see driverLocationTask.ts) and
+    // idempotent for the same target, de-duping concurrent callers via its
+    // own start-lock, so re-running this on every relevant state change —
+    // including this screen simply remounting, or this effect firing twice
+    // in quick succession from two separate Firestore listeners right after
+    // passenger verification — is always safe. Deliberately NO cleanup/stop
+    // on unmount: navigating to another tab must not interrupt tracking —
+    // the JS process, and this subscription with it, keeps running as long
+    // as the driver keeps the app open at all — only an explicit status
+    // transition (Finish/Cancel Trip below), the target actually changing,
+    // or sign-out stops it.
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await captureDriverLocationOnce(target);
+        if (cancelled) return;
+
+        const result = await startDriverLocationTracking(target);
+        if (!cancelled && !result.started) {
+          Alert.alert(t("booking.locationPermissionTitle"), t("booking.allowLocationForTracking"));
+        }
+      } catch (error) {
+        console.log("ride-navigation: failed to start driver location tracking", error);
       }
-    });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, booking, isSchoolTripsSource, anySchoolPassengerInProgress]);
 
@@ -520,6 +538,20 @@ export default function RideNavigationScreen() {
   // progress from a single subscription, without a second live read. Never
   // a second start/arrive/finish implementation — same transitions,
   // same notify() calls, just fanned out to N passengers instead of 1.
+  //
+  // The trip doc write and every affected booking's write commit as ONE
+  // atomic writeBatch — never a separate updateDoc followed by a separate
+  // batch.commit(). Firestore rejects a WHOLE batch if any single write in
+  // it fails its security rule, so splitting them risked (and, before
+  // "completedAt" was added to schoolBookings' allowed field list in
+  // firestore.rules, actually caused) exactly the bug this fixes: the trip
+  // doc committing "completed" while the batch of booking writes then threw
+  // permission-denied and never committed at all — the driver's screen and
+  // Firestore itself showed "completed", but every passenger's own booking
+  // silently stayed stuck at "in_progress" forever (no completedAt, no
+  // rating eligibility, no notification). With one batch, either everything
+  // above commits together or NONE of it does, so the UI can only ever
+  // reflect a state that was actually fully written.
   const updateSchoolTripStatus = async (nextStatus: TripStatus) => {
     const tripPayload: any = {
       tripStatus: nextStatus,
@@ -550,14 +582,9 @@ export default function RideNavigationScreen() {
       tripPayload.status = "completed";
     }
 
-    await updateDoc(doc(db, SCHOOL_TRIPS_COLLECTION, id), tripPayload);
-
-    if (nextStatus === "completed") {
-      await stopDriverLocationTracking();
-    }
-
     // Same driverId-filter requirement as the schoolPassengerBookings
-    // subscription above — see its comment.
+    // subscription above — see its comment. Read BEFORE any write, so a
+    // failure here never leaves a half-built batch.
     const bookingsSnap = await getDocs(
       query(
         collection(db, SCHOOL_BOOKINGS_COLLECTION),
@@ -567,27 +594,52 @@ export default function RideNavigationScreen() {
       ),
     );
 
-    if (!bookingsSnap.empty) {
-      const batch = writeBatch(db);
+    const batch = writeBatch(db);
+    batch.update(doc(db, SCHOOL_TRIPS_COLLECTION, id), tripPayload);
 
-      bookingsSnap.docs.forEach((bookingSnap) => {
-        const bookingPayload: any = {
-          tripStatus: nextStatus,
-          updatedAt: serverTimestamp(),
-        };
+    bookingsSnap.docs.forEach((bookingSnap) => {
+      const bookingPayload: any = {
+        tripStatus: nextStatus,
+        updatedAt: serverTimestamp(),
+      };
 
-        if (nextStatus === "completed") {
-          bookingPayload.status = "completed";
-          bookingPayload.finishedByDriver = true;
-          bookingPayload.needsPassengerRating = true;
-          bookingPayload.ratingSubmitted = false;
-          bookingPayload.rating = null;
-        }
+      if (nextStatus === "completed") {
+        bookingPayload.status = "completed";
+        bookingPayload.finishedByDriver = true;
+        bookingPayload.needsPassengerRating = true;
+        bookingPayload.ratingSubmitted = false;
+        bookingPayload.rating = null;
+        // The trip doc itself already gets its own completedAt above —
+        // each booking needs its OWN stamp too: the rating gate checks
+        // completedAt on the booking, not the (driver-only-readable) trip.
+        bookingPayload.completedAt = serverTimestamp();
+      }
 
-        batch.update(bookingSnap.ref, bookingPayload);
-      });
+      batch.update(bookingSnap.ref, bookingPayload);
+    });
 
+    try {
       await batch.commit();
+    } catch (error) {
+      console.log("updateSchoolTripStatus: batch commit failed", {
+        stage: "schoolTrips+schoolBookings atomic batch",
+        tripId: id,
+        nextStatus,
+        affectedBookingIds: bookingsSnap.docs.map((d) => d.id),
+        error,
+      });
+      // Nothing committed — the trip and every booking are exactly as they
+      // were before this call, so the caller's catch block can surface the
+      // error without any local state ever having claimed completion.
+      throw error;
+    }
+
+    // Only stop broadcasting the driver's live location once the "completed"
+    // write has actually been confirmed by Firestore — never before, so a
+    // failed/rolled-back finish never silently ends tracking for a trip
+    // that (from the passengers' own data) never actually finished.
+    if (nextStatus === "completed") {
+      await stopDriverLocationTracking();
     }
 
     // One notification per BOOKING (not per unique passenger) — a parent
@@ -745,10 +797,26 @@ export default function RideNavigationScreen() {
           text: t("booking.finishTripTitle"),
           style: "destructive",
           onPress: async () => {
+            // busy already disables the Finish Trip button (see its
+            // `disabled` prop below) — this guard also blocks a second
+            // Alert confirm tap landing here while a first request is
+            // still in flight.
+            if (busy) return;
+
             try {
               setBusy(true);
+              // Fully awaited — the screen's own displayed tripStatus comes
+              // from the live booking/trip Firestore listener, never from
+              // local state set ahead of this call, so the UI can only ever
+              // show "completed" once this has actually resolved.
               await updateTripStatus("completed");
             } catch (error: any) {
+              console.log("handleFinishTrip: finish trip failed", {
+                stage: "updateTripStatus(completed)",
+                id,
+                isSchoolTripsSource,
+                error,
+              });
               Alert.alert(t("common.error"), error?.message || t("booking.couldNotUpdate"));
             } finally {
               setBusy(false);

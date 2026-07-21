@@ -54,6 +54,61 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------
+    // Driver-rating helpers — shared by driverReviews/{reviewId}'s create
+    // rule and users/{userId}'s rating-credit branch below. One passenger
+    // rating flow, five booking-like source collections (see
+    // app/booking/rideBookingLib.ts, schoolTripsLib.ts, bookings.tsx's
+    // submitSchoolRating, roadside-help/roadsideLib.ts, work-errand/
+    // workErrandLib.ts — every one of them writes this exact same shape:
+    // one driverReviews/{bookingId} doc, a few rating fields on the source
+    // booking/application doc, and this same users/{driverId} aggregate
+    // credit, all inside one Firestore transaction).
+    //
+    // Deliberately self-contained — neither function below reads any OTHER
+    // document via get()/exists(). Earlier versions of this rule cross-
+    // checked the review against its source booking (get() on bookings/
+    // schoolBookings/workApplications/errandApplications) and used the
+    // int()/double() cast functions for exact arithmetic equality; both
+    // repeatedly produced "Missing or insufficient permissions" here and
+    // were never fully provable without a live Firestore rules simulator.
+    // The booking-ownership/completion/not-already-rated checks are still
+    // fully enforced — just client-side, inside each submit*Rating
+    // transaction (which re-reads the booking fresh from the server before
+    // writing, never trusting its caller's in-memory copy) — the same
+    // client-trust boundary this file already accepts elsewhere for
+    // transaction-run writes (see the schoolTrips seat-booking comment
+    // above). What still IS enforced here, server-side, unconditionally:
+    // the caller can only ever be the review's own passenger, can never
+    // rate themselves, the rating is a plain 1-5 integer, and a driver's
+    // aggregate can only ever move by exactly one valid 1-5 rating with
+    // no other field touched.
+    // ---------------------------------------------------------------
+    function isValidDriverReview(reviewId) {
+      let data = request.resource.data;
+      return data.bookingId == reviewId &&
+        data.category in ["personal_ride", "school", "roadside", "work", "errands"] &&
+        data.passengerId == request.auth.uid &&
+        data.driverId is string && data.driverId != "" &&
+        data.driverId != request.auth.uid &&
+        data.rating is int && data.rating >= 1 && data.rating <= 5;
+    }
+
+    function isValidDriverRatingCredit(userId) {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      let oldCount = oldData.get("ratingCount", 0);
+      let oldSum = oldData.get("ratingSum", 0);
+      let delta = newData.ratingSum - oldSum;
+      return isSignedIn() &&
+        request.auth.uid != userId &&
+        newData.diff(oldData).affectedKeys()
+          .hasOnly(["ratingAverage", "ratingCount", "ratingSum", "updatedAt"]) &&
+        newData.ratingCount == oldCount + 1 &&
+        delta >= 1 && delta <= 5 &&
+        newData.ratingAverage >= 0 && newData.ratingAverage <= 5;
+    }
+
+    // ---------------------------------------------------------------
     // users/{userId}
     // ---------------------------------------------------------------
     match /users/{userId} {
@@ -82,24 +137,27 @@ service cloud.firestore {
       ) || (
         // A passenger who just rated THIS user as their driver credits
         // exactly one new rating onto the running-average fields — see
-        // submitSchoolBookingRating (schoolTripsLib.ts) and
-        // submitRideRating (rideBookingLib.ts), which both write here as
-        // one step of the same rating transaction that creates the
-        // driverReviews doc and marks the booking rated. Never touches
-        // name/role/phone/verification/anything else about the profile,
-        // and the increment is bounded to a single valid 1-5 star value —
-        // this can't be used to overwrite or reset another user's profile.
-        isSignedIn() &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(["ratingCount", "ratingSum", "ratingAverage", "updatedAt"]) &&
-        request.resource.data.ratingCount == resource.data.get("ratingCount", 0) + 1 &&
-        (request.resource.data.ratingSum - resource.data.get("ratingSum", 0)) >= 1 &&
-        (request.resource.data.ratingSum - resource.data.get("ratingSum", 0)) <= 5 &&
-        request.resource.data.ratingAverage >= 0 &&
-        request.resource.data.ratingAverage <= 5
+        // isValidDriverRatingCredit above and every submit*Rating function
+        // across app/booking/ (rideBookingLib.ts, schoolTripsLib.ts,
+        // bookings.tsx, roadside-help/roadsideLib.ts, work-errand/
+        // workErrandLib.ts), which all write here as one step of the same
+        // rating transaction that creates the matching driverReviews/
+        // {bookingId} doc and marks the booking rated. Never touches
+        // name/role/phone/verification/anything else about the profile.
+        isValidDriverRatingCredit(userId)
       );
 
       allow delete: if isAdmin() && request.auth.uid != userId;
+
+      // users/{userId}/savedFormValues/{docId} — a driver's own remembered
+      // car model/color/plate/price suggestions (see
+      // app/driver/create/savedFormValuesLib.ts). Strictly private: only
+      // the owning driver (never another signed-in user, never an
+      // unauthenticated request) can read or write it — nothing here is
+      // ever shown to anyone else.
+      match /savedFormValues/{docId} {
+        allow read, write: if isSelf(userId);
+      }
     }
 
     // ---------------------------------------------------------------
@@ -155,8 +213,15 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    // See isValidDriverReview above — reviewId must equal the bookingId
+    // being rated (this is what makes a duplicate rating attempt a `create`
+    // on an already-existing doc, rejected before any field is even
+    // inspected), the review must be for a real completed booking the
+    // caller actually owns, and it's immutable once created.
     match /driverReviews/{reviewId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidDriverReview(reviewId);
+      allow update, delete: if false;
     }
 
     match /notifications/{notificationId} {
@@ -309,26 +374,53 @@ service cloud.firestore {
           request.resource.data.verificationStatus == "expired"
         ) ||
         (
+          // Finish Trip stamps completedAt on EACH affected booking (not
+          // just the schoolTrips doc) — the rating gate reads
+          // completedAtSeconds off the booking itself (bookings.tsx /
+          // MySchoolTripsSection.tsx), never off the trip. Omitting
+          // "completedAt" here previously denied the whole batch.update in
+          // updateSchoolTripStatus (ride-navigation.tsx) the moment a trip
+          // had any still-booked passenger — every write in a Firestore
+          // batch must independently satisfy this rule, so one denied
+          // field in ANY of the affected schoolBookings docs failed the
+          // ENTIRE batch, including the schoolTrips write that preceded it.
           resource.data.driverId == request.auth.uid &&
           request.resource.data.driverId == resource.data.driverId &&
           request.resource.data.passengerId == resource.data.passengerId &&
           request.resource.data.tripId == resource.data.tripId &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             "tripStatus", "status", "finishedByDriver", "needsPassengerRating",
-            "ratingSubmitted", "rating", "updatedAt"
+            "ratingSubmitted", "rating", "completedAt", "updatedAt"
           ]) &&
           request.resource.data.tripStatus in
             ["booked", "driver_on_way", "arrived_pickup", "completed"] &&
           (request.resource.data.status == resource.data.status || request.resource.data.status == "completed")
         ) ||
         (
+          // Passenger submits their own post-trip rating — only once
+          // (resource.data.ratingSubmitted must not already be true) and
+          // only once the trip actually completed. Ownership/completion/
+          // duplicate-prevention for the review itself is fully verified
+          // by isValidDriverReview on the driverReviews/{bookingId} create
+          // in the SAME transaction — not re-checked here via exists(),
+          // since plain get()/exists() in a security rule reflects the
+          // state as it was BEFORE this transaction's own writes, so a
+          // review being created in this very transaction would never be
+          // visible here yet (that would make this branch impossible to
+          // satisfy, not a real safeguard).
           resource.data.passengerId == request.auth.uid &&
           request.resource.data.passengerId == resource.data.passengerId &&
           request.resource.data.driverId == resource.data.driverId &&
           request.resource.data.tripId == resource.data.tripId &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(["rating", "ratingSubmitted", "needsPassengerRating", "updatedAt"]) &&
-          request.resource.data.ratingSubmitted == true
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+            ["rating", "reviewComment", "ratingSubmitted", "needsPassengerRating", "ratedAt", "updatedAt"]
+          ) &&
+          resource.data.get("ratingSubmitted", false) != true &&
+          resource.data.tripStatus == "completed" &&
+          resource.data.status == "completed" &&
+          request.resource.data.ratingSubmitted == true &&
+          request.resource.data.rating is int &&
+          request.resource.data.rating >= 1 && request.resource.data.rating <= 5
         ) ||
         (
           resource.data.driverId == request.auth.uid &&

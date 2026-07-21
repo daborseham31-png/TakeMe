@@ -35,9 +35,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "TakeMe uses your location while the app is open to find roadside help near you, set your pickup location for rides, and show rides starting near your current location.",
-          "isAndroidBackgroundLocationEnabled": true,
-          "isAndroidForegroundServiceEnabled": true
+          "locationWhenInUsePermission": "TakeMe uses your location while the app is open to find roadside help near you, set your pickup location for rides, and show rides starting near your current location."
         }
       ],
       [
