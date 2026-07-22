@@ -1506,6 +1506,7 @@
     "unreadOverflow": "+99",
     "chatFallbackTitle": "محادثة",
     "noMessagesYetSayHello": "لا توجد رسائل بعد. قل مرحبًا 👋",
-    "typeMessagePlaceholder": "اكتب رسالة…"
+    "typeMessagePlaceholder": "اكتب رسالة…",
+    "tabTitle": "الرسائل"
   }
 }

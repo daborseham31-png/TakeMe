@@ -22,15 +22,14 @@ import {
 
 import { useTranslation } from "react-i18next";
 
-import { auth, db } from "../firebase";
+import { auth, db } from "../../firebase";
 import {
   ChatUser,
   clearAllConversations,
   hideConversation,
   openConversation,
   searchUsers,
-} from "./chat/chatLib";
-import { useLanguage } from "./i18n/LanguageProvider";
+} from "../chat/chatLib";
 
 type Conversation = {
   id: string;
@@ -64,7 +63,6 @@ const formatTime = (seconds: number) => {
 
 export default function MessagesScreen() {
   const { t } = useTranslation();
-  const { isRTL } = useLanguage();
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -222,11 +220,6 @@ export default function MessagesScreen() {
   return (
     <SafeAreaView style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
-          <Text style={styles.backText}>{t("common.back")}</Text>
-        </Pressable>
-
         <View style={styles.headerRow}>
           <View style={styles.header}>
             <Ionicons name="chatbubbles" size={26} color="#F58220" />
@@ -362,13 +355,6 @@ export default function MessagesScreen() {
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#FBF7F1" },
   scroll: { padding: 20, paddingTop: 50, paddingBottom: 40 },
-  backButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 16,
-  },
-  backText: { color: "#7C5F46", fontWeight: "800", fontSize: 15 },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",

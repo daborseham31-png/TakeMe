@@ -1487,6 +1487,7 @@
     "unreadOverflow": "99+",
     "chatFallbackTitle": "Chat",
     "noMessagesYetSayHello": "No messages yet. Say hello 👋",
-    "typeMessagePlaceholder": "Type a message…"
+    "typeMessagePlaceholder": "Type a message…",
+    "tabTitle": "Messages"
   }
 }

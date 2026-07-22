@@ -1492,6 +1492,7 @@
     "unreadOverflow": "99+",
     "chatFallbackTitle": "צ'אט",
     "noMessagesYetSayHello": "אין עדיין הודעות. אמור שלום 👋",
-    "typeMessagePlaceholder": "הקלד הודעה…"
+    "typeMessagePlaceholder": "הקלד הודעה…",
+    "tabTitle": "הודעות"
   }
 }
