@@ -3,7 +3,7 @@ import { Tabs } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
-import { View } from "react-native";
+import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
@@ -68,6 +68,46 @@ function BookingsTabIcon({
   );
 }
 
+// Numeric badge (same shape as home.tsx's old top-bar icon badges) shown
+// over the Messages tab icon while there are unread chat messages.
+function MessagesTabIcon({
+  color,
+  size,
+  unreadCount,
+}: {
+  color: string;
+  size: number;
+  unreadCount: number;
+}) {
+  return (
+    <View>
+      <Ionicons name="chatbubble-ellipses" size={size} color={color} />
+      {unreadCount > 0 ? (
+        <View
+          style={{
+            position: "absolute",
+            top: -4,
+            right: -8,
+            minWidth: 16,
+            height: 16,
+            borderRadius: 8,
+            paddingHorizontal: 3,
+            backgroundColor: "#DC2626",
+            alignItems: "center",
+            justifyContent: "center",
+            borderWidth: 1.5,
+            borderColor: "#FFFFFF",
+          }}
+        >
+          <Text style={{ color: "#FFFFFF", fontSize: 9, fontWeight: "900" }}>
+            {unreadCount > 99 ? "99+" : unreadCount}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 export default function TabLayout() {
   const { t } = useTranslation();
   const { language } = useLanguage();
@@ -75,6 +115,7 @@ export default function TabLayout() {
   const [hasPassengerAttention, setHasPassengerAttention] = useState(false);
   const [hasDriverAttention, setHasDriverAttention] = useState(false);
   const hasActiveRide = hasPassengerAttention || hasDriverAttention;
+  const [unreadChats, setUnreadChats] = useState(0);
 
   useEffect(() => {
     languageRef.current = language;
@@ -134,6 +175,45 @@ export default function TabLayout() {
     };
   }, []);
 
+  // Live unread chat count for the Messages tab icon badge — single
+  // array-contains filter, index-free (moved here from home.tsx's old
+  // top-bar chat icon, now that Messages is its own tab).
+  useEffect(() => {
+    let unsubChats: (() => void) | null = null;
+
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      unsubChats?.();
+      unsubChats = null;
+
+      if (!user) {
+        setUnreadChats(0);
+        return;
+      }
+
+      unsubChats = onSnapshot(
+        query(
+          collection(db, "conversations"),
+          where("participants", "array-contains", user.uid),
+        ),
+        (snap) => {
+          const total = snap.docs.reduce((sum, d) => {
+            const data = d.data();
+            const hidden: string[] = data.hiddenFor || [];
+            if (hidden.includes(user.uid)) return sum;
+            return sum + (data.unreadCount?.[user.uid] || 0);
+          }, 0);
+          setUnreadChats(total);
+        },
+        () => setUnreadChats(0),
+      );
+    });
+
+    return () => {
+      unsubChats?.();
+      unsubAuth();
+    };
+  }, []);
+
   return (
     <Tabs
       screenOptions={{
@@ -161,6 +241,16 @@ export default function TabLayout() {
               size={size}
               hasActive={hasActiveRide}
             />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="messages"
+        options={{
+          title: t("messages.tabTitle"),
+          tabBarIcon: ({ color, size }) => (
+            <MessagesTabIcon color={color} size={size} unreadCount={unreadChats} />
           ),
         }}
       />

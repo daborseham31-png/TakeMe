@@ -56,7 +56,21 @@ const logoImg = require("../../assets/images/logo.jpeg");
 
 type FilterKey = "all" | FeedCategory;
 
-const FILTER_KEYS: FilterKey[] = ["all", "personal", "school", "schoolTrip", "work", "errand"];
+// "school" is one visible chip covering BOTH the legacy driverRoutes school
+// category and the newer schoolTrips-collection category — selecting it
+// reveals a second inline row (all / outbound / return / round trip) above
+// the rides list rather than a second separate top-level chip. See
+// schoolDirectionFilter.
+const FILTER_KEYS: FilterKey[] = ["all", "personal", "school", "work", "errand"];
+
+type SchoolDirectionFilter = "all" | "outbound" | "return" | "round";
+
+const SCHOOL_DIRECTION_OPTIONS: { key: SchoolDirectionFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "common.all" },
+  { key: "outbound", labelKey: "schoolTrip.outboundOnly" },
+  { key: "return", labelKey: "schoolTrip.returnOnly" },
+  { key: "round", labelKey: "schoolTrip.roundTrip" },
+];
 
 const FILTER_ICONS: Record<FilterKey, keyof typeof Ionicons.glyphMap> = {
   all: "apps-outline",
@@ -72,8 +86,6 @@ export default function HomeScreen() {
   const { isRTL } = useLanguage();
   const [unreadHelp, setUnreadHelp] = useState(0);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
-  // Unread chat messages across all of the user's conversations.
-  const [unreadChats, setUnreadChats] = useState(0);
   const [checkingDriver, setCheckingDriver] = useState(false);
 
   // --- "Trips near you" feed --------------------------------------------
@@ -92,6 +104,8 @@ export default function HomeScreen() {
     requestPermission: requestLocationPermission,
   } = useCurrentLocation();
   const [mode, setMode] = useState<RideDisplayMode>("nearby");
+  const [schoolDirectionFilter, setSchoolDirectionFilter] =
+    useState<SchoolDirectionFilter>("all");
 
   // Ticks once a minute (plus on refresh/focus) purely to force expired
   // rides out of visibleFeedItems below — never re-fetches from Firestore.
@@ -152,24 +166,18 @@ export default function HomeScreen() {
     };
   }, []);
 
-  // Live unread notifications + unread chat messages for the signed-in user.
-  // Both use single-filter queries → index-free.
+  // Live unread notifications for the signed-in user — single-filter query,
+  // index-free. (Unread chat count now lives on the Messages tab icon
+  // itself, in (tabs)/_layout.tsx, since chat moved off this screen.)
   useEffect(() => {
     let unsubNotifs: (() => void) | null = null;
-    let unsubChats: (() => void) | null = null;
-
-    const cleanup = () => {
-      unsubNotifs?.();
-      unsubChats?.();
-      unsubNotifs = unsubChats = null;
-    };
 
     const unsubAuth = onAuthStateChanged(auth, (user) => {
-      cleanup();
+      unsubNotifs?.();
+      unsubNotifs = null;
 
       if (!user) {
         setUnreadNotifs(0);
-        setUnreadChats(0);
         return;
       }
 
@@ -184,27 +192,10 @@ export default function HomeScreen() {
         },
         () => setUnreadNotifs(0),
       );
-
-      unsubChats = onSnapshot(
-        query(
-          collection(db, "conversations"),
-          where("participants", "array-contains", user.uid),
-        ),
-        (snap) => {
-          const total = snap.docs.reduce((sum, d) => {
-            const data = d.data();
-            const hidden: string[] = data.hiddenFor || [];
-            if (hidden.includes(user.uid)) return sum;
-            return sum + (data.unreadCount?.[user.uid] || 0);
-          }, 0);
-          setUnreadChats(total);
-        },
-        () => setUnreadChats(0),
-      );
     });
 
     return () => {
-      cleanup();
+      unsubNotifs?.();
       unsubAuth();
     };
   }, []);
@@ -293,12 +284,33 @@ export default function HomeScreen() {
       const base =
         filter === "all"
           ? feedItems
-          : feedItems.filter((item) => item.category === filter);
+          : filter === "school"
+            ? feedItems.filter(
+                (item) => item.category === "school" || item.category === "schoolTrip",
+              )
+            : feedItems.filter((item) => item.category === filter);
 
-      return base.filter((item) => !isRideExpired(item));
+      // Direction sub-filter, school only. "all" is the default, unrestricted
+      // view; "outbound"/"return" narrow to exactly one direction (legacy
+      // "school" items carry no direction at all, so they only ever show
+      // under "all" — see homeFeedLib.ts); "round" keeps only schoolTrip legs
+      // that were created together with their outbound/return counterpart
+      // (linkedTripId set — see homeFeedLib.ts's FeedItem.linkedTripId).
+      const directionFiltered =
+        filter !== "school" || schoolDirectionFilter === "all"
+          ? base
+          : schoolDirectionFilter === "round"
+            ? base.filter((item) => !!item.linkedTripId)
+            : base.filter(
+                (item) =>
+                  item.direction ===
+                  (schoolDirectionFilter === "outbound" ? "to_school" : "from_school"),
+              );
+
+      return directionFiltered.filter((item) => !isRideExpired(item));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [feedItems, filter, expiryTick],
+    [feedItems, filter, schoolDirectionFilter, expiryTick],
   );
 
   const itemsWithDistance = useMemo(
@@ -479,25 +491,6 @@ export default function HomeScreen() {
               <View style={styles.iconBadge}>
                 <Text style={styles.iconBadgeText}>
                   {unreadHelp > 99 ? "99+" : unreadHelp}
-                </Text>
-              </View>
-            ) : null}
-          </Pressable>
-
-          <Pressable
-            style={styles.iconButton}
-            onPress={() => router.push("/messages" as any)}
-            hitSlop={8}
-          >
-            <Ionicons
-              name="chatbubble-ellipses-outline"
-              size={22}
-              color="#7C5F46"
-            />
-            {unreadChats > 0 ? (
-              <View style={styles.iconBadge}>
-                <Text style={styles.iconBadgeText}>
-                  {unreadChats > 99 ? "99+" : unreadChats}
                 </Text>
               </View>
             ) : null}
@@ -803,6 +796,38 @@ export default function HomeScreen() {
             );
           }}
         />
+
+        {filter === "school" ? (
+          <FlatList
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            data={SCHOOL_DIRECTION_OPTIONS}
+            keyExtractor={(option) => option.key}
+            contentContainerStyle={styles.schoolDirectionRow}
+            renderItem={({ item: option }) => {
+              const optionActive = schoolDirectionFilter === option.key;
+
+              return (
+                <Pressable
+                  style={[
+                    styles.schoolDirectionChip,
+                    optionActive && styles.schoolDirectionChipActive,
+                  ]}
+                  onPress={() => setSchoolDirectionFilter(option.key)}
+                >
+                  <Text
+                    style={[
+                      styles.schoolDirectionChipText,
+                      optionActive && styles.schoolDirectionChipTextActive,
+                    ]}
+                  >
+                    {t(option.labelKey)}
+                  </Text>
+                </Pressable>
+              );
+            }}
+          />
+        ) : null}
 
         {feedLoading ? (
           <View style={styles.feedLoadingBox}>
@@ -1270,6 +1295,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   filterChipTextActive: {
+    color: "#FFFFFF",
+  },
+  schoolDirectionRow: {
+    gap: 8,
+    paddingBottom: 10,
+    paddingTop: 2,
+  },
+  schoolDirectionChip: {
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  schoolDirectionChipActive: {
+    backgroundColor: "#F58220",
+    borderColor: "#F58220",
+  },
+  schoolDirectionChipText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 12.5,
+  },
+  schoolDirectionChipTextActive: {
     color: "#FFFFFF",
   },
   feedLoadingBox: {

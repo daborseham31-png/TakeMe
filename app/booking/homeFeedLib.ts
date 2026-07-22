@@ -79,6 +79,13 @@ export type FeedItem = {
   // normalizeSchoolTripItem below and TripFeedCard.tsx's badge).
   direction: "to_school" | "from_school" | "";
 
+  // schoolTrip category only — set when this leg was created together with
+  // its outbound/return counterpart (see createSchoolRoundTrip in
+  // schoolTripsLib.ts), used by Home's "Round trip" direction filter to
+  // distinguish an actual linked pair from a single unlinked leg. Always
+  // null for every other category.
+  linkedTripId: string | null;
+
   fromLocationId: string;
   toLocationId: string;
   locationId: string;
@@ -234,6 +241,7 @@ const normalizeDriverRouteItem = (id: string, data: any): FeedItem | null => {
     carColor: data.carColor || "",
     carPlateLast3: getLast3Digits(data.carPlate || ""),
     direction: "",
+    linkedTripId: null,
 
     fromLocationId: data.fromLocationId || "",
     toLocationId: data.toLocationId || "",
@@ -298,6 +306,7 @@ const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
     carColor: "",
     carPlateLast3: "",
     direction: "",
+    linkedTripId: null,
 
     fromLocationId: "",
     toLocationId: "",
@@ -371,6 +380,7 @@ const normalizeErrandJobItem = (id: string, data: any): FeedItem | null => {
     carColor: "",
     carPlateLast3: "",
     direction: "",
+    linkedTripId: null,
 
     fromLocationId: "",
     toLocationId: "",
@@ -455,6 +465,7 @@ const normalizeSchoolTripItem = (id: string, data: any): FeedItem | null => {
     // normalizeSchoolTripDirection in schoolTripsLib.ts for how an
     // unrecognized/legacy raw value is resolved.
     direction: normalizeSchoolTripDirection(data.direction),
+    linkedTripId: data.linkedTripId || null,
 
     fromLocationId: "",
     toLocationId: "",

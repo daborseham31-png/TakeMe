@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
   },
   languagePill: {
     position: "absolute",
-    top: 16,
+    top: 55,
     right: 20,
     flexDirection: "row",
     alignItems: "center",
