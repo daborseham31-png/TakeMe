@@ -29,8 +29,12 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../firebase";
-import MySchoolTripsSection from "../booking/school/MySchoolTripsSection";
+import useMySchoolRows, {
+  SchoolDriverRow,
+  SchoolPassengerRow,
+} from "../booking/school/useMySchoolRows";
 import {
+  BookingBucket,
   BookingItem,
   cancelGeneralBooking,
   canStartTrip,
@@ -38,8 +42,13 @@ import {
   DriverCollection,
   DriverTripItem,
   getCategoryMeta,
+  getDriverTripBucket,
+  getDriverTripStatus,
   getGeneralBookingCancelBlockedReason,
+  getPassengerTripBucket,
+  getPassengerTripStatus,
   getStartTripBlockedReason,
+  getTripTimestamp,
   isCompletedItem,
   markCompleted,
   normalizeBooking,
@@ -59,12 +68,13 @@ import {
   RIDE_STATUS_LABEL,
   RideBooking,
   RideStatus,
-  startRide,
+  startRideInProgress,
   submitRideRating,
 } from "../booking/rideBookingLib";
 import {
   acceptRequest,
   arriveJob,
+  beginJobTrip,
   cancelApplication,
   cancelBlockedReason,
   enrichApplicationWithCustomerAge,
@@ -173,7 +183,16 @@ const enrichRideWithRouteDetails = async (ride: RideBooking) => {
 // shared sortMyBookings() helper can read `.date`/`.time`/`.status`/
 // `.tripStatus` straight off it with no per-category special-casing.
 type TaggedRide = RideBooking & { _kind: "ride" };
-type TaggedTrip = DriverTripItem & { _kind: "trip" };
+// activeBookingCount is real evidence of booking (see tagTrip below), never
+// derived from available/remaining seats. waitingForBooking is the ONE
+// shared "zero active bookings, not yet completed" flag read by both the
+// card (Mark as Completed / "Waiting for booking" label) and
+// getBookingBucket (Unbooked Trips), so the two can never disagree.
+type TaggedTrip = DriverTripItem & {
+  _kind: "trip";
+  activeBookingCount: number;
+  waitingForBooking: boolean;
+};
 type TaggedBooking = BookingItem & { _kind: "booking" };
 // NormalizedApplication has no `.time` field (it uses `.startTime`) — alias
 // it here so the generic date/time sort helpers work unchanged.
@@ -182,10 +201,33 @@ type TaggedApplication = NormalizedApplication & {
   time: string;
 };
 
-type CombinedRow = TaggedRide | TaggedTrip | TaggedBooking | TaggedApplication;
+// School (new-style) rows come pre-tagged from useMySchoolRows — see its
+// SchoolPassengerRow/SchoolDriverRow types.
+type CombinedRow =
+  | TaggedRide
+  | TaggedTrip
+  | TaggedBooking
+  | TaggedApplication
+  | SchoolPassengerRow
+  | SchoolDriverRow;
 
 const tagRide = (r: RideBooking): TaggedRide => ({ ...r, _kind: "ride" });
-const tagTrip = (t: DriverTripItem): TaggedTrip => ({ ...t, _kind: "trip" });
+// Real active-booking evidence — driverRoutes/errandJobs "trip" rows only
+// ever reach here with zero bookings by construction (booked ones are
+// filtered out of driverTrips upstream, see the comment there); workJobs
+// keeps its own real acceptedWorkersCount counter even while still open for
+// more workers. A trip already manually marked "completed" is never
+// "waiting for booking" regardless of activeBookingCount.
+const tagTrip = (t: DriverTripItem): TaggedTrip => {
+  const activeBookingCount = t.collectionName === "workJobs" ? (t.acceptedWorkersCount ?? 0) : 0;
+
+  return {
+    ...t,
+    _kind: "trip",
+    activeBookingCount,
+    waitingForBooking: t.status !== "completed" && activeBookingCount === 0,
+  };
+};
 const tagBooking = (b: BookingItem): TaggedBooking => ({
   ...b,
   _kind: "booking",
@@ -197,79 +239,32 @@ const tagApplication = (a: NormalizedApplication): TaggedApplication => ({
 });
 
 // ---------------------------------------------------------------------------
-// Driver tab ONLY: classifies each row into "Booked & Active" vs
-// "Created — Waiting for Booking". The passenger tab is never split — every
-// passenger row is a real booking by construction, so this classification
-// simply doesn't apply there.
-//
-// ride/booking/application rows only ever exist because someone actually
-// booked or applied for something (there is no "unclaimed" version of any
-// of these three) — they always belong in "Booked & Active". Only "trip"
-// rows (the driver's own driverRoutes/workJobs/errandJobs listing) can go
-// either way.
+// Driver tab ONLY: a "trip" row (the driver's own driverRoutes/workJobs/
+// errandJobs listing) is the only kind that can ever be "waiting for
+// booking" — ride/booking/application rows only ever exist because someone
+// actually booked or applied for something (there is no "unclaimed" version
+// of any of these three), so tagTrip's waitingForBooking is never computed
+// for them.
 //
 // IMPORTANT: `status` on a normalized DriverTripItem is NEVER usable as
 // booking evidence — normalizeDriverTrip (bookingsLib.ts) collapses every
 // non-completed driverRoutes/workJobs/errandJobs document to status
 // "ongoing" regardless of whether anyone booked/accepted it (a freshly
 // created, never-booked route has the exact same "ongoing" status as one
-// with a passenger). Classifying on status here previously caused every
-// unbooked created listing to show up as "Booked & Active". Real evidence
-// only ever comes from a matching document elsewhere:
-//   - driverRoutes: a `bookings` doc whose routeId matches (bookedRouteIds)
-//   - workJobs: acceptedWorkersCount > 0 on the job itself (kept as ONE
-//     card even while still open for more workers — never split/duplicated)
-//   - errandJobs: an accepted-or-further workApplications/errandApplications
-//     doc whose sourceId matches (bookedJobSourceIds) — errand has no
-//     capacity concept, so once accepted the original listing is dropped
-//     from `driverTrips` entirely in favor of the application row, and never
-//     reaches this classifier as a "trip" row at all.
-// By the time a "trip" row reaches this function it is therefore guaranteed
-// to have no real booking evidence unless acceptedWorkersCount says so.
+// with a passenger). Real evidence only ever comes from a matching document
+// elsewhere — driverRoutes: a `bookings` doc whose routeId matches
+// (bookedRouteIds); workJobs: an accepted-or-further workApplications doc
+// whose sourceId matches (bookedWorkJobIds); errandJobs: an
+// accepted-or-further errandApplications doc whose sourceId matches
+// (bookedErrandJobIds). All three: once booked, the original listing is
+// dropped from `driverTrips` entirely in favor of the application/booking
+// row, so the same real-world assignment is never rendered as two cards —
+// and never reaches tagTrip as a "trip" row at all once booked.
+// By the time a "trip" row reaches tagTrip it is therefore guaranteed to
+// have no real booking evidence (activeBookingCount is always 0, except
+// workJobs' own acceptedWorkersCount mirror, which is also guaranteed 0 by
+// the same filtering).
 // ---------------------------------------------------------------------------
-const isTripBookedOrActive = (t: DriverTripItem): boolean => {
-  if (isCompletedItem(t)) return true;
-
-  const acceptedWorkersCount =
-    typeof t.acceptedWorkersCount === "number" ? t.acceptedWorkersCount : 0;
-
-  return acceptedWorkersCount > 0;
-};
-
-type DriverBucket = "upcoming" | "inProgress" | "completed";
-
-const IN_PROGRESS_TRIP_STATUSES = ["on_the_way", "driver_on_way", "arrived", "arrived_pickup", "in_progress"];
-
-// One 3-way classification (Upcoming / In Progress / Completed) across every
-// row shape the driver tab combines — never a per-category split. A row's
-// real status/tripStatus is the only signal; category/collection never
-// affects which bucket it lands in.
-const getDriverBucket = (row: CombinedRow): DriverBucket => {
-  if (row._kind === "ride") {
-    if (row.status === "completed" || row.status === "cancelled") return "completed";
-    if (IN_PROGRESS_TRIP_STATUSES.includes(row.status)) return "inProgress";
-    return "upcoming";
-  }
-
-  if (row._kind === "trip") {
-    // A driver-posted listing not yet booked by anyone has no live-tracking
-    // status of its own — it's either still open (upcoming) or completed.
-    return row.status === "completed" ? "completed" : "upcoming";
-  }
-
-  if (row._kind === "application") {
-    if (row.status === "completed" || row.status === "rejected" || row.status === "cancelled") {
-      return "completed";
-    }
-    if (IN_PROGRESS_TRIP_STATUSES.includes(row.status)) return "inProgress";
-    return "upcoming";
-  }
-
-  // row._kind === "booking" (covers personal/school-legacy/delivery/roadside)
-  if (row.status === "completed" || row.status === "cancelled") return "completed";
-  if (IN_PROGRESS_TRIP_STATUSES.includes(String(row.tripStatus))) return "inProgress";
-  return "upcoming";
-};
 
 export default function BookingsScreen() {
   const { t } = useTranslation();
@@ -284,12 +279,23 @@ export default function BookingsScreen() {
 
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [tab, setTab] = useState<Tab>("passenger");
-  const [driverBucketTab, setDriverBucketTab] = useState<DriverBucket>("upcoming");
-  // Reported by MySchoolTripsSection (a separate render tree) for whichever
-  // bucket is currently selected — see its onBucketCountChange comment.
-  const [schoolTripBucketCount, setSchoolTripBucketCount] = useState(0);
+  // Shared by both Passenger and Driver — one Upcoming/In Progress/Completed
+  // tab row above the single merged list (see getBookingBucket).
+  const [bucketTab, setBucketTab] = useState<BookingBucket>("upcoming");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+
+  // Ticks once a minute purely to force a Waiting-for-booking trip whose
+  // departure time has just passed out of that section and into Expired —
+  // No bookings automatically, without waiting on some unrelated Firestore
+  // update or user interaction to trigger a re-render — same pattern as
+  // home.tsx's expiryTick. Never re-fetches anything.
+  const [unbookedExpiryTick, setUnbookedExpiryTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setUnbookedExpiryTick(Date.now()), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Deep-link from a notification ("open the driver tab, find this pending
   // request, scroll to it and flash it briefly").
@@ -300,6 +306,14 @@ export default function BookingsScreen() {
   const mainScrollRef = useRef<ScrollView>(null);
   const scrollOffsetRef = useRef(0);
   const appCardRefs = useRef<Record<string, View | null>>({});
+
+  // Horizontal status-tab bar — independent from the vertical page scroll
+  // above (a nested horizontal ScrollView inside a vertical one already
+  // gets its own gesture in React Native, no extra wiring needed).
+  const bucketScrollRef = useRef<ScrollView>(null);
+  const bucketScrollOffsetRef = useRef(0);
+  const bucketScrollViewportWidthRef = useRef(0);
+  const bucketButtonLayoutsRef = useRef<Record<string, { x: number; width: number }>>({});
 
   const [bookings, setBookings] = useState<BookingItem[]>([]);
   const [driverRoadside, setDriverRoadside] = useState<BookingItem[]>([]);
@@ -326,8 +340,8 @@ export default function BookingsScreen() {
 
   // Set only from a tapped rating notification (see the params effect below)
   // — the ONLY way the rating modal opens on its own now. Cleared the moment
-  // this component (or MySchoolTripsSection, for new-style school trips) has
-  // had its one shot at finding + opening the matching booking, so it never
+  // this component (or useMySchoolRows, for new-style school trips) has had
+  // its one shot at finding + opening the matching booking, so it never
   // fires again on a later re-render.
   const [pendingRatingBookingId, setPendingRatingBookingId] = useState<
     string | null
@@ -364,6 +378,13 @@ export default function BookingsScreen() {
   const [rebookTime, setRebookTime] = useState("");
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+
+  const school = useMySchoolRows({
+    tab,
+    uid,
+    pendingRatingBookingId,
+    onConsumePendingRating: () => setPendingRatingBookingId(null),
+  });
 
   useEffect(() => {
     return onAuthStateChanged(auth, (user) => {
@@ -687,17 +708,23 @@ const subscribe = (
     });
   };
 
+// Only a CANCELLED booking is ignored here — a cancelled booking is not a
+// real active passenger booking, so the original route listing must reappear
+// (and, once it has zero active bookings left, land in Unbooked Trips — see
+// getBookingBucket). A completed booking still counts: the trip already
+// happened, so the listing stays represented by that completed booking card
+// rather than reappearing as a separate "unbooked" row for the same trip.
 const bookedRouteIds = useMemo(() => {
   const ids = new Set<string>();
 
   driverRoadside.forEach((b) => {
-    if (b.routeId) {
+    if (b.routeId && b.status !== "cancelled") {
       ids.add(b.routeId);
     }
   });
 
   driverRides.forEach((r) => {
-    if (r.routeId) {
+    if (r.routeId && r.status !== "cancelled") {
       ids.add(r.routeId);
     }
   });
@@ -710,12 +737,20 @@ const bookedRouteIds = useMemo(() => {
   // arrived, completed...), the job is effectively taken by exactly one
   // customer. The accepted application already renders its own card, so the
   // original errandJobs listing must be dropped here to avoid a duplicate
-  // "still waiting" card for a job that's actually in progress.
+  // "still waiting" card for a job that's actually in progress. A cancelled
+  // (or still-pending/rejected) application is not a real active booking —
+  // the listing must reappear so it can correctly land in Unbooked Trips
+  // once it has zero active bookings (see getBookingBucket).
   const bookedErrandJobIds = useMemo(() => {
     const ids = new Set<string>();
 
     asProviderErrand.forEach((a) => {
-      if (a.sourceId && a.status !== "pending" && a.status !== "rejected") {
+      if (
+        a.sourceId &&
+        a.status !== "pending" &&
+        a.status !== "rejected" &&
+        a.status !== "cancelled"
+      ) {
         ids.add(a.sourceId);
       }
     });
@@ -723,11 +758,39 @@ const bookedRouteIds = useMemo(() => {
     return ids;
   }, [asProviderErrand]);
 
+  // Once ANY worker has accepted a job (or is further along — on the way,
+  // in progress, completed...), that worker's own accepted-assignment
+  // application card already shows the detailed Start/Finish flow for it —
+  // the published workJobs listing card becomes a duplicate of the exact
+  // same real-world assignment and must not render alongside it. Matched by
+  // application.sourceId === job.id (the real relationship the application
+  // was created from — see acceptRequest in workErrandLib.ts), never by
+  // title/location/date. A cancelled (or still-pending/rejected)
+  // application is not a real active booking — the listing must reappear so
+  // it can correctly land in Unbooked Trips once it has zero active
+  // bookings (see getDriverTripStatus/tagTrip's activeBookingCount).
+  const bookedWorkJobIds = useMemo(() => {
+    const ids = new Set<string>();
+
+    asProviderWork.forEach((a) => {
+      if (
+        a.sourceId &&
+        a.status !== "pending" &&
+        a.status !== "rejected" &&
+        a.status !== "cancelled"
+      ) {
+        ids.add(a.sourceId);
+      }
+    });
+
+    return ids;
+  }, [asProviderWork]);
+
   // Driver-owned listings not yet booked by anyone (school/personal routes,
-  // work jobs, errand jobs). Once a route/errand IS booked, its original
-  // listing card is hidden here in favor of the actual booking/application
-  // card. Work jobs are never excluded this way — they legitimately keep
-  // showing while still open for more workers even after some are accepted.
+  // work jobs, errand jobs). Once a route/errand/work job IS booked, its
+  // original listing card is hidden here in favor of the actual
+  // booking/application card, so the same real-world assignment is never
+  // shown as two separate cards.
   const driverTrips = useMemo(
     () =>
       [...routes, ...workJobs, ...errandJobs].filter((t) => {
@@ -739,9 +802,13 @@ const bookedRouteIds = useMemo(() => {
           return false;
         }
 
+        if (t.collectionName === "workJobs" && bookedWorkJobIds.has(t.id)) {
+          return false;
+        }
+
         return true;
       }),
-    [routes, workJobs, errandJobs, bookedRouteIds, bookedErrandJobIds],
+    [routes, workJobs, errandJobs, bookedRouteIds, bookedErrandJobIds, bookedWorkJobIds],
   );
 
   // ONE combined, chronologically sorted list per tab — School, Personal,
@@ -754,8 +821,9 @@ const bookedRouteIds = useMemo(() => {
         ...passengerRides.map(tagRide),
         ...bookings.map(tagBooking),
         ...passengerApps.map(tagApplication),
+        ...school.passengerRows,
       ]),
-    [passengerRides, bookings, passengerApps],
+    [passengerRides, bookings, passengerApps, school.passengerRows],
   );
 
   const combinedDriverRows = useMemo<CombinedRow[]>(
@@ -765,8 +833,9 @@ const bookedRouteIds = useMemo(() => {
         ...driverTrips.map(tagTrip),
         ...driverRoadside.map(tagBooking),
         ...driverApps.map(tagApplication),
+        ...school.driverRows,
       ]),
-    [driverRides, driverTrips, driverRoadside, driverApps],
+    [driverRides, driverTrips, driverRoadside, driverApps, school.driverRows],
   );
 
   // requestId -> live roadsideRequests record, so a roadside booking row can
@@ -796,37 +865,123 @@ const bookedRouteIds = useMemo(() => {
     [combinedDriverRows, q],
   );
 
-  // Already sorted by sortMyBookings (active first, nearest date first /
-  // completed last, most recent first) — filtering here just splits the
-  // list for the "Finished trips" header without a second sort call.
-  const activePassengerRows = useMemo(
-    () => filteredPassengerRows.filter((row) => !isCompletedItem(row)),
-    [filteredPassengerRows],
-  );
-  const finishedPassengerRows = useMemo(
-    () => filteredPassengerRows.filter((row) => isCompletedItem(row)),
-    [filteredPassengerRows],
+  // One shared Upcoming/In Progress/Completed(/Unbooked Trips) split, used
+  // by both Passenger and Driver tabs — never a per-category split. Already
+  // sorted by sortMyBookings (nearest-date-first / completed-last, most-
+  // recent-completed-first across every category), so filtering here just
+  // buckets the list without a second sort call, preserving date order
+  // exactly.
+  //
+  // Passenger and Driver deliberately use TWO SEPARATE classifiers, never
+  // one shared function — "In Progress" means something different for each
+  // role (see bookingsLib.ts's comment above getPassengerTripStatus).
+  // Passenger: getPassengerTripStatus/getPassengerTripBucket — driver on the
+  // way/arrived/actually in progress all read as one continuous In Progress
+  // phase, and there is no Unbooked Trips bucket at all. Driver: the
+  // stricter getDriverTripStatus/getDriverTripBucket, unchanged.
+  const rowsForTab = tab === "passenger" ? filteredPassengerRows : filteredDriverRows;
+  const getBucket = tab === "driver" ? getDriverTripBucket : getPassengerTripBucket;
+  const getEffectiveStatus = tab === "driver" ? getDriverTripStatus : getPassengerTripStatus;
+
+  const upcomingRows = useMemo(
+    () => rowsForTab.filter((row) => getBucket(row) === "upcoming"),
+    [rowsForTab, getBucket],
   );
 
-  // Three simple filters of the already-sorted filteredDriverRows
-  // (sortMyBookings already put non-completed first / nearest-date-first /
-  // completed-last across the whole list, mixing every category together —
-  // filtering here just splits it into the Upcoming/In Progress/Completed
-  // tabs without a second sort call, so date order is preserved exactly).
-  const driverUpcomingRows = useMemo(
-    () => filteredDriverRows.filter((row) => getDriverBucket(row) === "upcoming"),
-    [filteredDriverRows],
+  const inProgressRows = useMemo(
+    () => rowsForTab.filter((row) => getBucket(row) === "inProgress"),
+    [rowsForTab, getBucket],
   );
 
-  const driverInProgressRows = useMemo(
-    () => filteredDriverRows.filter((row) => getDriverBucket(row) === "inProgress"),
-    [filteredDriverRows],
+  const completedRows = useMemo(
+    () => rowsForTab.filter((row) => getBucket(row) === "completed"),
+    [rowsForTab, getBucket],
   );
 
-  const driverCompletedRows = useMemo(
-    () => filteredDriverRows.filter((row) => getDriverBucket(row) === "completed"),
-    [filteredDriverRows],
+  // Split of the Completed bucket, for BOTH roles — a cancelled trip is
+  // bucketed as "completed" (see getDriverTripBucket/getPassengerTripBucket)
+  // but is never the same thing as a successful completion, so it renders in
+  // its own clearly separated section (see the Completed tab JSX below) and
+  // is excluded from the Completed tab's own count, without adding a new
+  // main tab for either role.
+  const trulyCompletedRows = useMemo(
+    () => completedRows.filter((row) => getEffectiveStatus(row) !== "cancelled"),
+    [completedRows, getEffectiveStatus],
   );
+  const cancelledHistoryRows = useMemo(
+    () => completedRows.filter((row) => getEffectiveStatus(row) === "cancelled"),
+    [completedRows, getEffectiveStatus],
+  );
+
+  // Driver-only — a published trip listing (driverRoutes/workJobs/errandJobs
+  // "trip" row, or a School "schoolTrip" row) whose own departure date/time
+  // has passed with zero real active bookings against it (see
+  // getDriverTripBucket in bookingsLib.ts). Always empty on the passenger
+  // tab, since no passenger row kind can ever classify this way.
+  const unbookedTripsRows = useMemo(
+    () => rowsForTab.filter((row) => getBucket(row) === "unbookedTrips"),
+    [rowsForTab, getBucket],
+  );
+
+  // Two clearly separated sections within Unbooked Trips — never one mixed
+  // list. getDriverTripStatus is the exact same function that already
+  // decided this row belongs in "unbookedTrips" (see getDriverTripBucket),
+  // so which of the two sections it falls into can never disagree with why
+  // it's in this tab at all. Each section gets its OWN sort direction (see
+  // getTripTimestamp — the one shared date+time parser used everywhere else
+  // in My Bookings, so every category's differing date/time field names are
+  // already handled consistently).
+  const waitingForBookingRows = useMemo(
+    () =>
+      [...unbookedTripsRows]
+        .filter((row) => getDriverTripStatus(row) === "waitingForBooking")
+        .sort((a, b) => getTripTimestamp(a) - getTripTimestamp(b)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [unbookedTripsRows, unbookedExpiryTick],
+  );
+  const expiredNoBookingsRows = useMemo(
+    () =>
+      [...unbookedTripsRows]
+        .filter((row) => getDriverTripStatus(row) === "expiredNoBookings")
+        .sort((a, b) => getTripTimestamp(b) - getTripTimestamp(a)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [unbookedTripsRows, unbookedExpiryTick],
+  );
+
+  // "Unbooked Trips" is driver-only — if it was selected and the user
+  // switches to the Passenger tab (which never has this bucket), fall back
+  // to Upcoming rather than showing an always-empty selected tab.
+  useEffect(() => {
+    if (tab === "passenger" && bucketTab === "unbookedTrips") {
+      setBucketTab("upcoming");
+    }
+  }, [tab, bucketTab]);
+
+  // Keep the active status tab visible when it changes — only scrolls the
+  // horizontal tab bar the minimum amount needed to bring it fully into
+  // view (never forces it to the center), and only once this tab's own
+  // layout has actually been measured.
+  useEffect(() => {
+    const layout = bucketButtonLayoutsRef.current[bucketTab];
+    const viewportWidth = bucketScrollViewportWidthRef.current;
+    if (!layout || !viewportWidth) return;
+
+    const EDGE_PADDING = 12;
+    const currentOffset = bucketScrollOffsetRef.current;
+    const buttonStart = layout.x;
+    const buttonEnd = layout.x + layout.width;
+
+    let nextOffset: number | null = null;
+    if (buttonStart < currentOffset + EDGE_PADDING) {
+      nextOffset = Math.max(buttonStart - EDGE_PADDING, 0);
+    } else if (buttonEnd > currentOffset + viewportWidth - EDGE_PADDING) {
+      nextOffset = buttonEnd - viewportWidth + EDGE_PADDING;
+    }
+
+    if (nextOffset !== null) {
+      bucketScrollRef.current?.scrollTo({ x: nextOffset, animated: true });
+    }
+  }, [bucketTab, tab]);
 
   // Notification deep link: once the target combined list (whichever tab the
   // notification targeted) contains the target id, scroll to it and flash
@@ -1132,13 +1287,30 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     }
 
     runApp(a.id, async () => {
-      await startJob(a.kind, a.id, a);
+      // Work Helper only — pressing Start is the one real "this assignment
+      // has actually started" action, so it persists tripStatus
+      // "in_progress" directly (same beginJobTrip write the old, separate
+      // "Start Trip" post-arrival button already used — see
+      // handleAppStartTrip below) rather than only the "on the way"
+      // sub-step. Errand is deliberately untouched — still startJob, same
+      // on_the_way → arrived → Finish flow as before.
+      if (a.kind === "work") {
+        await beginJobTrip(a.kind, a.id, a);
+      } else {
+        await startJob(a.kind, a.id, a);
+      }
       openNavigation(a);
     });
   };
 
   const handleAppArrive = (a: NormalizedApplication) =>
     runApp(a.id, () => arriveJob(a.kind, a.id, a));
+
+  // The real "Start Trip" step, distinct from handleAppStart (which only
+  // means "began driving toward the customer"). Moves the card from
+  // Upcoming to In Progress — see getDriverTripStatus in bookingsLib.ts.
+  const handleAppStartTrip = (a: NormalizedApplication) =>
+    runApp(a.id, () => beginJobTrip(a.kind, a.id, a));
 
   const handleAppFinish = (a: NormalizedApplication) =>
     Alert.alert(
@@ -1328,13 +1500,17 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
             id: row.id,
             field,
           });
-        } else {
+        } else if (row._kind === "trip") {
           ops.push({
             collectionName: row.collectionName,
             id: row.id,
             field: "deletedForDriver",
           });
         }
+        // School rows (_kind "schoolGroup"/"schoolTrip"/"schoolWaiting") are
+        // filtered out by handleClearAllBookings before this runs — they're
+        // owned by useMySchoolRows, never bulk-hidden from here (unchanged
+        // from before this screen merged them into the shared list).
       });
 
       if (viewer === "driver") {
@@ -1368,7 +1544,15 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
   };
 
   const handleClearAllBookings = () => {
-    const rows = tab === "passenger" ? filteredPassengerRows : filteredDriverRows;
+    // School (new-style) rows are owned by useMySchoolRows — its own
+    // cancel/hide functions are the only thing that ever touches them, same
+    // as before this screen merged them into the shared list. Clear All
+    // only ever bulk-hides the ride/booking/application/trip kinds it
+    // already knows how to write to (see runClearAllBookings below).
+    const rows = (tab === "passenger" ? filteredPassengerRows : filteredDriverRows).filter(
+      (r) =>
+        r._kind !== "schoolGroup" && r._kind !== "schoolTrip" && r._kind !== "schoolWaiting",
+    );
     if (rows.length === 0 || clearingAll) return;
 
     Alert.alert(
@@ -1449,7 +1633,7 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     }
 
     runApp(r.id, async () => {
-      await startRide(r.id, r);
+      await startRideInProgress(r.id, r);
       router.push({
         pathname: "/driver/ride-navigation",
         params: { id: r.id },
@@ -1883,17 +2067,17 @@ const submitRating = async () => {
 // and only for the exact booking that notification named. This effect gets
 // exactly one shot per pending id: whether or not a match is found (and
 // whether or not it's still eligible), it clears pendingRatingBookingId so
-// it can never reopen the modal again for the same tap — MySchoolTripsSection
+// it can never reopen the modal again for the same tap — useMySchoolRows
 // (new-style school trips, a separate schoolBookings collection this
-// component has no visibility into) gets the same id as a prop and runs the
-// same one-shot search independently; only one of the two will ever actually
-// find it.
+// component has no visibility into) gets the same id as a parameter and
+// runs the same one-shot search independently; only one of the two will
+// ever actually find it.
 useEffect(() => {
   if (!pendingRatingBookingId) return;
   if (tab !== "passenger") return;
   // Wait for this screen's own Firestore subscriptions to resolve at least
   // once — giving up while still loading would wrongly treat a booking that
-  // just hasn't arrived yet as "not found here, must be MySchoolTripsSection".
+  // just hasn't arrived yet as "not found here, must be useMySchoolRows".
   if (loading) return;
   if (ratingBooking || schoolRatingBooking || appRatingBooking || roadsideRatingBooking) {
     return;
@@ -1930,7 +2114,7 @@ useEffect(() => {
   }
 
   // Not one of this screen's own bookings — leave pendingRatingBookingId set
-  // so it's still passed to MySchoolTripsSection below; it clears it via
+  // so it's still passed to useMySchoolRows; it clears it via
   // onConsumePendingRating once it has had its own shot.
 }, [
   pendingRatingBookingId,
@@ -2001,7 +2185,7 @@ useEffect(() => {
     );
   };
 
-  const renderRideStatus = (status: RideStatus) => {
+  const renderRideStatus = (status: RideStatus, label?: string) => {
     const done = status === "completed";
     const dead = status === "cancelled";
     const pillStyle = done
@@ -2018,7 +2202,7 @@ useEffect(() => {
     return (
       <View style={[styles.statusPill, pillStyle]}>
         <Text style={[styles.statusText, textStyle]}>
-          {translateStatus(t, "rides", status) || RIDE_STATUS_LABEL[status]}
+          {label || translateStatus(t, "rides", status) || RIDE_STATUS_LABEL[status]}
         </Text>
       </View>
     );
@@ -2053,7 +2237,16 @@ useEffect(() => {
           </View>
 
           <View style={styles.cardTopActions}>
-            {renderRideStatus(r.status)}
+            {renderRideStatus(
+              r.status,
+              // Driver-only — RideStatus itself has no "in_progress" value
+              // (see updateTripStatus in ride-navigation.tsx), so the badge
+              // must be overridden here once the trip has actually started;
+              // Passenger's own rendering is completely untouched.
+              viewer === "driver" && r.tripStatus === "in_progress"
+                ? t("rides.tripInProgress")
+                : undefined,
+            )}
             {r.status === "completed"
               ? renderDeleteButton(() => confirmHideRideBooking(r, viewer))
               : null}
@@ -2439,16 +2632,6 @@ useEffect(() => {
               </Pressable>
             ) : null}
 
-            {!done && !usesRideNavigation ? (
-              <Pressable
-                style={styles.completeButton}
-                onPress={() => confirmComplete("bookings", b.id, t("booking.labelWord"))}
-              >
-                <Ionicons name="checkmark-done" size={17} color="#166534" />
-                <Text style={styles.completeButtonText}>{t("booking.markAsCompletedTitle")}</Text>
-              </Pressable>
-            ) : null}
-
             {!finished && tripStatus === "booked" ? (
               <>
                 <Pressable
@@ -2517,16 +2700,6 @@ useEffect(() => {
               </Pressable>
             ) : null}
 
-            {!usesRideNavigation && !done ? (
-              <Pressable
-                style={styles.completeButton}
-                onPress={() => confirmComplete("bookings", b.id, t("booking.labelWord"))}
-              >
-                <Ionicons name="checkmark-done" size={17} color="#166534" />
-                <Text style={styles.completeButtonText}>{t("booking.markAsCompletedTitle")}</Text>
-              </Pressable>
-            ) : null}
-
             {!finished && tripStatus === "booked" ? (
               <>
                 <Pressable
@@ -2554,11 +2727,16 @@ useEffect(() => {
     );
   };
 
-  const renderTripCard = (trip: DriverTripItem) => {
+  const renderTripCard = (trip: TaggedTrip) => {
     const meta = getCategoryMeta(trip.category);
     const done = trip.status === "completed";
     const daysText = trip.days.length > 0 ? trip.days.join(", ") : "";
-    const waitingForBooking = !done && !isTripBookedOrActive(trip);
+    const waitingForBooking = trip.waitingForBooking;
+    // Same distinction getDriverTripStatus uses for the Unbooked Trips
+    // bucket — future zero-booking trips read "Waiting for booking", past
+    // ones read "Expired — No bookings", never the same text once the
+    // departure time has passed.
+    const isExpiredUnbooked = waitingForBooking && getDriverTripStatus(trip) === "expiredNoBookings";
 
     return (
       <View
@@ -2578,7 +2756,11 @@ useEffect(() => {
           <View style={styles.cardTopActions}>
             {renderStatus(
               trip.status,
-              waitingForBooking ? t("booking.waitingForBookingLabel") : undefined,
+              waitingForBooking
+                ? isExpiredUnbooked
+                  ? t("booking.expiredNoBookingsLabel")
+                  : t("booking.waitingForBookingLabel")
+                : undefined,
             )}
             {done ? renderDeleteButton(() => confirmDeleteTrip(trip)) : null}
           </View>
@@ -2659,7 +2841,9 @@ useEffect(() => {
           ) : null}
         </View>
 
-{!done && !(trip.collectionName === "driverRoutes" && trip.category === "school") ? (
+{!done &&
+!waitingForBooking &&
+!(trip.collectionName === "driverRoutes" && trip.category === "school") ? (
   <Pressable
     style={styles.completeButton}
     onPress={() => confirmComplete(trip.collectionName, trip.id, t("booking.tripWord"))}
@@ -2921,6 +3105,14 @@ useEffect(() => {
 
       if (row._kind === "application") {
         return renderWithCardRef(row.id, renderApplicationCard(row, viewer));
+      }
+
+      if (
+        row._kind === "schoolGroup" ||
+        row._kind === "schoolTrip" ||
+        row._kind === "schoolWaiting"
+      ) {
+        return row.render();
       }
 
       // row._kind === "booking"
@@ -3225,6 +3417,17 @@ useEffect(() => {
             {a.status === "arrived" ? (
               <Pressable
                 style={styles.startButton}
+                onPress={() => handleAppStartTrip(a)}
+                disabled={busy}
+              >
+                <Ionicons name="play" size={16} color="#FFFFFF" />
+                <Text style={styles.startButtonText}>{t("booking.startTripButton")}</Text>
+              </Pressable>
+            ) : null}
+
+            {a.status === "in_progress" ? (
+              <Pressable
+                style={styles.startButton}
                 onPress={() => handleAppFinish(a)}
                 disabled={busy}
               >
@@ -3277,10 +3480,7 @@ useEffect(() => {
     );
   };
 
-  const isEmpty =
-    tab === "passenger"
-      ? filteredPassengerRows.length === 0
-      : filteredDriverRows.length === 0;
+  const isEmpty = rowsForTab.length === 0;
 
   return (
     <SafeAreaView style={styles.page}>
@@ -3375,16 +3575,85 @@ useEffect(() => {
           ) : null}
         </View>
 
-        <MySchoolTripsSection
-          tab={tab}
-          uid={uid}
-          pendingRatingBookingId={pendingRatingBookingId}
-          onConsumePendingRating={() => setPendingRatingBookingId(null)}
-          driverBucket={tab === "driver" ? driverBucketTab : undefined}
-          onBucketCountChange={setSchoolTripBucketCount}
-        />
+        {/* One shared Upcoming/In Progress/Completed tab row, above every
+            card, controlling all categories (School, Personal Ride,
+            Work Helper, Errands, Roadside) together — for both
+            Passenger and Driver. Unbooked Trips is a 4th, driver-only tab —
+            the Passenger tab structure otherwise stays exactly 3-way. */}
+        <View
+          style={styles.driverBucketRow}
+          onLayout={(e) => {
+            bucketScrollViewportWidthRef.current = e.nativeEvent.layout.width;
+          }}
+        >
+          <ScrollView
+            ref={bucketScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.driverBucketRowContent}
+            onScroll={(e) => {
+              bucketScrollOffsetRef.current = e.nativeEvent.contentOffset.x;
+            }}
+            scrollEventThrottle={16}
+          >
+            {(
+              [
+                { key: "upcoming", icon: "calendar-outline", rows: upcomingRows, labelKey: "booking.bucketUpcoming" },
+                { key: "inProgress", icon: "navigate-outline", rows: inProgressRows, labelKey: "booking.bucketInProgress" },
+                {
+                  key: "completed",
+                  icon: "checkmark-circle-outline",
+                  // Excludes cancelled trips for both roles — they render in
+                  // their own separated section instead (see below).
+                  rows: trulyCompletedRows,
+                  labelKey: "booking.bucketCompleted",
+                },
+                ...(tab === "driver"
+                  ? [
+                      {
+                        key: "unbookedTrips" as const,
+                        icon: "car-outline" as const,
+                        rows: unbookedTripsRows,
+                        labelKey: "booking.bucketUnbookedTrips",
+                      },
+                    ]
+                  : []),
+              ] as const
+            ).map((bucket) => {
+              const active = bucketTab === bucket.key;
 
-        {loading ? (
+              return (
+                <Pressable
+                  key={bucket.key}
+                  style={[styles.driverBucketButton, active && styles.driverBucketButtonActive]}
+                  onPress={() => setBucketTab(bucket.key)}
+                  onLayout={(e) => {
+                    bucketButtonLayoutsRef.current[bucket.key] = {
+                      x: e.nativeEvent.layout.x,
+                      width: e.nativeEvent.layout.width,
+                    };
+                  }}
+                >
+                  <Ionicons
+                    name={bucket.icon}
+                    size={15}
+                    color={active ? "#FFFFFF" : "#7C5F46"}
+                  />
+                  <Text
+                    style={[
+                      styles.driverBucketButtonText,
+                      active && styles.driverBucketButtonTextActive,
+                    ]}
+                  >
+                    {t(bucket.labelKey)} ({bucket.rows.length})
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {loading || school.loading ? (
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color="#F58220" />
           </View>
@@ -3408,87 +3677,104 @@ useEffect(() => {
                 : t("booking.bookingsEmptyHintDriver")}
             </Text>
           </View>
-        ) : tab === "passenger" ? (
-          <>
-            <View style={styles.list}>
-              {renderCombinedRows(activePassengerRows, "passenger")}
-            </View>
+        ) : bucketTab === "completed" ? (
+          (() => {
+            // Truly-completed rows, then (if any) a clearly separated
+            // "Cancelled" section below — cancelled is bucketed with
+            // Completed (see getDriverTripBucket/getPassengerTripBucket) but
+            // is never the same thing as a successful completion, and is
+            // never counted in the tab's own count above. Same treatment for
+            // both roles — no new main tab for either.
+            const primaryRows = trulyCompletedRows;
+            const cancelledRows = cancelledHistoryRows;
 
-            {finishedPassengerRows.length > 0 ? (
+            if (primaryRows.length === 0 && cancelledRows.length === 0) {
+              return <Text style={styles.sectionEmptyText}>{t("booking.noCompletedTrips")}</Text>;
+            }
+
+            return (
               <>
-                <View style={styles.sectionSeparator} />
+                {primaryRows.length > 0 ? (
+                  <View style={styles.list}>{renderCombinedRows(primaryRows, tab)}</View>
+                ) : (
+                  <Text style={styles.sectionEmptyText}>{t("booking.noCompletedTrips")}</Text>
+                )}
 
-                <View style={styles.sectionHeaderRow}>
-                  <Ionicons name="checkmark-done-outline" size={16} color="#7C5F46" />
-                  <Text style={styles.sectionHeaderText}>{t("booking.finishedTripsSection")}</Text>
-                </View>
+                {cancelledRows.length > 0 ? (
+                  <>
+                    <View style={styles.sectionSeparator} />
 
-                <View style={styles.list}>
-                  {renderCombinedRows(finishedPassengerRows, "passenger")}
-                </View>
+                    <View style={styles.sectionHeaderRow}>
+                      <Ionicons name="close-circle-outline" size={16} color="#7C5F46" />
+                      <Text style={styles.sectionHeaderText}>{t("booking.cancelledTripsSection")}</Text>
+                    </View>
+
+                    <View style={styles.list}>{renderCombinedRows(cancelledRows, tab)}</View>
+                  </>
+                ) : null}
               </>
-            ) : null}
-          </>
+            );
+          })()
+        ) : bucketTab === "unbookedTrips" ? (
+          (() => {
+            // Two clearly separated sections, never one mixed list —
+            // Waiting for booking (ascending, nearest first) above Expired —
+            // No bookings (descending, most-recently-expired first). The
+            // Expired heading only renders when that section has rows; the
+            // Waiting heading is shown whenever there's anything above it
+            // to label, so an all-expired or all-waiting tab never shows an
+            // empty/redundant heading.
+            if (waitingForBookingRows.length === 0 && expiredNoBookingsRows.length === 0) {
+              return <Text style={styles.sectionEmptyText}>{t("booking.noUnbookedTrips")}</Text>;
+            }
+
+            return (
+              <>
+                {waitingForBookingRows.length > 0 ? (
+                  <>
+                    <View style={styles.sectionHeaderRow}>
+                      <Ionicons name="hourglass-outline" size={16} color="#7C5F46" />
+                      <Text style={styles.sectionHeaderText}>
+                        {t("booking.waitingForBookingLabel")}
+                      </Text>
+                    </View>
+                    <View style={styles.list}>{renderCombinedRows(waitingForBookingRows, tab)}</View>
+                  </>
+                ) : null}
+
+                {expiredNoBookingsRows.length > 0 ? (
+                  <>
+                    {waitingForBookingRows.length > 0 ? <View style={styles.sectionSeparator} /> : null}
+
+                    <View style={styles.sectionHeaderRow}>
+                      <Ionicons name="time-outline" size={16} color="#7C5F46" />
+                      <Text style={styles.sectionHeaderText}>
+                        {t("booking.expiredNoBookingsLabel")}
+                      </Text>
+                    </View>
+                    <View style={styles.list}>{renderCombinedRows(expiredNoBookingsRows, tab)}</View>
+                  </>
+                ) : null}
+              </>
+            );
+          })()
         ) : (
-          <>
-            <View style={styles.driverBucketRow}>
-              {(
-                [
-                  { key: "upcoming", icon: "calendar-outline", rows: driverUpcomingRows, labelKey: "booking.bucketUpcoming" },
-                  { key: "inProgress", icon: "navigate-outline", rows: driverInProgressRows, labelKey: "booking.bucketInProgress" },
-                  { key: "completed", icon: "checkmark-circle-outline", rows: driverCompletedRows, labelKey: "booking.bucketCompleted" },
-                ] as const
-              ).map((bucket) => {
-                const active = driverBucketTab === bucket.key;
+          (() => {
+            const bucketRows = bucketTab === "upcoming" ? upcomingRows : inProgressRows;
 
-                return (
-                  <Pressable
-                    key={bucket.key}
-                    style={[styles.driverBucketButton, active && styles.driverBucketButtonActive]}
-                    onPress={() => setDriverBucketTab(bucket.key)}
-                  >
-                    <Ionicons
-                      name={bucket.icon}
-                      size={15}
-                      color={active ? "#FFFFFF" : "#7C5F46"}
-                    />
-                    <Text
-                      style={[
-                        styles.driverBucketButtonText,
-                        active && styles.driverBucketButtonTextActive,
-                      ]}
-                    >
-                      {t(bucket.labelKey)} ({bucket.rows.length})
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            const bucketEmptyKey =
+              bucketTab === "upcoming" ? "booking.noBookedActiveTrips" : "booking.noTripsInProgress";
 
-            {(() => {
-              const bucketRows =
-                driverBucketTab === "upcoming"
-                  ? driverUpcomingRows
-                  : driverBucketTab === "inProgress"
-                    ? driverInProgressRows
-                    : driverCompletedRows;
-
-              const bucketEmptyKey =
-                driverBucketTab === "upcoming"
-                  ? "booking.noBookedActiveTrips"
-                  : driverBucketTab === "inProgress"
-                    ? "booking.noTripsInProgress"
-                    : "booking.noCompletedTrips";
-
-              return bucketRows.length === 0 && schoolTripBucketCount === 0 ? (
-                <Text style={styles.sectionEmptyText}>{t(bucketEmptyKey)}</Text>
-              ) : (
-                <View style={styles.list}>{renderCombinedRows(bucketRows, "driver")}</View>
-              );
-            })()}
-          </>
+            return bucketRows.length === 0 ? (
+              <Text style={styles.sectionEmptyText}>{t(bucketEmptyKey)}</Text>
+            ) : (
+              <View style={styles.list}>{renderCombinedRows(bucketRows, tab)}</View>
+            );
+          })()
         )}
       </ScrollView>
+
+      {school.modals}
 
       <Modal
         visible={!!rebook}
@@ -3832,22 +4118,25 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   driverBucketRow: {
-    flexDirection: "row",
-    gap: 8,
     marginBottom: 16,
   },
+  driverBucketRowContent: {
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 2,
+  },
   driverBucketButton: {
-    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
+    minWidth: 118,
     borderWidth: 1,
     borderColor: "#E7DCD1",
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
     paddingVertical: 12,
-    paddingHorizontal: 6,
+    paddingHorizontal: 16,
   },
   driverBucketButtonActive: {
     backgroundColor: "#F58220",
@@ -3881,15 +4170,22 @@ const styles = StyleSheet.create({
   },
   cardTop: {
     flexDirection: "row",
+    flexWrap: "wrap",
     justifyContent: "space-between",
     alignItems: "center",
-    gap: 10,
+    rowGap: 6,
+    columnGap: 10,
     marginBottom: 12,
   },
+  // flexShrink lets this group (and the status pill's own text inside it)
+  // give way instead of pushing the row wider than the card on a long
+  // category label + a long status label (e.g. "Expired — No bookings")
+  // together on a narrow screen.
   cardTopActions: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    flexShrink: 1,
   },
   deleteButton: {
     width: 34,
@@ -3904,6 +4200,7 @@ const styles = StyleSheet.create({
   catChip: {
     flexDirection: "row",
     alignItems: "center",
+    flexShrink: 1,
     gap: 6,
     paddingHorizontal: 11,
     paddingVertical: 6,
@@ -3912,6 +4209,7 @@ const styles = StyleSheet.create({
   catText: {
     fontWeight: "900",
     fontSize: 13,
+    flexShrink: 1,
   },
   tripTitle: {
     fontSize: 16,
@@ -3941,6 +4239,7 @@ const styles = StyleSheet.create({
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
+    flexShrink: 1,
     gap: 5,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -3955,6 +4254,7 @@ const styles = StyleSheet.create({
   statusText: {
     fontWeight: "900",
     fontSize: 12,
+    flexShrink: 1,
   },
   statusTextOngoing: {
     color: "#B86115",
@@ -3982,7 +4282,9 @@ const styles = StyleSheet.create({
   },
   metaRow: {
     flexDirection: "row",
-    gap: 20,
+    flexWrap: "wrap",
+    rowGap: 8,
+    columnGap: 16,
     marginTop: 2,
     marginBottom: 14,
   },
@@ -3990,11 +4292,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    maxWidth: "100%",
   },
   metaText: {
     fontSize: 15,
     fontWeight: "900",
     color: "#111827",
+    flexShrink: 1,
   },
   completeButton: {
     flexDirection: "row",

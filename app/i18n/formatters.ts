@@ -131,7 +131,6 @@ const CATEGORY_LABEL_KEY: Record<string, string> = {
   school: "rideCategory.categories.school.title",
   personal: "rideCategory.categories.personal.title",
   personal_ride: "rideCategory.categories.personal.title",
-  delivery: "booking.categoryLabels.delivery",
   errands: "booking.categoryLabels.errands",
   workErrands: "booking.categoryLabels.workErrands",
   roadside: "booking.categoryLabels.roadside",

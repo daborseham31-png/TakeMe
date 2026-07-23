@@ -8,7 +8,7 @@
 //
 // Deliberately excluded: Roadside Help (passenger-initiated requests, not
 // driver-created listings — doesn't fit "available trips/services to
-// discover"), and Delivery (not one of the four categories asked for).
+// discover").
 //
 // Firestore reads: this mirrors the exact same "read the whole collection,
 // filter client-side" pattern already used by driverresults.tsx (driverRoutes),
@@ -197,7 +197,7 @@ const normalizeDriverRouteItem = (id: string, data: any): FeedItem | null => {
     (d) => d.remainingSeats > 0 && !isDateTimeExpired(d.date, d.time),
   );
 
-  const date = data.tripDate || data.deliveryDate || "";
+  const date = data.tripDate || "";
 
   if (isWeekly) {
     if (availableWeeklyDays.length === 0) return null;

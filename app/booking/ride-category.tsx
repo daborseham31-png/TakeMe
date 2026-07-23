@@ -42,13 +42,6 @@ const categories: Category[] = [
     color: "#EC4899",
   },
   {
-    key: "delivery",
-    titleKey: "rideCategory.categories.delivery.title",
-    descKey: "rideCategory.categories.delivery.desc",
-    icon: "cube-outline",
-    color: "#A855F7",
-  },
-  {
     key: "help",
     titleKey: "rideCategory.categories.help.title",
     descKey: "rideCategory.categories.help.desc",
@@ -64,7 +57,6 @@ export default function RideCategoryScreen() {
 school: "/booking/school",
 workErrands: "/booking/work-errand",
       personal: "/personal-ride",
-      delivery: "/item-delivery",
       help: "/booking/roadside-help",
     };
 

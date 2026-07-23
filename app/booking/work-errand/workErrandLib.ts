@@ -50,6 +50,7 @@ export type FlowStatus =
   | "accepted"
   | "on_the_way"
   | "arrived"
+  | "in_progress"
   | "completed"
   | "rejected"
   | "cancelled";
@@ -703,6 +704,36 @@ export const arriveJob = async (
   });
 };
 
+// The real "Start Trip" action, distinct from startJob (which only means
+// "began driving toward the customer") — this is what actually moves the
+// job into Driver My Bookings' In Progress tab (see getDriverTripStatus in
+// bookingsLib.ts, which reads this same tripStatus). Only available once
+// the driver has arrived; Finish now requires this to have run first (see
+// bookings.tsx's renderApplicationCard).
+export const beginJobTrip = async (
+  kind: WorkErrandKind,
+  id: string,
+  data: NormalizedApplication,
+) => {
+  await updateDoc(doc(db, COLLECTION[kind], id), {
+    status: "in_progress" as FlowStatus,
+    tripStatus: "in_progress",
+    tripStartedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await notify({
+    receiverId: data.customerId,
+    type: "trip_in_progress",
+    title: kind === "work" ? "Work started" : "Errand started",
+    message: kind === "work" ? "Your work has started." : "Your errand has started.",
+    applicationId: id,
+    kind,
+    category: data.category,
+    status: "in_progress",
+  });
+};
+
 export const finishJob = async (
   kind: WorkErrandKind,
   id: string,
@@ -858,6 +889,7 @@ export const toDateTime = (dateYMD: string, timeHM: string): Date | null => {
 const UNCANCELLABLE: FlowStatus[] = [
   "on_the_way",
   "arrived",
+  "in_progress",
   "completed",
   "rejected",
   "cancelled",
@@ -1365,6 +1397,7 @@ export const STATUS_LABEL: Record<FlowStatus, string> = {
   accepted: "Accepted / Upcoming",
   on_the_way: "On the way",
   arrived: "Arrived",
+  in_progress: "In progress",
   completed: "Completed",
   rejected: "Rejected",
   cancelled: "Cancelled",

@@ -65,15 +65,6 @@ const categories: Category[] = [
     background: "#FFF2E8",
     route: "/driver/create/errand",
   },
-  {
-    key: "delivery",
-    labelKey: "driverCreate.itemDeliveryLabel",
-    descriptionKey: "driverCreate.itemDeliveryDesc",
-    icon: "cube-outline",
-    color: "#A855F7",
-    background: "#F4EAFE",
-    route: "/driver/create/delivery",
-  },
 ];
 
 export default function AddDriverRouteScreen() {

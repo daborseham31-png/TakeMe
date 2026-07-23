@@ -82,7 +82,7 @@ export const normalizeSchoolTripDirection = (value: any): SchoolTripDirection =>
 };
 
 // The ONE place a direction badge's display text is derived — reused by
-// MySchoolTripsSection.tsx (booking/trip cards) and TripFeedCard.tsx (Home
+// useMySchoolRows.tsx (booking/trip cards) and TripFeedCard.tsx (Home
 // feed cards) instead of each screen keeping its own copy. Never shows a
 // combined "outbound and return" label — every card this labels represents
 // exactly one leg (see AGENTS.md's school-trip direction-badge spec).
@@ -1803,6 +1803,14 @@ export const verifyPassengerCodeAndStartTrip = async (
       );
     }
 
+    // The driver's own published trip listing (Driver My Bookings' card is
+    // built from THIS document, never from an individual passenger's
+    // booking — see useMySchoolRows.tsx's driverRows) must be read here,
+    // before any writes in this transaction, so it can be synced in the
+    // same atomic commit as the booking below.
+    const tripRef = doc(db, SCHOOL_TRIPS_COLLECTION, booking.tripId);
+    const tripSnap = await transaction.get(tripRef);
+
     const nowTs = serverTimestamp();
 
     transaction.update(bookingRef, {
@@ -1817,6 +1825,33 @@ export const verifyPassengerCodeAndStartTrip = async (
       tripStartedNotificationSent: true,
       updatedAt: nowTs,
     });
+
+    // Sync the trip the moment its FIRST passenger actually starts — this
+    // is the one place Driver My Bookings reads to classify Upcoming vs
+    // In Progress (getDriverTripStatus in bookingsLib.ts), so without this
+    // write the driver's own card stayed stuck on "arrived_pickup" forever
+    // even after the real trip had started. Guarded to only fire once (the
+    // trip's own tripStatus must still be "arrived_pickup") so a second or
+    // third passenger verifying on the same shared trip never re-stamps or
+    // issues a redundant write.
+    //
+    // IMPORTANT: only tripStatus/updatedAt — never tripStartedAt here. The
+    // schoolTrips security rule's driver-lifecycle update shape (this is a
+    // driver-initiated write, driverId == request.auth.uid) only allows
+    // ["tripStatus", "trackingEnabled", "driverLocation",
+    // "driverLocationUpdatedAt", "driverOnWayAt", "arrivedPickupAt",
+    // "completedAt", "finishedByDriver", "status", "updatedAt"] — adding
+    // tripStartedAt here would fail that rule and abort this ENTIRE
+    // transaction (including the booking update above), since every write
+    // in a transaction must independently satisfy its own document's rule.
+    // tripStartedAt is already correctly stamped on the booking above,
+    // which is the only place any part of this app ever reads it from.
+    if (tripSnap.exists() && tripSnap.data()?.tripStatus === "arrived_pickup") {
+      transaction.update(tripRef, {
+        tripStatus: "in_progress" as TripTrackingStatus,
+        updatedAt: nowTs,
+      });
+    }
 
     // Authorizes this exact passenger to read the trip's shared live
     // location (tripLocations/{tripId} — one doc per car, several

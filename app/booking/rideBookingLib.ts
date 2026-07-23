@@ -342,6 +342,50 @@ export const startRide = async (bookingId: string, booking: RideBooking) => {
   });
 };
 
+// The Driver My Bookings card's own "Start Ride" button (bookings.tsx —
+// handleRideStart) calls THIS, not startRide above — pressing it is the one
+// real "the ride has actually started" action for Personal Ride, so it must
+// persist tripStatus "in_progress" directly in one write, not just the
+// "driver is on the way" sub-step. `.status` is set to "arrived" (the last
+// non-terminal RideStatus value — RideStatus itself has no "in_progress")
+// so getRideCancelBlockedReason's existing `status !== "booked"` check still
+// correctly blocks cancellation once started, and trackingEnabled is set
+// true immediately so live GPS sharing begins right away instead of waiting
+// on an intermediate "arrived at pickup" step that this simplified flow
+// skips entirely.
+export const startRideInProgress = async (bookingId: string, booking: RideBooking) => {
+  if (!canStartTrip(booking)) {
+    throw new Error(
+      getStartTripBlockedReason(booking) ||
+        i18n.t("booking.startTripOnlyOnTripDate"),
+    );
+  }
+
+  await updateDoc(doc(db, "bookings", bookingId), {
+    status: "arrived" as RideStatus,
+    tripStatus: "in_progress" as TripTrackingStatus,
+    trackingEnabled: true,
+    needsPassengerRating: false,
+    driverOnWayAt: serverTimestamp(),
+    arrivedPickupAt: serverTimestamp(),
+    tripStartedAt: serverTimestamp(),
+    startedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await notify({
+    receiverId: booking.passengerId,
+    type: "ride_trip_in_progress",
+    title: "Trip started",
+    message: "Your trip has started",
+    applicationId: bookingId,
+    bookingId,
+    category: RIDE_CATEGORY,
+    status: "in_progress",
+    targetTab: "passenger",
+  });
+};
+
 export const arriveRide = async (bookingId: string, booking: RideBooking) => {
   await updateDoc(doc(db, "bookings", bookingId), {
     status: "arrived",

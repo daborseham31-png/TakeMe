@@ -2,7 +2,7 @@
 // The ONE shared "remember what I typed last time" system for driver trip
 // creation forms — car model, car color, plate number, price. Used by every
 // screen under app/driver/create/ (RideForm.tsx for Personal Ride + weekly
-// School, SchoolTripForm.tsx for one-time School, delivery.tsx, work.tsx,
+// School, SchoolTripForm.tsx for one-time School, work.tsx,
 // errand.tsx) instead of each screen inventing its own suggestion list.
 //
 // Storage: one doc per driver, users/{uid}/savedFormValues/profile — a
