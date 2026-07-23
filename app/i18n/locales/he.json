@@ -1065,7 +1065,13 @@
     "dayNoLongerAvailable": "לנהג זה כבר אין זמינות ביום {{day}}.",
     "dayNotEnoughSeats": "אין מספיק מקומות ביום {{day}}. יש לבחור נהג אחר.",
     "notEnoughSeatsAvailable": "אין מספיק מקומות זמינים. יש לבחור נהג אחר.",
-    "finishedTripsSection": "נסיעות שהסתיימו"
+    "finishedTripsSection": "נסיעות שהסתיימו",
+    "bucketUpcoming": "קרובות",
+    "bucketInProgress": "בביצוע",
+    "bucketCompleted": "הושלמו",
+    "noTripsInProgress": "אין כרגע נסיעות בביצוע.",
+    "noCompletedTrips": "אין עדיין נסיעות שהושלמו.",
+    "cannotCancelTripWithinFiveHours": "אי אפשר לבטל את הנסיעה פחות מ-5 שעות לפני היציאה."
   },
   "school": {
     "headerTitle": "נסיעת בית ספר",
@@ -1185,7 +1191,6 @@
     "allowsPets": "מאפשר חיות מחמד?",
     "schoolName": "שם בית הספר",
     "enterSchoolName": "הזן את שם בית הספר או האוניברסיטה",
-    "exactDestinationOptional": "יעד מדויק (אופציונלי)",
     "enterExactDestination": "הזן את הבניין, האוניברסיטה או הציון דרך המדויק",
     "repeatMultipleDays": "חזרה על מספר ימים?",
     "travelDate": "תאריך הנסיעה",
@@ -1267,7 +1272,8 @@
     "categoriesLabel": "קטגוריות",
     "imageQualityNote": "איכות התמונה: {{quality}}. לתוצאות הטובות ביותר השתמש בתמונה ברורה ומוארת היטב.",
     "languagesYouSpeak": "השפות שאתה דובר",
-    "verifyAndContinue": "אמת והמשך"
+    "verifyAndContinue": "אמת והמשך",
+    "exactDestination": "יעד מדויק"
   },
   "bitPayment": {
     "openBitAndCopy": "פתח את Bit והעתק מספר",

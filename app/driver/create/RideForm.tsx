@@ -7,6 +7,7 @@ import {
   Pressable,
   SafeAreaView,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -14,6 +15,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
+import { getCategoryMeta } from "../../booking/bookingsLib";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
@@ -22,6 +24,7 @@ import {
   WeekDayRow,
   WeeklyDriverDay,
 } from "../../booking/weeklyBookingLib";
+import { translateCategoryLabel } from "../../i18n/formatters";
 import AutocompleteTextField from "../../components/AutocompleteTextField";
 import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { fetchDriverEligibility } from "../driverEligibility";
@@ -67,6 +70,7 @@ export default function RideForm({
 }: Props) {
   const { t } = useTranslation();
   const { driverName, phone, driverAge, languages } = useDriverAccount();
+  const meta = getCategoryMeta(category);
 
   const canRepeat = category === "school" || category === "personal";
 
@@ -369,22 +373,30 @@ export default function RideForm({
     }
   };
 
+  const categoryBadge = (
+    <View style={[categoryStyles.categoryBadge, { backgroundColor: `${meta.color}18` }]}>
+      <Ionicons name={meta.icon} size={18} color={meta.color} />
+      <Text style={[categoryStyles.categoryBadgeText, { color: meta.color }]}>
+        {translateCategoryLabel(category, meta.label, t)}
+      </Text>
+    </View>
+  );
+
   const content = (
-    <View style={styles.card}>
+    <>
+      {/* Standalone (non-embedded) mode renders the badge in the same row
+          as the back button instead — see the two returns below. */}
+      {embedded ? <View style={categoryStyles.embeddedBadgeWrap}>{categoryBadge}</View> : null}
+
+      <View style={styles.card}>
       {!embedded ? (
         <>
-          <Text style={styles.title}>{t("driverCreate.newTripTitle")}</Text>
+          <Text style={[styles.title, categoryStyles.smallerTitle]}>
+            {t("driverCreate.newTripTitle")}
+          </Text>
           <Text style={styles.subtitle}>{t("driverCreate.newTripSubtitle")}</Text>
         </>
       ) : null}
-
-          {showPets && (
-            <YesNoField
-              label={t("driverCreate.allowsPets")}
-              value={allowsPets}
-              onValueChange={setAllowsPets}
-            />
-          )}
 
           <IsraelLocationAutocomplete
             label={t("booking.from")}
@@ -429,7 +441,7 @@ export default function RideForm({
           {category === "personal" ? (
             <>
               <Text style={styles.label}>
-                {t("driverCreate.exactDestinationOptional")}
+                {t("driverCreate.exactDestination")}
               </Text>
               <View style={styles.inputRow}>
                 <Ionicons name="flag-outline" size={18} color="#8B7B6B" />
@@ -449,6 +461,7 @@ export default function RideForm({
               label={t("driverCreate.repeatMultipleDays")}
               value={isRecurring}
               onValueChange={toggleRecurring}
+              activeColor={meta.color}
             />
           )}
 
@@ -513,6 +526,17 @@ export default function RideForm({
             />
           )}
 
+          {showPets && (
+            <YesNoField
+              label={t("driverCreate.allowsPets")}
+              value={allowsPets}
+              onValueChange={setAllowsPets}
+              activeColor={meta.color}
+            />
+          )}
+
+          <View style={{ height: 20 }} />
+
           <VehicleDetailsSection
             car={car}
             onChangeCar={setCar}
@@ -526,6 +550,7 @@ export default function RideForm({
           <Pressable
             style={[
               styles.submitButton,
+              { backgroundColor: meta.color },
               loading && styles.submitButtonDisabled,
             ]}
             onPress={handleSubmit}
@@ -535,7 +560,8 @@ export default function RideForm({
               {loading ? t("driverCreate.creating") : t("driverCreate.createTrip")}
             </Text>
           </Pressable>
-    </View>
+      </View>
+    </>
   );
 
   if (embedded) {
@@ -555,15 +581,50 @@ export default function RideForm({
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <Pressable
-          style={styles.backButton}
-          onPress={() => (onBack ? onBack() : router.back())}
-        >
-          <Ionicons name="arrow-back" size={24} color="#7C5F46" />
-        </Pressable>
+        <View style={categoryStyles.topRow}>
+          <Pressable
+            style={styles.backButton}
+            onPress={() => (onBack ? onBack() : router.back())}
+          >
+            <Ionicons name="arrow-back" size={24} color="#7C5F46" />
+          </Pressable>
+
+          {categoryBadge}
+        </View>
 
         {content}
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+const categoryStyles = StyleSheet.create({
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 12,
+  },
+  embeddedBadgeWrap: {
+    marginBottom: 12,
+  },
+  categoryBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  categoryBadgeText: {
+    fontWeight: "900",
+    fontSize: 15,
+  },
+  // Overrides shared driverHelpers.ts styles.title (fontSize 28) just here —
+  // that style is reused by every other create-trip screen, so shrinking it
+  // globally would resize titles nobody asked to change.
+  smallerTitle: {
+    fontSize: 22,
+  },
+});

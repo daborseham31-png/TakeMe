@@ -55,7 +55,13 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
-import { canStartTrip, dismissRatingNotifications, getCategoryMeta, getStartTripBlockedReason } from "../bookingsLib";
+import {
+  canStartTrip,
+  dismissRatingNotifications,
+  DRIVER_CANCEL_LOCK_HOURS,
+  getCategoryMeta,
+  getStartTripBlockedReason,
+} from "../bookingsLib";
 import { translateCategoryLabel } from "../../i18n/formatters";
 import {
   cancelRideRequest,
@@ -88,6 +94,17 @@ type Props = {
   // never runs again for the same notification tap.
   pendingRatingBookingId?: string | null;
   onConsumePendingRating?: () => void;
+  // Driver tab only — bookings.tsx's own Upcoming/In Progress/Completed tab
+  // selection, so a driver's school trips slot into the SAME 3-way split as
+  // every other category instead of running their own separate Active/
+  // Finished sections alongside it. Omitted (undefined) on the passenger
+  // tab, which keeps its own existing grouped-bookings view unchanged.
+  driverBucket?: "upcoming" | "inProgress" | "completed";
+  // How many trips actually render for the current driverBucket — lets the
+  // parent's own "no trips in this tab" empty text stay correct instead of
+  // showing even though this component (a separate render tree) still has
+  // real cards for that bucket.
+  onBucketCountChange?: (count: number) => void;
 };
 
 const directionLabel = schoolTripDirectionLabel;
@@ -108,6 +125,8 @@ export default function MySchoolTripsSection({
   uid,
   pendingRatingBookingId,
   onConsumePendingRating,
+  driverBucket,
+  onBucketCountChange,
 }: Props) {
   const { t } = useTranslation();
 
@@ -303,14 +322,26 @@ export default function MySchoolTripsSection({
     });
   }, [trips, tab]);
 
-  const activeTrips = useMemo(
-    () => sortedTrips.filter((trip) => trip.status !== "completed"),
-    [sortedTrips],
+  // Same 3-way Upcoming/In Progress/Completed split bookings.tsx uses for
+  // every other category (see getDriverBucket there) — driverBucket picks
+  // which one this render shows, so a driver's school trips slot into
+  // exactly one of the SAME outer tabs rather than running a second,
+  // separate Active/Finished grouping alongside them.
+  const tripBucket = (trip: SchoolTrip): "upcoming" | "inProgress" | "completed" => {
+    if (trip.status === "completed" || trip.status === "cancelled") return "completed";
+    if (trip.tripStatus !== "booked") return "inProgress";
+    return "upcoming";
+  };
+
+  const visibleTrips = useMemo(
+    () => sortedTrips.filter((trip) => tripBucket(trip) === driverBucket),
+    [sortedTrips, driverBucket],
   );
-  const finishedTrips = useMemo(
-    () => sortedTrips.filter((trip) => trip.status === "completed"),
-    [sortedTrips],
-  );
+
+  useEffect(() => {
+    if (tab === "driver") onBucketCountChange?.(visibleTrips.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, visibleTrips.length]);
 
   const handleCancelBooking = (booking: SchoolBooking) => {
     if (booking.status !== "booked") return;
@@ -351,7 +382,12 @@ export default function MySchoolTripsSection({
   // doc and read server-side by the onSchoolTripCancelled Cloud Function to
   // search for replacement trips for those passengers (AGENTS.md).
   const handleCancelTrip = (trip: SchoolTrip) => {
-    const blocked = getSchoolCancelBlockedReason(trip.date, trip.departureTime, trip.tripStatus);
+    const blocked = getSchoolCancelBlockedReason(
+      trip.date,
+      trip.departureTime,
+      trip.tripStatus,
+      DRIVER_CANCEL_LOCK_HOURS,
+    );
     if (blocked) {
       Alert.alert(t("booking.cannotCancelTitle"), blocked);
       return;
@@ -586,7 +622,10 @@ export default function MySchoolTripsSection({
             : null;
 
         return (
-          <View key={booking.id} style={styles.legCard}>
+          <View
+            key={booking.id}
+            style={[styles.legCard, { borderLeftWidth: 4, borderLeftColor: schoolMeta.color }]}
+          >
             <View style={styles.legHeader}>
               <View
                 style={[
@@ -738,15 +777,24 @@ export default function MySchoolTripsSection({
     const blockedReason = getStartTripBlockedReason(trip);
     const showLifecycleButton = trip.status !== "cancelled" && trip.status !== "completed";
 
-    // Same 2-hour-before-departure / "driver already left" gate as the
-    // passenger's own cancel button — see getSchoolCancelBlockedReason.
+    // Driver's own trip uses the stricter 5-hour-before-departure window
+    // (see DRIVER_CANCEL_LOCK_HOURS) — cancelling here can affect passengers
+    // already booked onto it, not just the driver's own plan.
     const cancelBlockedReason =
       trip.status === "active" || trip.status === "full"
-        ? getSchoolCancelBlockedReason(trip.date, trip.departureTime, trip.tripStatus)
+        ? getSchoolCancelBlockedReason(
+            trip.date,
+            trip.departureTime,
+            trip.tripStatus,
+            DRIVER_CANCEL_LOCK_HOURS,
+          )
         : null;
 
     return (
-      <View key={trip.id} style={styles.legCard}>
+      <View
+        key={trip.id}
+        style={[styles.legCard, { borderLeftWidth: 4, borderLeftColor: schoolMeta.color }]}
+      >
         <View style={[styles.catChip, { backgroundColor: `${schoolMeta.color}18` }]}>
           <Ionicons name={schoolMeta.icon} size={13} color={schoolMeta.color} />
           <Text style={[styles.catChipText, { color: schoolMeta.color }]}>
@@ -843,16 +891,18 @@ export default function MySchoolTripsSection({
   const hasContent =
     tab === "passenger"
       ? groupedPassengerBookings.length > 0 || visibleRequests.length > 0
-      : trips.length > 0 || bookings.length > 0;
+      : visibleTrips.length > 0;
 
   if (!hasContent) return null;
 
   return (
     <View style={styles.section}>
-      <View style={styles.sectionHeaderRow}>
-        <Ionicons name="school" size={16} color="#F58220" />
-        <Text style={styles.sectionHeaderText}>{t("schoolTrip.mySchoolTripsSection")}</Text>
-      </View>
+      {tab === "passenger" ? (
+        <View style={styles.sectionHeaderRow}>
+          <Ionicons name="school" size={16} color="#F58220" />
+          <Text style={styles.sectionHeaderText}>{t("schoolTrip.mySchoolTripsSection")}</Text>
+        </View>
+      ) : null}
 
       {tab === "passenger" && activeGroupedBookings.map(renderGroupCard)}
 
@@ -892,16 +942,7 @@ export default function MySchoolTripsSection({
           </View>
         ))}
 
-      {tab === "driver" && activeTrips.map(renderTripCard)}
-
-      {tab === "driver" && finishedTrips.length > 0 ? (
-        <View style={styles.sectionHeaderRow}>
-          <Ionicons name="checkmark-done-outline" size={16} color="#7C5F46" />
-          <Text style={styles.sectionHeaderText}>{t("schoolTrip.finishedTripsSection")}</Text>
-        </View>
-      ) : null}
-
-      {tab === "driver" && finishedTrips.map(renderTripCard)}
+      {tab === "driver" && visibleTrips.map(renderTripCard)}
 
       <Modal visible={!!ratingBooking} animationType="fade" transparent onRequestClose={closeRatingModal}>
         <View style={styles.ratingOverlay}>

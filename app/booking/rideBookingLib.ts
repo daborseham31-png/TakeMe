@@ -34,7 +34,10 @@ import i18n from "../i18n";
 import {
   canStartTrip,
   DriverLiveLocation,
+  DRIVER_CANCEL_LOCK_HOURS,
   getStartTripBlockedReason,
+  getTimeBasedCancelBlockedReason,
+  PASSENGER_CANCEL_LOCK_HOURS,
   TripTrackingStatus,
 } from "./bookingsLib";
 import { GeoPoint, notify } from "./work-errand/workErrandLib";
@@ -246,6 +249,61 @@ export const hideRideBookingForDriver = async (
       deletedForDriver: true,
       updatedAt: serverTimestamp(),
     }).catch(() => {});
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Cancellation — a real status change (never confused with hide above, which
+// only affects one side's own list). No shared capacity to restore here: a
+// personal_ride booking is a direct 1:1 driver/passenger match created by
+// createRideBooking above, not a seat taken from a shared driverRoutes pool.
+// ---------------------------------------------------------------------------
+
+export const getRideCancelBlockedReason = (
+  ride: RideBooking,
+  cancelledBy: "passenger" | "driver" = "passenger",
+  now: Date = new Date(),
+): string | null => {
+  if (ride.status !== "booked") {
+    return i18n.t("workErrand.cannotCancelAnymore");
+  }
+
+  const hours =
+    cancelledBy === "driver" ? DRIVER_CANCEL_LOCK_HOURS : PASSENGER_CANCEL_LOCK_HOURS;
+
+  return getTimeBasedCancelBlockedReason(ride, hours, now);
+};
+
+export const cancelRideBooking = async (
+  bookingId: string,
+  ride: RideBooking,
+  cancelledBy: "passenger" | "driver",
+) => {
+  const blocked = getRideCancelBlockedReason(ride, cancelledBy);
+  if (blocked) throw new Error(blocked);
+
+  await updateDoc(doc(db, "bookings", bookingId), {
+    status: "cancelled" as RideStatus,
+    updatedAt: serverTimestamp(),
+  });
+
+  const receiverId = cancelledBy === "passenger" ? ride.driverId : ride.passengerId;
+
+  if (receiverId) {
+    await notify({
+      receiverId,
+      type: "cancelled",
+      title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
+      message:
+        cancelledBy === "passenger"
+          ? `${ride.passengerName} cancelled their ride booking`
+          : `${ride.driverName} cancelled your ride booking`,
+      applicationId: bookingId,
+      bookingId,
+      category: RIDE_CATEGORY,
+      status: "cancelled",
+      targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
+    });
   }
 };
 
