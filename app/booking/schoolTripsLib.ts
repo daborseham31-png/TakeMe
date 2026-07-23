@@ -38,7 +38,12 @@ import * as Crypto from "expo-crypto";
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";
 import { normalizeToWesternDigits } from "../i18n/digits";
-import { DriverLiveLocation, TripTrackingStatus } from "./bookingsLib";
+import {
+  DRIVER_CANCEL_LOCK_HOURS,
+  DriverLiveLocation,
+  PASSENGER_CANCEL_LOCK_HOURS,
+  TripTrackingStatus,
+} from "./bookingsLib";
 import { normalizeTime, timeToMinutes } from "../driver/create/driverHelpers";
 import { calculateDistanceKm } from "./homeFeedLib";
 import { notify } from "./work-errand/workErrandLib";
@@ -1006,12 +1011,17 @@ export const createSchoolRoundTrip = async (
 // cancelSchoolTrip below before either actually writes anything.
 // ---------------------------------------------------------------------------
 
-const CANCEL_LOCK_HOURS_BEFORE_DEPARTURE = 2;
-
+// hoursBeforeDeparture defaults to the passenger's own booking-cancel
+// window (2h) — cancelSchoolTrip (the driver cancelling their own posted
+// trip) explicitly passes DRIVER_CANCEL_LOCK_HOURS (5h) instead, since that
+// can affect passengers already booked onto it, not just the driver's own
+// plan (matches the passenger/driver split in bookingsLib.ts's
+// getTimeBasedCancelBlockedReason).
 export const getSchoolCancelBlockedReason = (
   date: string,
   departureTime: string,
   tripStatus: TripTrackingStatus,
+  hoursBeforeDeparture: number = PASSENGER_CANCEL_LOCK_HOURS,
 ): string | null => {
   if (tripStatus !== "booked") {
     return i18n.t("schoolTrip.cannotCancelDriverEnRoute");
@@ -1021,12 +1031,14 @@ export const getSchoolCancelBlockedReason = (
   if (Number.isNaN(start.getTime())) return null;
 
   const lockAt = new Date(
-    start.getTime() - CANCEL_LOCK_HOURS_BEFORE_DEPARTURE * 60 * 60 * 1000,
+    start.getTime() - hoursBeforeDeparture * 60 * 60 * 1000,
   );
 
-  return Date.now() >= lockAt.getTime()
-    ? i18n.t("schoolTrip.cannotCancelWithinTwoHours")
-    : null;
+  if (Date.now() < lockAt.getTime()) return null;
+
+  return hoursBeforeDeparture >= DRIVER_CANCEL_LOCK_HOURS
+    ? i18n.t("booking.cannotCancelTripWithinFiveHours")
+    : i18n.t("schoolTrip.cannotCancelWithinTwoHours");
 };
 
 // ---------------------------------------------------------------------------
@@ -1046,7 +1058,12 @@ export const cancelSchoolTrip = async (tripId: string, reason?: string) => {
 
   if (tripSnap.exists()) {
     const trip = normalizeSchoolTrip(tripSnap.id, tripSnap.data());
-    const blocked = getSchoolCancelBlockedReason(trip.date, trip.departureTime, trip.tripStatus);
+    const blocked = getSchoolCancelBlockedReason(
+      trip.date,
+      trip.departureTime,
+      trip.tripStatus,
+      DRIVER_CANCEL_LOCK_HOURS,
+    );
     if (blocked) throw new Error(blocked);
   }
 

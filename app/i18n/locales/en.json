@@ -1061,7 +1061,13 @@
     "dayNoLongerAvailable": "This driver no longer has {{day}} available.",
     "dayNotEnoughSeats": "{{day}} no longer has enough seats. Please choose another driver.",
     "notEnoughSeatsAvailable": "Not enough seats available. Please choose another driver.",
-    "finishedTripsSection": "Finished trips"
+    "finishedTripsSection": "Finished trips",
+    "bucketUpcoming": "Upcoming",
+    "bucketInProgress": "In Progress",
+    "bucketCompleted": "Completed",
+    "noTripsInProgress": "No trips in progress right now.",
+    "noCompletedTrips": "No completed trips yet.",
+    "cannotCancelTripWithinFiveHours": "You cannot cancel this trip less than 5 hours before departure."
   },
   "school": {
     "headerTitle": "School Ride",
@@ -1181,7 +1187,6 @@
     "allowsPets": "Allows pets?",
     "schoolName": "School Name",
     "enterSchoolName": "Enter the school or university name",
-    "exactDestinationOptional": "Exact Destination (optional)",
     "enterExactDestination": "Enter the exact building, university, or landmark",
     "repeatMultipleDays": "Repeat on multiple days?",
     "travelDate": "Travel Date",
@@ -1263,7 +1268,8 @@
     "categoriesLabel": "Categories",
     "imageQualityNote": "Image quality: {{quality}}. For best results use a clear, well-lit photo.",
     "languagesYouSpeak": "Languages you speak",
-    "verifyAndContinue": "Verify & Continue"
+    "verifyAndContinue": "Verify & Continue",
+    "exactDestination": "Exact Destination"
   },
   "bitPayment": {
     "openBitAndCopy": "Open Bit & Copy Number",

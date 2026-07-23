@@ -30,15 +30,20 @@ export default function SchoolRideScreen() {
   return (
     <SafeAreaView style={styles.page}>
       <View style={{ paddingHorizontal: 16, paddingTop: 45 }}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons
-            name={isRTL ? "arrow-forward" : "arrow-back"}
-            size={24}
-            color="#7C5F46"
-          />
-        </Pressable>
+        <View style={modeStyles.headerRow}>
+          <Pressable style={modeStyles.headerBackButton} onPress={() => router.back()}>
+            <Ionicons
+              name={isRTL ? "arrow-forward" : "arrow-back"}
+              size={24}
+              color="#7C5F46"
+            />
+          </Pressable>
 
-        <Text style={styles.title}>{t("schoolTrip.createScreenTitle")}</Text>
+          <Text style={modeStyles.headerTitle}>{t("schoolTrip.createScreenTitle")}</Text>
+
+          <View style={modeStyles.headerSpacer} />
+        </View>
+
         <Text style={styles.subtitle}>{t("schoolTrip.createScreenSubtitle")}</Text>
 
         <View style={modeStyles.tabRow}>
@@ -88,6 +93,29 @@ export default function SchoolRideScreen() {
 }
 
 const modeStyles = {
+  headerRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+  },
+  headerBackButton: {
+    width: 42,
+    height: 42,
+    justifyContent: "center" as const,
+  },
+  headerTitle: {
+    flex: 1,
+    fontSize: 22,
+    fontWeight: "900" as const,
+    color: "#111827",
+    textAlign: "center" as const,
+  },
+  // Same width as headerBackButton, invisible — keeps headerTitle
+  // mathematically centered on the row instead of just centered in the
+  // leftover space next to the back button.
+  headerSpacer: {
+    width: 42,
+  },
   tabRow: {
     flexDirection: "row" as const,
     backgroundColor: "#F3ECE3",
@@ -98,7 +126,7 @@ const modeStyles = {
   },
   tab: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 7,
     borderRadius: 9,
     alignItems: "center" as const,
   },
@@ -116,6 +144,6 @@ const modeStyles = {
     fontSize: 13,
   },
   tabTextActive: {
-    color: "#F58220",
+    color: "#3B82F6",
   },
 };

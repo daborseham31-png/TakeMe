@@ -1076,7 +1076,13 @@
     "dayNoLongerAvailable": "لم يعد هذا السائق متاحًا يوم {{day}}.",
     "dayNotEnoughSeats": "لم تعد هناك مقاعد كافية يوم {{day}}. يرجى اختيار سائق آخر.",
     "notEnoughSeatsAvailable": "لا توجد مقاعد كافية متاحة. يرجى اختيار سائق آخر.",
-    "finishedTripsSection": "رحلات انتهت"
+    "finishedTripsSection": "رحلات انتهت",
+    "bucketUpcoming": "قادمة",
+    "bucketInProgress": "قيد التنفيذ",
+    "bucketCompleted": "مكتملة",
+    "noTripsInProgress": "لا توجد رحلات قيد التنفيذ الآن.",
+    "noCompletedTrips": "لا توجد رحلات مكتملة بعد.",
+    "cannotCancelTripWithinFiveHours": "لا يمكنك إلغاء هذه الرحلة قبل أقل من 5 ساعات من موعد الانطلاق."
   },
   "school": {
     "headerTitle": "رحلة مدرسية",
@@ -1196,7 +1202,6 @@
     "allowsPets": "يسمح بالحيوانات الأليفة؟",
     "schoolName": "اسم المدرسة",
     "enterSchoolName": "أدخل اسم المدرسة أو الجامعة",
-    "exactDestinationOptional": "الوجهة الدقيقة (اختياري)",
     "enterExactDestination": "أدخل المبنى أو الجامعة أو المعلَم بالضبط",
     "repeatMultipleDays": "التكرار على عدة أيام؟",
     "travelDate": "تاريخ السفر",
@@ -1278,7 +1283,8 @@
     "categoriesLabel": "الفئات",
     "imageQualityNote": "جودة الصورة: {{quality}}. للحصول على أفضل النتائج استخدم صورة واضحة وجيدة الإضاءة.",
     "languagesYouSpeak": "اللغات التي تتحدثها",
-    "verifyAndContinue": "تحقق واستمر"
+    "verifyAndContinue": "تحقق واستمر",
+    "exactDestination": "الوجهة الدقيقة"
   },
   "bitPayment": {
     "openBitAndCopy": "افتح بيت وانسخ الرقم",

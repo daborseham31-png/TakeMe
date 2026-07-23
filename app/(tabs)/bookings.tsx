@@ -32,11 +32,13 @@ import { auth, db } from "../../firebase";
 import MySchoolTripsSection from "../booking/school/MySchoolTripsSection";
 import {
   BookingItem,
+  cancelGeneralBooking,
   canStartTrip,
   dismissRatingNotifications,
   DriverCollection,
   DriverTripItem,
   getCategoryMeta,
+  getGeneralBookingCancelBlockedReason,
   getStartTripBlockedReason,
   isCompletedItem,
   markCompleted,
@@ -47,7 +49,9 @@ import {
 } from "../booking/bookingsLib";
 import {
   arriveRide,
+  cancelRideBooking,
   finishRide,
+  getRideCancelBlockedReason,
   hideRideBookingForDriver,
   hideRideBookingForPassenger,
   normalizeRideBooking,
@@ -232,10 +236,39 @@ const isTripBookedOrActive = (t: DriverTripItem): boolean => {
   return acceptedWorkersCount > 0;
 };
 
-const isDriverRowBookedOrActive = (row: CombinedRow): boolean => {
-  if (row._kind !== "trip") return true;
+type DriverBucket = "upcoming" | "inProgress" | "completed";
 
-  return isTripBookedOrActive(row);
+const IN_PROGRESS_TRIP_STATUSES = ["on_the_way", "driver_on_way", "arrived", "arrived_pickup", "in_progress"];
+
+// One 3-way classification (Upcoming / In Progress / Completed) across every
+// row shape the driver tab combines — never a per-category split. A row's
+// real status/tripStatus is the only signal; category/collection never
+// affects which bucket it lands in.
+const getDriverBucket = (row: CombinedRow): DriverBucket => {
+  if (row._kind === "ride") {
+    if (row.status === "completed" || row.status === "cancelled") return "completed";
+    if (IN_PROGRESS_TRIP_STATUSES.includes(row.status)) return "inProgress";
+    return "upcoming";
+  }
+
+  if (row._kind === "trip") {
+    // A driver-posted listing not yet booked by anyone has no live-tracking
+    // status of its own — it's either still open (upcoming) or completed.
+    return row.status === "completed" ? "completed" : "upcoming";
+  }
+
+  if (row._kind === "application") {
+    if (row.status === "completed" || row.status === "rejected" || row.status === "cancelled") {
+      return "completed";
+    }
+    if (IN_PROGRESS_TRIP_STATUSES.includes(row.status)) return "inProgress";
+    return "upcoming";
+  }
+
+  // row._kind === "booking" (covers personal/school-legacy/delivery/roadside)
+  if (row.status === "completed" || row.status === "cancelled") return "completed";
+  if (IN_PROGRESS_TRIP_STATUSES.includes(String(row.tripStatus))) return "inProgress";
+  return "upcoming";
 };
 
 export default function BookingsScreen() {
@@ -251,6 +284,10 @@ export default function BookingsScreen() {
 
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [tab, setTab] = useState<Tab>("passenger");
+  const [driverBucketTab, setDriverBucketTab] = useState<DriverBucket>("upcoming");
+  // Reported by MySchoolTripsSection (a separate render tree) for whichever
+  // bucket is currently selected — see its onBucketCountChange comment.
+  const [schoolTripBucketCount, setSchoolTripBucketCount] = useState(0);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -771,17 +808,23 @@ const bookedRouteIds = useMemo(() => {
     [filteredPassengerRows],
   );
 
-  // Both lists are simple filters of the already-sorted filteredDriverRows
+  // Three simple filters of the already-sorted filteredDriverRows
   // (sortMyBookings already put non-completed first / nearest-date-first /
-  // completed-last across the whole list — filtering preserves that
-  // relative order, so neither section needs its own separate sort call).
-  const driverActiveRows = useMemo(
-    () => filteredDriverRows.filter(isDriverRowBookedOrActive),
+  // completed-last across the whole list, mixing every category together —
+  // filtering here just splits it into the Upcoming/In Progress/Completed
+  // tabs without a second sort call, so date order is preserved exactly).
+  const driverUpcomingRows = useMemo(
+    () => filteredDriverRows.filter((row) => getDriverBucket(row) === "upcoming"),
     [filteredDriverRows],
   );
 
-  const driverCreatedRows = useMemo(
-    () => filteredDriverRows.filter((row) => !isDriverRowBookedOrActive(row)),
+  const driverInProgressRows = useMemo(
+    () => filteredDriverRows.filter((row) => getDriverBucket(row) === "inProgress"),
+    [filteredDriverRows],
+  );
+
+  const driverCompletedRows = useMemo(
+    () => filteredDriverRows.filter((row) => getDriverBucket(row) === "completed"),
     [filteredDriverRows],
   );
 
@@ -873,6 +916,10 @@ const bookedRouteIds = useMemo(() => {
   const getBookingTripLabel = (b: BookingItem) => {
     const tripStatus = (b as any).tripStatus;
 
+    if (b.status === "cancelled") {
+      return t("bookings.status.cancelled");
+    }
+
     if (b.status === "completed" || tripStatus === "completed") {
       return t("common.completed");
     }
@@ -894,24 +941,29 @@ const bookedRouteIds = useMemo(() => {
 
   const renderBookingTripStatus = (b: BookingItem) => {
     const tripStatus = (b as any).tripStatus;
-    const completed = b.status === "completed" || tripStatus === "completed";
+    const cancelled = b.status === "cancelled";
+    const completed = !cancelled && (b.status === "completed" || tripStatus === "completed");
 
     return (
       <View
         style={[
           styles.statusPill,
-          completed ? styles.statusDone : styles.statusOngoing,
+          cancelled ? styles.statusDead : completed ? styles.statusDone : styles.statusOngoing,
         ]}
       >
         <Ionicons
-          name={completed ? "checkmark-circle" : "time"}
+          name={cancelled ? "close-circle" : completed ? "checkmark-circle" : "time"}
           size={13}
-          color={completed ? "#166534" : "#B86115"}
+          color={cancelled ? "#B91C1C" : completed ? "#166534" : "#B86115"}
         />
         <Text
           style={[
             styles.statusText,
-            completed ? styles.statusTextDone : styles.statusTextOngoing,
+            cancelled
+              ? styles.statusTextDead
+              : completed
+                ? styles.statusTextDone
+                : styles.statusTextOngoing,
           ]}
         >
           {getBookingTripLabel(b)}
@@ -1416,7 +1468,54 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
 
   const handleRideFinish = (r: RideBooking) =>
     runApp(r.id, () => finishRide(r.id, r));
-    const bookingNeedsRating = (
+
+  const handleCancelRideBooking = (r: RideBooking, viewer: Tab) => {
+    const blocked = getRideCancelBlockedReason(r, viewer);
+    if (blocked) {
+      Alert.alert(t("booking.cannotCancelTitle"), blocked);
+      return;
+    }
+
+    const title =
+      viewer === "driver" ? t("schoolTrip.cancelTripButton") : t("booking.cancelBookingTitle");
+    const message =
+      viewer === "driver" ? t("schoolTrip.cancelTripConfirm") : t("booking.cancelBookingConfirm");
+
+    Alert.alert(title, message, [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: title,
+        style: "destructive",
+        onPress: () =>
+          runApp(r.id, () => cancelRideBooking(r.id, r, viewer)),
+      },
+    ]);
+  };
+
+  const handleCancelGeneralBooking = (b: BookingItem, viewer: Tab) => {
+    const blocked = getGeneralBookingCancelBlockedReason(b, viewer);
+    if (blocked) {
+      Alert.alert(t("booking.cannotCancelTitle"), blocked);
+      return;
+    }
+
+    const title =
+      viewer === "driver" ? t("schoolTrip.cancelTripButton") : t("booking.cancelBookingTitle");
+    const message =
+      viewer === "driver" ? t("schoolTrip.cancelTripConfirm") : t("booking.cancelBookingConfirm");
+
+    Alert.alert(title, message, [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: title,
+        style: "destructive",
+        onPress: () =>
+          runApp(b.id, () => cancelGeneralBooking(b.id, b, viewer)),
+      },
+    ]);
+  };
+
+  const bookingNeedsRating = (
     b: BookingItem | RideBooking | NormalizedApplication,
   ) => {
     const item: any = b;
@@ -1931,11 +2030,17 @@ useEffect(() => {
     const busy = busyId === r.id;
     const rideCanStart = canStartTrip(r);
     const rideBlockedReason = getStartTripBlockedReason(r);
+    const rideCancelBlocked =
+      r.status === "booked" ? getRideCancelBlockedReason(r, viewer) : null;
 
     return (
       <View
         key={`ride-${r.id}`}
-        style={[styles.card, r.status === "completed" && styles.cardDone]}
+        style={[
+          styles.card,
+          { borderLeftColor: meta.color },
+          r.status === "completed" && styles.cardDone,
+        ]}
       >
         <View style={styles.cardTop}>
           <View
@@ -2043,6 +2148,28 @@ useEffect(() => {
               {/* Personal Ride never shows Live Tracking — renderRideCard is
                   exclusively the personal ride pipeline (RIDE_CATEGORY). */}
 
+              {r.status === "booked" ? (
+                <>
+                  <Pressable
+                    style={[
+                      styles.cancelBookingButton,
+                      !!rideCancelBlocked && styles.cancelBookingButtonDisabled,
+                    ]}
+                    onPress={() => handleCancelRideBooking(r, viewer)}
+                    disabled={!!rideCancelBlocked}
+                  >
+                    <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+                    <Text style={styles.cancelBookingButtonText}>
+                      {t("booking.cancelBookingTitle")}
+                    </Text>
+                  </Pressable>
+
+                  {rideCancelBlocked ? (
+                    <Text style={styles.appHint}>{rideCancelBlocked}</Text>
+                  ) : null}
+                </>
+              ) : null}
+
               {r.status === "completed" && bookingNeedsRating(r) ? (
                 <Pressable
                   style={styles.primaryButton}
@@ -2083,6 +2210,24 @@ useEffect(() => {
 
                 {!rideCanStart && rideBlockedReason ? (
                   <Text style={styles.appHint}>{rideBlockedReason}</Text>
+                ) : null}
+
+                <Pressable
+                  style={[
+                    styles.cancelBookingButton,
+                    !!rideCancelBlocked && styles.cancelBookingButtonDisabled,
+                  ]}
+                  onPress={() => handleCancelRideBooking(r, viewer)}
+                  disabled={!!rideCancelBlocked}
+                >
+                  <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+                  <Text style={styles.cancelBookingButtonText}>
+                    {t("schoolTrip.cancelTripButton")}
+                  </Text>
+                </Pressable>
+
+                {rideCancelBlocked ? (
+                  <Text style={styles.appHint}>{rideCancelBlocked}</Text>
                 ) : null}
               </>
             ) : null}
@@ -2175,7 +2320,9 @@ useEffect(() => {
   const renderBookingCard = (b: BookingItem, viewer: Tab = "passenger") => {
     const meta = getCategoryMeta(b.category);
     const tripStatus = (b as any).tripStatus;
-    const done = b.status === "completed" || tripStatus === "completed";
+    const cancelled = b.status === "cancelled";
+    const done = !cancelled && (b.status === "completed" || tripStatus === "completed");
+    const finished = done || cancelled;
     const isSchool = b.category === "school";
     const isPersonalCategory = b.category === "personal";
     // School and (weekly) personal bookings both drive through the ride
@@ -2184,9 +2331,16 @@ useEffect(() => {
     const isDriverView = viewer === "driver";
     const bookingCanStart = canStartTrip(b);
     const bookingBlockedReason = getStartTripBlockedReason(b);
+    const bookingCancelBlocked =
+      !finished && tripStatus === "booked"
+        ? getGeneralBookingCancelBlockedReason(b, viewer)
+        : null;
 
     return (
-      <View key={b.id} style={[styles.card, done && styles.cardDone]}>
+      <View
+        key={b.id}
+        style={[styles.card, { borderLeftColor: meta.color }, finished && styles.cardDone]}
+      >
         <View style={styles.cardTop}>
           <View
             style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}
@@ -2199,7 +2353,7 @@ useEffect(() => {
 
           <View style={styles.cardTopActions}>
             {renderBookingTripStatus(b)}
-            {done
+            {finished
               ? renderDeleteButton(() => confirmHideGeneralBooking(b, viewer))
               : null}
           </View>
@@ -2294,6 +2448,28 @@ useEffect(() => {
                 <Text style={styles.completeButtonText}>{t("booking.markAsCompletedTitle")}</Text>
               </Pressable>
             ) : null}
+
+            {!finished && tripStatus === "booked" ? (
+              <>
+                <Pressable
+                  style={[
+                    styles.cancelBookingButton,
+                    !!bookingCancelBlocked && styles.cancelBookingButtonDisabled,
+                  ]}
+                  onPress={() => handleCancelGeneralBooking(b, viewer)}
+                  disabled={!!bookingCancelBlocked}
+                >
+                  <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+                  <Text style={styles.cancelBookingButtonText}>
+                    {t("booking.cancelBookingTitle")}
+                  </Text>
+                </Pressable>
+
+                {bookingCancelBlocked ? (
+                  <Text style={styles.appHint}>{bookingCancelBlocked}</Text>
+                ) : null}
+              </>
+            ) : null}
           </>
         ) : (
           <>
@@ -2350,6 +2526,28 @@ useEffect(() => {
                 <Text style={styles.completeButtonText}>{t("booking.markAsCompletedTitle")}</Text>
               </Pressable>
             ) : null}
+
+            {!finished && tripStatus === "booked" ? (
+              <>
+                <Pressable
+                  style={[
+                    styles.cancelBookingButton,
+                    !!bookingCancelBlocked && styles.cancelBookingButtonDisabled,
+                  ]}
+                  onPress={() => handleCancelGeneralBooking(b, viewer)}
+                  disabled={!!bookingCancelBlocked}
+                >
+                  <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+                  <Text style={styles.cancelBookingButtonText}>
+                    {t("schoolTrip.cancelTripButton")}
+                  </Text>
+                </Pressable>
+
+                {bookingCancelBlocked ? (
+                  <Text style={styles.appHint}>{bookingCancelBlocked}</Text>
+                ) : null}
+              </>
+            ) : null}
           </>
         )}
       </View>
@@ -2365,7 +2563,7 @@ useEffect(() => {
     return (
       <View
         key={`${trip.collectionName}-${trip.id}`}
-        style={[styles.card, done && styles.cardDone]}
+        style={[styles.card, { borderLeftColor: meta.color }, done && styles.cardDone]}
       >
         <View style={styles.cardTop}>
           <View
@@ -2499,11 +2697,14 @@ useEffect(() => {
     const isCompletedUnpaid =
       (b.status === "completed" || b.helpCompleted) && b.paymentStatus !== "paid";
     const isPaid = b.paymentStatus === "paid";
+    const roadsideCancelBlocked = isAccepted
+      ? getGeneralBookingCancelBlockedReason(b, viewer)
+      : null;
 
     return (
       <View
         key={`roadside-${b.id}`}
-        style={[styles.card, !isAccepted && styles.cardDone]}
+        style={[styles.card, { borderLeftColor: meta.color }, !isAccepted && styles.cardDone]}
       >
         <View style={styles.cardTop}>
           <View
@@ -2632,6 +2833,28 @@ useEffect(() => {
             <Ionicons name="star-outline" size={17} color="#FFFFFF" />
             <Text style={styles.primaryButtonText}>{t("booking.rateHelperButton")}</Text>
           </Pressable>
+        ) : null}
+
+        {isAccepted ? (
+          <>
+            <Pressable
+              style={[
+                styles.cancelBookingButton,
+                !!roadsideCancelBlocked && styles.cancelBookingButtonDisabled,
+              ]}
+              onPress={() => handleCancelGeneralBooking(b, viewer)}
+              disabled={!!roadsideCancelBlocked}
+            >
+              <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+              <Text style={styles.cancelBookingButtonText}>
+                {isDriverView ? t("schoolTrip.cancelTripButton") : t("booking.cancelBookingTitle")}
+              </Text>
+            </Pressable>
+
+            {roadsideCancelBlocked ? (
+              <Text style={styles.appHint}>{roadsideCancelBlocked}</Text>
+            ) : null}
+          </>
         ) : null}
       </View>
     );
@@ -2771,7 +2994,7 @@ useEffect(() => {
     return (
       <View
         key={`${a.kind}-app-${a.id}`}
-        style={[styles.card, (done || dead) && styles.cardDone]}
+        style={[styles.card, { borderLeftColor: meta.color }, (done || dead) && styles.cardDone]}
       >
         <View style={styles.cardTop}>
           <View
@@ -3157,6 +3380,8 @@ useEffect(() => {
           uid={uid}
           pendingRatingBookingId={pendingRatingBookingId}
           onConsumePendingRating={() => setPendingRatingBookingId(null)}
+          driverBucket={tab === "driver" ? driverBucketTab : undefined}
+          onBucketCountChange={setSchoolTripBucketCount}
         />
 
         {loading ? (
@@ -3206,39 +3431,61 @@ useEffect(() => {
           </>
         ) : (
           <>
-            <View style={styles.sectionHeaderRow}>
-              <Ionicons name="flash" size={16} color="#166534" />
-              <Text style={styles.sectionHeaderText}>{t("booking.bookedActiveSection")}</Text>
+            <View style={styles.driverBucketRow}>
+              {(
+                [
+                  { key: "upcoming", icon: "calendar-outline", rows: driverUpcomingRows, labelKey: "booking.bucketUpcoming" },
+                  { key: "inProgress", icon: "navigate-outline", rows: driverInProgressRows, labelKey: "booking.bucketInProgress" },
+                  { key: "completed", icon: "checkmark-circle-outline", rows: driverCompletedRows, labelKey: "booking.bucketCompleted" },
+                ] as const
+              ).map((bucket) => {
+                const active = driverBucketTab === bucket.key;
+
+                return (
+                  <Pressable
+                    key={bucket.key}
+                    style={[styles.driverBucketButton, active && styles.driverBucketButtonActive]}
+                    onPress={() => setDriverBucketTab(bucket.key)}
+                  >
+                    <Ionicons
+                      name={bucket.icon}
+                      size={15}
+                      color={active ? "#FFFFFF" : "#7C5F46"}
+                    />
+                    <Text
+                      style={[
+                        styles.driverBucketButtonText,
+                        active && styles.driverBucketButtonTextActive,
+                      ]}
+                    >
+                      {t(bucket.labelKey)} ({bucket.rows.length})
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
 
-            {driverActiveRows.length > 0 ? (
-              <View style={styles.list}>
-                {renderCombinedRows(driverActiveRows, "driver")}
-              </View>
-            ) : (
-              <Text style={styles.sectionEmptyText}>
-                {t("booking.noBookedActiveTrips")}
-              </Text>
-            )}
+            {(() => {
+              const bucketRows =
+                driverBucketTab === "upcoming"
+                  ? driverUpcomingRows
+                  : driverBucketTab === "inProgress"
+                    ? driverInProgressRows
+                    : driverCompletedRows;
 
-            <View style={styles.sectionSeparator} />
+              const bucketEmptyKey =
+                driverBucketTab === "upcoming"
+                  ? "booking.noBookedActiveTrips"
+                  : driverBucketTab === "inProgress"
+                    ? "booking.noTripsInProgress"
+                    : "booking.noCompletedTrips";
 
-            <View style={styles.sectionHeaderRow}>
-              <Ionicons name="create-outline" size={16} color="#B86115" />
-              <Text style={styles.sectionHeaderText}>
-                {t("booking.createdWaitingSection")}
-              </Text>
-            </View>
-
-            {driverCreatedRows.length > 0 ? (
-              <View style={styles.list}>
-                {renderCombinedRows(driverCreatedRows, "driver")}
-              </View>
-            ) : (
-              <Text style={styles.sectionEmptyText}>
-                {t("booking.nothingWaitingForBooking")}
-              </Text>
-            )}
+              return bucketRows.length === 0 && schoolTripBucketCount === 0 ? (
+                <Text style={styles.sectionEmptyText}>{t(bucketEmptyKey)}</Text>
+              ) : (
+                <View style={styles.list}>{renderCombinedRows(bucketRows, "driver")}</View>
+              );
+            })()}
           </>
         )}
       </ScrollView>
@@ -3584,10 +3831,42 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 8,
   },
+  driverBucketRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 16,
+  },
+  driverBucketButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+  },
+  driverBucketButtonActive: {
+    backgroundColor: "#F58220",
+    borderColor: "#F58220",
+  },
+  driverBucketButtonText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  driverBucketButtonTextActive: {
+    color: "#FFFFFF",
+  },
   card: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E7DCD1",
+    borderLeftWidth: 4,
+    borderLeftColor: "#E7DCD1",
     borderRadius: 20,
     padding: 16,
     shadowColor: "#000",
@@ -3732,6 +4011,26 @@ const styles = StyleSheet.create({
     color: "#166534",
     fontWeight: "900",
     fontSize: 15,
+  },
+  cancelBookingButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#F5C2C2",
+    backgroundColor: "#FEF2F2",
+    borderRadius: 14,
+    paddingVertical: 13,
+    marginTop: 8,
+  },
+  cancelBookingButtonText: {
+    color: "#B91C1C",
+    fontWeight: "900",
+    fontSize: 15,
+  },
+  cancelBookingButtonDisabled: {
+    opacity: 0.5,
   },
   primaryButton: {
     flexDirection: "row",

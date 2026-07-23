@@ -679,7 +679,8 @@
     "notificationMessagePlaceholder": "Текст уведомления",
     "sendNotificationButton": "Отправить уведомление",
     "recentlySentTitle": "Недавно отправленные",
-    "sentNotificationsEmptyHint": "Отправленные вами уведомления появятся здесь."
+    "sentNotificationsEmptyHint": "Отправленные вами уведомления появятся здесь.",
+    "sortByLabel": "Сортировать по"
   },
   "profile": {
     "tabTitle": "Профиль",
@@ -1067,7 +1068,14 @@
     "noLocationsFound": "Места не найдены",
     "dayNoLongerAvailable": "У этого водителя больше нет дня «{{day}}».",
     "dayNotEnoughSeats": "В день «{{day}}» больше нет достаточно мест. Выберите другого водителя.",
-    "notEnoughSeatsAvailable": "Недостаточно свободных мест. Выберите другого водителя."
+    "notEnoughSeatsAvailable": "Недостаточно свободных мест. Выберите другого водителя.",
+    "finishedTripsSection": "Завершённые поездки",
+    "bucketUpcoming": "Предстоящие",
+    "bucketInProgress": "В процессе",
+    "bucketCompleted": "Завершённые",
+    "noTripsInProgress": "Сейчас нет поездок в процессе.",
+    "noCompletedTrips": "Пока нет завершённых поездок.",
+    "cannotCancelTripWithinFiveHours": "Нельзя отменить эту поездку менее чем за 5 часов до отправления."
   },
   "school": {
     "headerTitle": "Школьная поездка",
@@ -1169,7 +1177,10 @@
     "continueToPayment": "Перейти к оплате",
     "rateDriverButton": "Оценить водителя",
     "startTripButton": "Начать поездку",
-    "continueTripButton": "Продолжить поездку"
+    "continueTripButton": "Продолжить поездку",
+    "cannotCancelDriverEnRoute": "Отменить больше нельзя — водитель уже в пути.",
+    "cannotCancelWithinTwoHours": "Отменить больше нельзя — до отправления осталось меньше 2 часов.",
+    "finishedTripsSection": "Завершённые поездки"
   },
   "driverCreate": {
     "newTripTitle": "Создать новую поездку",
@@ -1184,7 +1195,6 @@
     "allowsPets": "Разрешены животные?",
     "schoolName": "Название школы",
     "enterSchoolName": "Введите название школы или университета",
-    "exactDestinationOptional": "Точный пункт назначения (необязательно)",
     "enterExactDestination": "Введите точное здание, университет или ориентир",
     "repeatMultipleDays": "Повторять несколько дней?",
     "travelDate": "Дата поездки",
@@ -1266,7 +1276,8 @@
     "categoriesLabel": "Категории",
     "imageQualityNote": "Качество изображения: {{quality}}. Для лучшего результата используйте чёткое, хорошо освещённое фото.",
     "languagesYouSpeak": "Языки, на которых вы говорите",
-    "verifyAndContinue": "Подтвердить и продолжить"
+    "verifyAndContinue": "Подтвердить и продолжить",
+    "exactDestination": "Точный пункт назначения"
   },
   "bitPayment": {
     "openBitAndCopy": "Открыть Bit и скопировать номер",
@@ -1352,7 +1363,8 @@
     "onlyEmployerCanPay": "Оплатить может только работодатель, забронировавший эту работу.",
     "cannotCancelAnymore": "Это бронирование больше нельзя отменить.",
     "cannotCancelWithinHour": "Вы не можете отменить менее чем за 1 час до начала.",
-    "missingDriverId": "Отсутствует ID водителя."
+    "missingDriverId": "Отсутствует ID водителя.",
+    "cannotCancelWithinTwoHours": "Отменить нельзя менее чем за 2 часа до начала."
   },
   "roadsideHelp": {
     "subtitle": "Получите помощь при поломке автомобиля поблизости",
@@ -1491,6 +1503,7 @@
     "unreadOverflow": "99+",
     "chatFallbackTitle": "Чат",
     "noMessagesYetSayHello": "Пока нет сообщений. Поздоровайтесь 👋",
-    "typeMessagePlaceholder": "Введите сообщение…"
+    "typeMessagePlaceholder": "Введите сообщение…",
+    "tabTitle": "Сообщения"
   }
 }

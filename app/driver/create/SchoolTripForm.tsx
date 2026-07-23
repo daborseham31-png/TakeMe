@@ -13,7 +13,7 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
@@ -202,36 +202,6 @@ export default function SchoolTripForm() {
       setReturnToPlace(fromPlace);
     }
   };
-
-  const summary = useMemo(() => {
-    if (!selectedSchool || !fromAddress || !toAddress) return null;
-
-    return {
-      school: getLocalizedSchoolName(selectedSchool, language),
-      mainFrom: fromAddress,
-      mainTo: toAddress,
-      mainTime: departureTime,
-      mainPrice: price,
-      mainSeats: seats,
-      returnFrom: toAddress,
-      returnTo: returnToAddress,
-      returnTime,
-      returnPrice,
-      returnSeats,
-    };
-  }, [
-    selectedSchool,
-    language,
-    fromAddress,
-    toAddress,
-    departureTime,
-    price,
-    seats,
-    returnToAddress,
-    returnTime,
-    returnPrice,
-    returnSeats,
-  ]);
 
   const handleSubmit = async () => {
     const user = auth.currentUser;
@@ -634,41 +604,7 @@ export default function SchoolTripForm() {
         </View>
       ) : null}
 
-      {summary ? (
-        <View style={[styles.card, localStyles.summaryCard]}>
-          <Text style={localStyles.summaryTitle}>{t("schoolTrip.tripSummary")}</Text>
-
-          <Text style={localStyles.summarySchoolLine}>
-            <Ionicons name="school" size={13} color="#F58220" /> {summary.school}
-          </Text>
-
-          <View style={localStyles.summaryBlock}>
-            <Text style={localStyles.summaryLabel}>
-              {isReturnOnly ? t("schoolTrip.returnTrip") : t("schoolTrip.outboundTrip")}
-            </Text>
-            <Text style={localStyles.summaryLine}>
-              {summary.mainFrom} → {summary.mainTo}
-            </Text>
-            <Text style={localStyles.summaryLine}>
-              {summary.mainTime || "--:--"} · {summary.mainPrice || "0"} ₪ ·{" "}
-              {summary.mainSeats || "0"} {t("booking.seats")}
-            </Text>
-          </View>
-
-          {showReturnSection ? (
-            <View style={localStyles.summaryBlock}>
-              <Text style={localStyles.summaryLabel}>{t("schoolTrip.returnTrip")}</Text>
-              <Text style={localStyles.summaryLine}>
-                {summary.returnFrom} → {summary.returnTo || "…"}
-              </Text>
-              <Text style={localStyles.summaryLine}>
-                {summary.returnTime || "--:--"} · {summary.returnPrice || "0"} ₪ ·{" "}
-                {summary.returnSeats || "0"} {t("booking.seats")}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      ) : null}
+      <View style={{ height: 20 }} />
 
       <VehicleDetailsSection
         car={car}
@@ -681,7 +617,11 @@ export default function SchoolTripForm() {
       />
 
       <Pressable
-        style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+        style={[
+          styles.submitButton,
+          localStyles.publishButton,
+          loading && styles.submitButtonDisabled,
+        ]}
         onPress={handleSubmit}
         disabled={loading}
       >
@@ -722,7 +662,10 @@ const localStyles = {
     textAlign: "center" as const,
   },
   tabTextActive: {
-    color: "#F58220",
+    color: "#3B82F6",
+  },
+  publishButton: {
+    backgroundColor: "#3B82F6",
   },
   sectionHeader: {
     flexDirection: "row" as const,
@@ -757,37 +700,5 @@ const localStyles = {
     fontSize: 10.5,
     fontWeight: "900" as const,
     color: "#5B4A3A",
-  },
-  summaryCard: {
-    backgroundColor: "#FFF8F2",
-    borderColor: "#FFE2C5",
-  },
-  summaryTitle: {
-    fontSize: 16,
-    fontWeight: "900" as const,
-    color: "#111827",
-    marginBottom: 6,
-  },
-  summarySchoolLine: {
-    fontSize: 13,
-    color: "#7C5F46",
-    fontWeight: "800" as const,
-    marginBottom: 12,
-  },
-  summaryBlock: {
-    marginBottom: 10,
-  },
-  summaryLabel: {
-    fontSize: 12,
-    fontWeight: "900" as const,
-    color: "#F58220",
-    marginBottom: 4,
-    textTransform: "uppercase" as const,
-  },
-  summaryLine: {
-    fontSize: 14,
-    color: "#111827",
-    fontWeight: "700" as const,
-    marginBottom: 2,
   },
 };

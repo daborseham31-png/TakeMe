@@ -19,6 +19,7 @@ import {
   getDoc,
   getDocs,
   query,
+  runTransaction,
   serverTimestamp,
   updateDoc,
   where,
@@ -213,6 +214,49 @@ export const getStartTripBlockedReason = (booking: any): string | null => {
 };
 
 // ---------------------------------------------------------------------------
+// Shared "can this still be cancelled?" time gate, generalized for any
+// booking shape whose date/time getBookingDateYMD/getBookingTime can read.
+// Callers still layer their own status check on top of this (this function
+// only ever looks at date/time, never status).
+//
+// Two standard windows, matching the passenger/driver wording split used
+// everywhere a booking has both sides ("Cancel Booking" vs "Cancel Trip"):
+//   - PASSENGER_CANCEL_LOCK_HOURS (2h) — the passenger cancelling their own
+//     seat/booking (RideBooking, general bookings, school bookings, work/
+//     errand applications).
+//   - DRIVER_CANCEL_LOCK_HOURS (5h) — the driver cancelling a trip THEY
+//     posted (personal/school-legacy driverRoutes listings, schoolTrips) —
+//     a stricter window since cancelling here can affect passengers already
+//     booked onto it, not just the driver's own plan.
+// ---------------------------------------------------------------------------
+
+export const PASSENGER_CANCEL_LOCK_HOURS = 2;
+export const DRIVER_CANCEL_LOCK_HOURS = 5;
+
+export const getTimeBasedCancelBlockedReason = (
+  booking: any,
+  hoursBeforeDeparture: number = PASSENGER_CANCEL_LOCK_HOURS,
+  now: Date = new Date(),
+): string | null => {
+  const date = getBookingDateYMD(booking);
+  const time = getBookingTime(booking);
+  if (!date) return null;
+
+  const start = new Date(`${date}T${time || "00:00"}:00`);
+  if (Number.isNaN(start.getTime())) return null;
+
+  const lockAt = new Date(
+    start.getTime() - hoursBeforeDeparture * 60 * 60 * 1000,
+  );
+
+  if (now.getTime() < lockAt.getTime()) return null;
+
+  return hoursBeforeDeparture >= DRIVER_CANCEL_LOCK_HOURS
+    ? i18n.t("booking.cannotCancelTripWithinFiveHours")
+    : i18n.t("schoolTrip.cannotCancelWithinTwoHours");
+};
+
+// ---------------------------------------------------------------------------
 // My Bookings sort order
 //
 // ONE combined chronological order across every category (School, Personal,
@@ -229,6 +273,7 @@ export const isCompletedItem = (item: any): boolean => {
 
   return (
     status === "completed" ||
+    status === "cancelled" ||
     tripStatus === "completed" ||
     item?.completed === true
   );
@@ -626,7 +671,7 @@ export type BookingItem = {
   dayName: string;
 
   // القديم يبقى عشان الشاشات الحالية
-  status: "ongoing" | "completed";
+  status: "ongoing" | "completed" | "cancelled";
 
   // الجديد للـ live tracking
   tripStatus: TripTrackingStatus;
@@ -657,6 +702,7 @@ export type BookingItem = {
   latitude: number | null;
   longitude: number | null;
   etaMinutes: number | null;
+  passengerId: string;
   passengerName: string;
   passengerPhone: string;
   driverPhone: string;
@@ -671,9 +717,11 @@ export const normalizeBooking = (id: string, data: any): BookingItem => {
   const tripStatus = normalizeTripStatus(data.tripStatus || data.status);
 
   const status =
-    data.status === "completed" || tripStatus === "completed"
-      ? "completed"
-      : "ongoing";
+    data.status === "cancelled"
+      ? "cancelled"
+      : data.status === "completed" || tripStatus === "completed"
+        ? "completed"
+        : "ongoing";
 
   const days: string[] = Array.isArray(data.days) ? data.days : [];
   const problemTypes: string[] = Array.isArray(data.problemTypes)
@@ -747,6 +795,7 @@ export const normalizeBooking = (id: string, data: any): BookingItem => {
           ? data.location.longitude
           : null,
     etaMinutes: asNumber(data.etaMinutes),
+    passengerId: data.passengerId || "",
     passengerName: data.passengerName || "Passenger",
     passengerPhone: data.passengerPhone || "",
     driverPhone: data.driverPhone || "",
@@ -771,6 +820,125 @@ export const normalizeBooking = (id: string, data: any): BookingItem => {
       ...days,
     ]),
   };
+};
+
+// ---------------------------------------------------------------------------
+// Cancellation — a real status change (never confused with the "hide from my
+// list" helpers in (tabs)/bookings.tsx, which never touch status/tripStatus
+// or notify anyone). Covers every category that goes through the generic
+// `bookings` collection via normalizeBooking above (personal/school
+// quick+weekly bookings, item delivery, roadside) — personal_ride has its
+// own equivalent, cancelRideBooking, in rideBookingLib.ts.
+//
+// Capacity restore: only bookings created through the weekly/quick
+// driverRoutes flow (weeklyBookingLib.ts's createWeeklyBookings) hold a
+// route seat that needs restoring — mirrors that function's own decrement
+// exactly, in reverse. Roadside/delivery bookings carry no routeId at all
+// (roadsideLib.ts creates them directly, no shared capacity to give back),
+// so they fall through untouched.
+// ---------------------------------------------------------------------------
+
+export const getGeneralBookingCancelBlockedReason = (
+  booking: BookingItem,
+  cancelledBy: "passenger" | "driver" = "passenger",
+  now: Date = new Date(),
+): string | null => {
+  if (booking.status !== "ongoing") {
+    return i18n.t("workErrand.cannotCancelAnymore");
+  }
+
+  if (booking.tripStatus && booking.tripStatus !== "booked") {
+    return i18n.t("workErrand.cannotCancelAnymore");
+  }
+
+  const hours =
+    cancelledBy === "driver" ? DRIVER_CANCEL_LOCK_HOURS : PASSENGER_CANCEL_LOCK_HOURS;
+
+  return getTimeBasedCancelBlockedReason(booking, hours, now);
+};
+
+export const cancelGeneralBooking = async (
+  bookingId: string,
+  booking: BookingItem,
+  cancelledBy: "passenger" | "driver",
+) => {
+  const blocked = getGeneralBookingCancelBlockedReason(booking, cancelledBy);
+  if (blocked) throw new Error(blocked);
+
+  const bookingRef = doc(db, "bookings", bookingId);
+
+  await runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+    if (!bookingSnap.exists()) return;
+
+    const data = bookingSnap.data();
+    if (data.status === "completed" || data.status === "cancelled") return;
+
+    transaction.update(bookingRef, {
+      status: "cancelled",
+      updatedAt: serverTimestamp(),
+    });
+
+    if (!booking.routeId) return;
+
+    const routeRef = doc(db, "driverRoutes", booking.routeId);
+    const routeSnap = await transaction.get(routeRef);
+    if (!routeSnap.exists()) return;
+
+    const routeData: any = routeSnap.data();
+    const hasWeeklyTrips =
+      Array.isArray(routeData.weeklyTrips) && routeData.weeklyTrips.length > 0;
+
+    if (hasWeeklyTrips && booking.date) {
+      const weeklyTrips = [...routeData.weeklyTrips];
+      const index = weeklyTrips.findIndex((trip: any) => trip.date === booking.date);
+      if (index === -1) return;
+
+      const currentRemaining =
+        typeof weeklyTrips[index].remainingSeats === "number"
+          ? weeklyTrips[index].remainingSeats
+          : 0;
+      const totalSeats = Number(weeklyTrips[index].seats) || currentRemaining;
+
+      weeklyTrips[index] = {
+        ...weeklyTrips[index],
+        remainingSeats: Math.min(currentRemaining + (booking.seats || 1), totalSeats),
+      };
+
+      transaction.update(routeRef, { weeklyTrips, updatedAt: serverTimestamp() });
+    } else if (routeData.bookingId === bookingId) {
+      // Whole-route booking (no per-day capacity) — reopen it, mirroring
+      // the exact fields createWeeklyBookings' else-branch sets when it
+      // books this route in the first place.
+      transaction.update(routeRef, {
+        status: "active",
+        tripStatus: "booked",
+        isBooked: false,
+        available: true,
+        bookingId: null,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  });
+
+  const receiverId = cancelledBy === "passenger" ? booking.driverId : booking.passengerId;
+
+  if (receiverId) {
+    await notify({
+      receiverId,
+      type: "cancelled",
+      title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
+      message:
+        cancelledBy === "passenger"
+          ? `${booking.passengerName || "The passenger"} cancelled their booking`
+          : `${booking.driverName || "The driver"} cancelled your booking`,
+      applicationId: bookingId,
+      bookingId,
+      category: booking.category,
+      status: "cancelled",
+      targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
+    });
+  }
 };
 
 export type DriverTripItem = {
