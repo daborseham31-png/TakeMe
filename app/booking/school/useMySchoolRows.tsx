@@ -1,12 +1,12 @@
 // ---------------------------------------------------------------------------
-// "New" school trips section for My Bookings (AGENTS.md #10) — deliberately
-// a SEPARATE, self-contained block (own Firestore subscriptions, own
-// rendering) rather than merged into bookings.tsx's existing CombinedRow
-// union. That union is deeply tied to the legacy driverRoutes/bookings
-// shape (ride/booking/trip/application `_kind`s, live-tracking, rating
-// flows) — bolting a fifth shape onto it risked regressing a screen every
-// category depends on. This section is rendered inline on both the
-// passenger and driver tabs of app/(tabs)/bookings.tsx, additive only.
+// "New" school trips data + cards for My Bookings — a hook (not a rendered
+// section) so its rows can be merged into app/(tabs)/bookings.tsx's single
+// global Upcoming/In Progress/Completed list alongside every other category,
+// instead of rendering as a separate, always-first block. This is the same
+// Firestore subscriptions / grouping / cancel / rating logic that used to
+// live in the now-removed MySchoolTripsSection.tsx component — only HOW it's
+// exposed to the parent screen changed (data + render closures instead of a
+// positioned <View>), not what it fetches, computes, or renders.
 //
 // Passenger view: every schoolBookings doc for this user, grouped by
 // bookingGroupId ("School booking — Round trip" when a group has both an
@@ -25,12 +25,16 @@
 // so a passenger's own card (and rating eligibility) reads from one
 // subscription — see schoolTripsLib.ts's SchoolTrip/SchoolBooking comments
 // and ride-navigation.tsx's updateSchoolTripStatus. Rating itself is a
-// small, self-contained modal here (same reasoning as this whole file being
-// separate from bookings.tsx's shared one).
+// small, self-contained modal here (same reasoning as this file staying
+// separate from bookings.tsx's own ride/booking/application rating modal).
 //
 // Driver view: every schoolTrips doc this driver created, each with its own
 // Cancel button — cancelling one leg never touches its linked trip
 // (AGENTS.md #12, edge cases #3/#4) — plus a Start/Continue Trip button.
+// Bucket (Upcoming/In Progress/Completed/Unbooked Trips) placement is
+// decided centrally by bookingsLib.ts's getDriverTripStatus/
+// getDriverTripBucket, from each row's .status/.tripStatus/
+// .waitingForBooking — this hook never filters by bucket itself.
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
@@ -56,11 +60,14 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
 import {
+  buildSearchText,
   canStartTrip,
   dismissRatingNotifications,
   DRIVER_CANCEL_LOCK_HOURS,
   getCategoryMeta,
+  getDriverTripStatus,
   getStartTripBlockedReason,
+  IN_PROGRESS_TRIP_STATUSES,
 } from "../bookingsLib";
 import { translateCategoryLabel } from "../../i18n/formatters";
 import {
@@ -82,29 +89,60 @@ import {
   submitSchoolBookingRating,
 } from "../schoolTripsLib";
 
-type Props = {
+type Params = {
   tab: "passenger" | "driver";
   uid: string | null;
-  // Set only from a tapped rating notification whose bookingId this
-  // component's own `bookings` (SCHOOL_BOOKINGS_COLLECTION) might contain —
-  // see bookings.tsx's pendingRatingBookingId, which passes the same id down
+  // Set only from a tapped rating notification whose bookingId this hook's
+  // own `bookings` (SCHOOL_BOOKINGS_COLLECTION) might contain — see
+  // bookings.tsx's pendingRatingBookingId, which passes the same id down
   // here after failing to find it among its own ride/booking/application
-  // arrays. onConsumePendingRating tells the parent this component has had
-  // its one shot (found-and-opened or not), so it clears the id and this
-  // never runs again for the same notification tap.
+  // arrays. onConsumePendingRating tells the parent this hook has had its
+  // one shot (found-and-opened or not), so it clears the id and this never
+  // runs again for the same notification tap.
   pendingRatingBookingId?: string | null;
   onConsumePendingRating?: () => void;
-  // Driver tab only — bookings.tsx's own Upcoming/In Progress/Completed tab
-  // selection, so a driver's school trips slot into the SAME 3-way split as
-  // every other category instead of running their own separate Active/
-  // Finished sections alongside it. Omitted (undefined) on the passenger
-  // tab, which keeps its own existing grouped-bookings view unchanged.
-  driverBucket?: "upcoming" | "inProgress" | "completed";
-  // How many trips actually render for the current driverBucket — lets the
-  // parent's own "no trips in this tab" empty text stay correct instead of
-  // showing even though this component (a separate render tree) still has
-  // real cards for that bucket.
-  onBucketCountChange?: (count: number) => void;
+};
+
+export type SchoolPassengerRow =
+  | {
+      _kind: "schoolGroup";
+      id: string;
+      date: string;
+      time: string;
+      status: "booked" | "completed";
+      tripStatus: string;
+      searchText: string;
+      render: () => React.ReactNode;
+    }
+  | {
+      _kind: "schoolWaiting";
+      id: string;
+      date: string;
+      time: string;
+      status: string;
+      searchText: string;
+      render: () => React.ReactNode;
+    };
+
+export type SchoolDriverRow = SchoolTrip & {
+  _kind: "schoolTrip";
+  time: string;
+  // Real count of SchoolBooking docs with status "booked" for this tripId —
+  // never derived from availableSeats/totalSeats.
+  activeBookingCount: number;
+  // Same condition the card's own status pill uses (isSchoolTripWaitingForBooking)
+  // — read FIRST by getDriverTripStatus so this row can never simultaneously
+  // qualify for Upcoming/In Progress/Completed.
+  waitingForBooking: boolean;
+  searchText: string;
+  render: () => React.ReactNode;
+};
+
+type Result = {
+  loading: boolean;
+  passengerRows: SchoolPassengerRow[];
+  driverRows: SchoolDriverRow[];
+  modals: React.ReactNode;
 };
 
 const directionLabel = schoolTripDirectionLabel;
@@ -120,14 +158,12 @@ const trackingStatusKey = (status: SchoolBooking["tripStatus"] | SchoolTrip["tri
   return "rides.waitingForDriver";
 };
 
-export default function MySchoolTripsSection({
+export default function useMySchoolRows({
   tab,
   uid,
   pendingRatingBookingId,
   onConsumePendingRating,
-  driverBucket,
-  onBucketCountChange,
-}: Props) {
+}: Params): Result {
   const { t } = useTranslation();
 
   const [bookings, setBookings] = useState<SchoolBooking[]>([]);
@@ -204,7 +240,7 @@ export default function MySchoolTripsSection({
           },
           (error) => {
             console.log("Listener failed:", {
-              feature: "MySchoolTripsSection.driverBookings",
+              feature: "useMySchoolRows.driverBookings",
               collection: SCHOOL_BOOKINGS_COLLECTION,
               userId: uid,
               code: error.code,
@@ -220,20 +256,15 @@ export default function MySchoolTripsSection({
     return () => unsubs.forEach((unsub) => unsub());
   }, [tab, uid]);
 
-  // A leg's own timestamp — used both to order a group by its earliest leg
-  // and to order groups against each other. Invalid/missing dates sort last
-  // within whichever half (active/finished) they fall into.
-  const legTimestamp = (leg: SchoolBooking) => {
-    const parsed = new Date(`${leg.date}T${leg.departureTime || "00:00"}:00`).getTime();
-    return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
-  };
-
   // A group (round trip's outbound+return, or a single leg) counts as
   // finished only once EVERY leg is done — completed or cancelled, never
   // still "booked".
   const isGroupFinished = (legs: SchoolBooking[]) =>
     legs.every((leg) => leg.status !== "booked");
 
+  // Grouping only — sort order across groups (and against every other
+  // category) is decided once, centrally, by bookings.tsx's sortMyBookings
+  // on the tagged rows below, never here.
   const groupedPassengerBookings = useMemo(() => {
     if (tab !== "passenger") return [];
 
@@ -243,32 +274,19 @@ export default function MySchoolTripsSection({
       groups.set(key, [...(groups.get(key) || []), booking]);
     });
 
-    // One combined order: every still-open group first (nearest departure
-    // first), every finished group below all of those (most recently
-    // finished first) — never grouped/split by category, matching the same
-    // convention as sortMyBookings in bookingsLib.ts.
-    return Array.from(groups.entries())
-      .map(([groupId, legs]) => ({
-        groupId,
-        legs: legs.sort((a, b) => (a.departureTime < b.departureTime ? -1 : 1)),
-      }))
-      .sort((a, b) => {
-        const aFinished = isGroupFinished(a.legs);
-        const bFinished = isGroupFinished(b.legs);
-        if (aFinished !== bFinished) return aFinished ? 1 : -1;
-
-        const aTime = legTimestamp(a.legs[0]);
-        const bTime = legTimestamp(b.legs[0]);
-        return aFinished ? bTime - aTime : aTime - bTime;
-      });
+    return Array.from(groups.entries()).map(([groupId, legs]) => ({
+      groupId,
+      legs: legs.sort((a, b) => (a.departureTime < b.departureTime ? -1 : 1)),
+    }));
   }, [bookings, tab]);
 
   // Same one-shot targeted-open behaviour as bookings.tsx's own effect (see
-  // its comment) — this component's `bookings` (SCHOOL_BOOKINGS_COLLECTION,
+  // its comment) — this hook's `bookings` (SCHOOL_BOOKINGS_COLLECTION,
   // new-style school trips) is invisible to that parent effect, so it's
-  // given the same pendingRatingBookingId as a prop and searches its own
-  // data independently. Either this finds it or the parent already didn't —
-  // exactly one of the two ever actually contains a given bookingId.
+  // given the same pendingRatingBookingId as a parameter and searches its
+  // own data independently. Either this finds it or the parent already
+  // didn't — exactly one of the two ever actually contains a given
+  // bookingId.
   useEffect(() => {
     if (!pendingRatingBookingId) return;
     if (tab !== "passenger") return;
@@ -289,59 +307,8 @@ export default function MySchoolTripsSection({
     }
 
     onConsumePendingRating?.();
-  }, [pendingRatingBookingId, tab, loading, bookings, ratingBooking]);
-
-  // Already sorted above (active first, nearest date first / finished last,
-  // most recent first) — filtering here just splits the list for the
-  // section header without a second sort.
-  const activeGroupedBookings = useMemo(
-    () => groupedPassengerBookings.filter((g) => !isGroupFinished(g.legs)),
-    [groupedPassengerBookings],
-  );
-  const finishedGroupedBookings = useMemo(
-    () => groupedPassengerBookings.filter((g) => isGroupFinished(g.legs)),
-    [groupedPassengerBookings],
-  );
-
-  const tripTimestamp = (trip: SchoolTrip) => {
-    const parsed = new Date(`${trip.date}T${trip.departureTime || "00:00"}:00`).getTime();
-    return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
-  };
-
-  const sortedTrips = useMemo(() => {
-    if (tab !== "driver") return [];
-
-    return [...trips].sort((a, b) => {
-      const aDone = a.status === "completed";
-      const bDone = b.status === "completed";
-      if (aDone !== bDone) return aDone ? 1 : -1;
-
-      const aTime = tripTimestamp(a);
-      const bTime = tripTimestamp(b);
-      return aDone ? bTime - aTime : aTime - bTime;
-    });
-  }, [trips, tab]);
-
-  // Same 3-way Upcoming/In Progress/Completed split bookings.tsx uses for
-  // every other category (see getDriverBucket there) — driverBucket picks
-  // which one this render shows, so a driver's school trips slot into
-  // exactly one of the SAME outer tabs rather than running a second,
-  // separate Active/Finished grouping alongside them.
-  const tripBucket = (trip: SchoolTrip): "upcoming" | "inProgress" | "completed" => {
-    if (trip.status === "completed" || trip.status === "cancelled") return "completed";
-    if (trip.tripStatus !== "booked") return "inProgress";
-    return "upcoming";
-  };
-
-  const visibleTrips = useMemo(
-    () => sortedTrips.filter((trip) => tripBucket(trip) === driverBucket),
-    [sortedTrips, driverBucket],
-  );
-
-  useEffect(() => {
-    if (tab === "driver") onBucketCountChange?.(visibleTrips.length);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, visibleTrips.length]);
+  }, [pendingRatingBookingId, tab, loading, bookings, ratingBooking]);
 
   const handleCancelBooking = (booking: SchoolBooking) => {
     if (booking.status !== "booked") return;
@@ -563,6 +530,83 @@ export default function MySchoolTripsSection({
 
   const schoolMeta = getCategoryMeta("school");
 
+  // Single top-right status pill — same visual pattern (and same
+  // statusPill/statusDone/statusDead/statusOngoing styling) as every other
+  // My Bookings card (see renderApplicationCard's "Work Helper" card and
+  // renderStatus/renderBookingTripStatus in app/(tabs)/bookings.tsx). Only
+  // presentation is shared here — the underlying status/tripStatus fields
+  // and their meaning are untouched.
+  const renderStatusPill = (cancelled: boolean, completed: boolean, label: string) => (
+    <View
+      style={[
+        styles.statusPill,
+        cancelled ? styles.statusDead : completed ? styles.statusDone : styles.statusOngoing,
+      ]}
+    >
+      <Ionicons
+        name={cancelled ? "close-circle" : completed ? "checkmark-circle" : "time"}
+        size={13}
+        color={cancelled ? "#B91C1C" : completed ? "#166534" : "#B86115"}
+      />
+      <Text
+        style={[
+          styles.statusPillText,
+          cancelled
+            ? styles.statusPillTextDead
+            : completed
+              ? styles.statusPillTextDone
+              : styles.statusPillTextOngoing,
+        ]}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+
+  // A leg is always a real booking (never "unbooked") — cancelled/completed
+  // read straight off its own status; anything else is its live tracking
+  // state (see trackingStatusKey).
+  const legStatusLabel = (leg: SchoolBooking) => {
+    if (leg.status === "cancelled") return t("bookings.status.cancelled");
+    if (leg.status === "completed") return t("common.completed");
+    return t(trackingStatusKey(leg.tripStatus));
+  };
+
+  // A driver's own trip listing additionally has a "waiting for booking"
+  // state — zero real active passenger bookings AND never actually started
+  // (tripStatus still "booked"; once genuinely started it stays whatever
+  // it is regardless of a later cancellation, same as the generic
+  // DriverTripItem trip card in app/(tabs)/bookings.tsx). This is the ONE
+  // place that decides "waiting for booking" — both the card's status pill
+  // (tripStatusLabel below) and the Upcoming/Unbooked Trips bucket
+  // (SchoolDriverRow.waitingForBooking, read first in getDriverTripStatus)
+  // read this exact same value, so the two can never disagree.
+  const isSchoolTripWaitingForBooking = (trip: SchoolTrip, activeBookingCount: number) =>
+    trip.status !== "completed" &&
+    trip.status !== "cancelled" &&
+    trip.tripStatus === "booked" &&
+    activeBookingCount === 0;
+
+  const tripStatusLabel = (trip: SchoolTrip, waitingForBooking: boolean) => {
+    if (trip.status === "cancelled") return t("bookings.status.cancelled");
+    if (trip.status === "completed") return t("common.completed");
+    if (waitingForBooking) {
+      // Same distinction bookings.tsx's DriverTripItem card uses — future
+      // zero-booking trips read "Waiting for booking", past ones read
+      // "Expired — No bookings", via the one shared getDriverTripStatus.
+      const effectiveStatus = getDriverTripStatus({
+        _kind: "schoolTrip",
+        waitingForBooking,
+        date: trip.date,
+        time: trip.departureTime,
+      });
+      return effectiveStatus === "expiredNoBookings"
+        ? t("booking.expiredNoBookingsLabel")
+        : t("booking.waitingForBookingLabel");
+    }
+    return t(trackingStatusKey(trip.tripStatus));
+  };
+
   const renderGroupCard = (group: (typeof groupedPassengerBookings)[number]) => (
     <View key={group.groupId} style={styles.groupCard}>
       <View style={[styles.catChip, { backgroundColor: `${schoolMeta.color}18` }]}>
@@ -639,21 +683,24 @@ export default function MySchoolTripsSection({
                   {directionLabel(t, booking.bookingDirection)}
                 </Text>
               </View>
-              <Text style={styles.statusText}>
-                {booking.status === "cancelled"
-                  ? t("booking.cancelBookingTitle")
-                  : t(trackingStatusKey(booking.tripStatus))}
-              </Text>
 
-              {booking.status === "completed" ? (
-                <Pressable
-                  style={styles.deleteButton}
-                  onPress={() => handleHideBooking(booking)}
-                  hitSlop={8}
-                >
-                  <Ionicons name="trash-outline" size={18} color="#B91C1C" />
-                </Pressable>
-              ) : null}
+              <View style={styles.legHeaderActions}>
+                {renderStatusPill(
+                  booking.status === "cancelled",
+                  booking.status === "completed",
+                  legStatusLabel(booking),
+                )}
+
+                {booking.status === "completed" ? (
+                  <Pressable
+                    style={styles.deleteButton}
+                    onPress={() => handleHideBooking(booking)}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#B91C1C" />
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
 
             <Text style={styles.routeText}>
@@ -772,10 +819,15 @@ export default function MySchoolTripsSection({
     </View>
   );
 
-  const renderTripCard = (trip: SchoolTrip) => {
+  const renderTripCard = (trip: SchoolTrip, activeBookingCount: number) => {
     const canStart = canStartTrip(trip);
     const blockedReason = getStartTripBlockedReason(trip);
-    const showLifecycleButton = trip.status !== "cancelled" && trip.status !== "completed";
+    const waitingForBooking = isSchoolTripWaitingForBooking(trip, activeBookingCount);
+    // Never show/enable Start Trip for a trip with zero real active
+    // passenger bookings — once it has actually started (tripStatus past
+    // "booked"), Continue keeps showing regardless, since this only guards
+    // the initial Start.
+    const showLifecycleButton = trip.status !== "cancelled" && trip.status !== "completed" && !waitingForBooking;
 
     // Driver's own trip uses the stricter 5-hour-before-departure window
     // (see DRIVER_CANCEL_LOCK_HOURS) — cancelling here can affect passengers
@@ -811,13 +863,20 @@ export default function MySchoolTripsSection({
           >
             <Text style={styles.badgeText}>{directionLabel(t, trip.direction)}</Text>
           </View>
-          <Text style={styles.statusText}>{trip.status}</Text>
 
-          {trip.status === "completed" ? (
-            <Pressable style={styles.deleteButton} onPress={() => handleHideTrip(trip)} hitSlop={8}>
-              <Ionicons name="trash-outline" size={18} color="#B91C1C" />
-            </Pressable>
-          ) : null}
+          <View style={styles.legHeaderActions}>
+            {renderStatusPill(
+              trip.status === "cancelled",
+              trip.status === "completed",
+              tripStatusLabel(trip, waitingForBooking),
+            )}
+
+            {trip.status === "completed" ? (
+              <Pressable style={styles.deleteButton} onPress={() => handleHideTrip(trip)} hitSlop={8}>
+                <Ionicons name="trash-outline" size={18} color="#B91C1C" />
+              </Pressable>
+            ) : null}
+          </View>
         </View>
 
         <Text style={styles.routeText}>
@@ -830,9 +889,6 @@ export default function MySchoolTripsSection({
           {trip.availableSeats}/{trip.totalSeats} {t("schoolTrip.seatsLeft")} ·{" "}
           {trip.pricePerSeat} ₪
         </Text>
-        {trip.tripStatus !== "booked" && trip.tripStatus !== "completed" ? (
-          <Text style={styles.childSummaryText}>{t(trackingStatusKey(trip.tripStatus))}</Text>
-        ) : null}
 
         {showLifecycleButton ? (
           <>
@@ -876,74 +932,121 @@ export default function MySchoolTripsSection({
     );
   };
 
-  if (loading) {
-    return (
-      <View style={styles.loadingBox}>
-        <ActivityIndicator size="small" color="#F58220" />
+  const renderWaitingCard = (request: RideRequest) => (
+    <View key={request.id} style={styles.legCard}>
+      <View style={[styles.legHeader, styles.legHeaderStatusOnly]}>
+        {renderStatusPill(false, false, t("schoolTrip.waitingBadge"))}
       </View>
-    );
-  }
+      <Text style={styles.routeText}>
+        {request.schoolName} → {request.toArea}
+      </Text>
+      <Text style={styles.metaText}>
+        {request.requestedDate} · {request.requestedTime} · {request.seats}{" "}
+        {t("schoolTrip.seatWord")}
+      </Text>
 
-  const visibleRequests = rideRequests.filter(
-    (r) => r.status === "waiting" || r.status === "matched",
+      <Pressable
+        style={[styles.cancelButton, busyId === request.id && { opacity: 0.6 }]}
+        onPress={() => handleCancelRequest(request)}
+        disabled={busyId === request.id}
+      >
+        <Text style={styles.cancelButtonText}>{t("schoolTrip.cancelWaitingRequestTitle")}</Text>
+      </Pressable>
+    </View>
   );
 
-  const hasContent =
-    tab === "passenger"
-      ? groupedPassengerBookings.length > 0 || visibleRequests.length > 0
-      : visibleTrips.length > 0;
+  const visibleRequests = useMemo(
+    () => rideRequests.filter((r) => r.status === "waiting" || r.status === "matched"),
+    [rideRequests],
+  );
 
-  if (!hasContent) return null;
+  const passengerRows = useMemo<SchoolPassengerRow[]>(() => {
+    const groupRows: SchoolPassengerRow[] = groupedPassengerBookings.map((group) => {
+      const legs = group.legs;
+      const finished = isGroupFinished(legs);
+      const activeLeg = legs.find((leg) => IN_PROGRESS_TRIP_STATUSES.includes(leg.tripStatus));
+      const representative = legs[0];
 
-  return (
-    <View style={styles.section}>
-      {tab === "passenger" ? (
-        <View style={styles.sectionHeaderRow}>
-          <Ionicons name="school" size={16} color="#F58220" />
-          <Text style={styles.sectionHeaderText}>{t("schoolTrip.mySchoolTripsSection")}</Text>
-        </View>
-      ) : null}
+      return {
+        _kind: "schoolGroup",
+        id: group.groupId,
+        date: representative.date,
+        time: representative.departureTime,
+        status: finished ? "completed" : "booked",
+        tripStatus: finished ? "completed" : activeLeg ? activeLeg.tripStatus : representative.tripStatus,
+        searchText: buildSearchText([
+          schoolMeta.label,
+          "school",
+          representative.fromAddress,
+          representative.toAddress,
+          representative.schoolName,
+          representative.driverName,
+          representative.date,
+          representative.departureTime,
+          ...legs.map((leg) => leg.passengerName),
+        ]),
+        render: () => renderGroupCard(group),
+      };
+    });
 
-      {tab === "passenger" && activeGroupedBookings.map(renderGroupCard)}
+    const waitingRows: SchoolPassengerRow[] = visibleRequests.map((request) => ({
+      _kind: "schoolWaiting",
+      id: request.id,
+      date: request.requestedDate,
+      time: request.requestedTime,
+      status: request.status,
+      searchText: buildSearchText([
+        t("schoolTrip.waitingBadge"),
+        "school",
+        request.schoolName,
+        request.fromArea,
+        request.toArea,
+        request.requestedDate,
+        request.requestedTime,
+      ]),
+      render: () => renderWaitingCard(request),
+    }));
 
-      {tab === "passenger" && finishedGroupedBookings.length > 0 ? (
-        <View style={styles.sectionHeaderRow}>
-          <Ionicons name="checkmark-done-outline" size={16} color="#7C5F46" />
-          <Text style={styles.sectionHeaderText}>{t("schoolTrip.finishedTripsSection")}</Text>
-        </View>
-      ) : null}
+    return [...groupRows, ...waitingRows];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupedPassengerBookings, visibleRequests, busyId]);
 
-      {tab === "passenger" && finishedGroupedBookings.map(renderGroupCard)}
+  const driverRows = useMemo<SchoolDriverRow[]>(
+    () =>
+      trips.map((trip) => {
+        // Real count of SchoolBooking docs for this trip, never availableSeats
+        // — same expression handleCancelTrip already uses for its "affected
+        // passengers" warning.
+        const activeBookingCount = bookings.filter(
+          (b) => b.tripId === trip.id && b.status === "booked",
+        ).length;
+        const waitingForBooking = isSchoolTripWaitingForBooking(trip, activeBookingCount);
 
-      {tab === "passenger" &&
-        visibleRequests.map((request) => (
-          <View key={request.id} style={styles.legCard}>
-            <View style={styles.legHeader}>
-              <View style={[styles.badge, styles.badgeWaiting]}>
-                <Ionicons name="hourglass-outline" size={12} color="#B86115" />
-                <Text style={styles.badgeText}>{t("schoolTrip.waitingBadge")}</Text>
-              </View>
-            </View>
-            <Text style={styles.routeText}>
-              {request.schoolName} → {request.toArea}
-            </Text>
-            <Text style={styles.metaText}>
-              {request.requestedDate} · {request.requestedTime} · {request.seats}{" "}
-              {t("schoolTrip.seatWord")}
-            </Text>
+        return {
+          ...trip,
+          _kind: "schoolTrip",
+          time: trip.departureTime,
+          activeBookingCount,
+          waitingForBooking,
+          searchText: buildSearchText([
+            schoolMeta.label,
+            "school",
+            trip.fromArea,
+            trip.toArea,
+            trip.schoolName,
+            trip.driverName,
+            trip.date,
+            trip.departureTime,
+          ]),
+          render: () => renderTripCard(trip, activeBookingCount),
+        };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trips, bookings, busyId],
+  );
 
-            <Pressable
-              style={[styles.cancelButton, busyId === request.id && { opacity: 0.6 }]}
-              onPress={() => handleCancelRequest(request)}
-              disabled={busyId === request.id}
-            >
-              <Text style={styles.cancelButtonText}>{t("schoolTrip.cancelWaitingRequestTitle")}</Text>
-            </Pressable>
-          </View>
-        ))}
-
-      {tab === "driver" && visibleTrips.map(renderTripCard)}
-
+  const modals = (
+    <>
       <Modal visible={!!ratingBooking} animationType="fade" transparent onRequestClose={closeRatingModal}>
         <View style={styles.ratingOverlay}>
           <View style={styles.ratingSheet}>
@@ -1038,8 +1141,10 @@ export default function MySchoolTripsSection({
           </View>
         </View>
       </Modal>
-    </View>
+    </>
   );
+
+  return { loading, passengerRows, driverRows, modals };
 }
 
 const styles = StyleSheet.create({
@@ -1083,7 +1188,24 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 8,
   },
-  legHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
+  legHeader: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    alignItems: "center",
+    rowGap: 6,
+    columnGap: 8,
+    marginBottom: 8,
+  },
+  // Groups the top-right status pill + delete button together, same
+  // pattern as cardTopActions in app/(tabs)/bookings.tsx. flexShrink lets
+  // this group (and the status pill's own text inside it) give way instead
+  // of pushing the row wider than the card on a long label like
+  // "Expired — No bookings".
+  legHeaderActions: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
+  // A waiting-for-ride request card has no direction badge to anchor the
+  // left side — its one status pill still belongs top-right.
+  legHeaderStatusOnly: { justifyContent: "flex-end" },
   badge: {
     flexDirection: "row",
     alignItems: "center",
@@ -1094,9 +1216,28 @@ const styles = StyleSheet.create({
   },
   badgeOutbound: { backgroundColor: "#DBEAFE" },
   badgeReturn: { backgroundColor: "#DCFCE7" },
-  badgeWaiting: { backgroundColor: "#FEF3C7" },
   badgeText: { fontSize: 11, fontWeight: "900", color: "#111827" },
-  statusText: { fontSize: 12, color: "#7C5F46", fontWeight: "700", textTransform: "capitalize" },
+  // Top-right status pill — same visual values as statusPill/statusDone/
+  // statusDead/statusOngoing/statusText/statusTextDone/statusTextDead/
+  // statusTextOngoing in app/(tabs)/bookings.tsx (the "Work Helper" card's
+  // reference styling), duplicated here since each screen keeps its own
+  // StyleSheet in this codebase.
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 1,
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  statusOngoing: { backgroundColor: "#FFF2E8" },
+  statusDone: { backgroundColor: "#E7F7EC" },
+  statusDead: { backgroundColor: "#F1E7E7" },
+  statusPillText: { fontWeight: "900", fontSize: 12, flexShrink: 1 },
+  statusPillTextOngoing: { color: "#B86115" },
+  statusPillTextDone: { color: "#166534" },
+  statusPillTextDead: { color: "#B91C1C" },
   routeText: { fontWeight: "800", color: "#111827", fontSize: 14, marginBottom: 4 },
   metaText: { fontSize: 12.5, color: "#7C5F46", fontWeight: "600", marginBottom: 2 },
   ltrText: { writingDirection: "ltr" },

@@ -3,7 +3,7 @@
 //
 // Collections used:
 //   - bookings     (passenger bookings, one per "Book This Driver")
-//   - driverRoutes (driver: school / personal / delivery)   keyed by driverId
+//   - driverRoutes (driver: school / personal)               keyed by driverId
 //   - workJobs     (driver: work helper jobs)                keyed by employerId
 //   - errandJobs   (driver: errands)                         keyed by ownerId
 //
@@ -90,7 +90,6 @@ export const CATEGORY_META: Record<
     icon: "person-outline",
     color: "#EC4899",
   },
-  delivery: { label: "Delivery", icon: "cube-outline", color: "#A855F7" },
   errands: { label: "Errand", icon: "location-outline", color: "#F58220" },
   workErrands: {
     label: "Work Helper",
@@ -311,6 +310,206 @@ export const sortMyBookings = <T,>(items: T[]): T[] => {
     // Completed: newest first, but still at the bottom.
     return bTime - aTime;
   });
+};
+
+// ---------------------------------------------------------------------------
+// My Bookings status bucket (Upcoming / In Progress / Completed / Unbooked
+// Trips)
+//
+// BookingBucket is the one shared tab-name type both classifiers below
+// return — but Driver and Passenger deliberately have TWO SEPARATE
+// classifier functions, not one shared one, because "In Progress" means
+// something different for each role:
+//   - Passenger: getPassengerTripStatus/getPassengerTripBucket, just below.
+//     The service already feels "active" to a passenger the moment the
+//     driver is on the way — Driver on the way / Driver arrived / actually
+//     in progress all read as one continuous "In Progress" phase.
+//   - Driver: getDriverTripStatus/getDriverTripBucket, further down this
+//     file. In Progress means the passenger trip has ACTUALLY started
+//     (tripStatus literally "in_progress") — "on the way"/"arrived" stay in
+//     Upcoming, and driver-published listings can additionally be
+//     "unbooked" (Unbooked Trips), a bucket passenger never has at all.
+// Never call the Driver classifier for a passenger row or vice versa.
+// ---------------------------------------------------------------------------
+
+export type BookingBucket = "upcoming" | "inProgress" | "completed" | "unbookedTrips";
+
+// Still used by the Driver "waiting" checks further down this file, and by
+// useMySchoolRows.tsx to pick a group's most-advanced leg — kept as the one
+// shared vocabulary list for "the driver has done something beyond just
+// booking," independent of which classifier is asking.
+export const IN_PROGRESS_TRIP_STATUSES = [
+  "on_the_way",
+  "driver_on_way",
+  "arrived",
+  "arrived_pickup",
+  "in_progress",
+];
+
+const ON_THE_WAY_VALUES = ["on_the_way", "driver_on_way"];
+const ARRIVED_VALUES = ["arrived", "arrived_pickup"];
+
+// ---------------------------------------------------------------------------
+// PASSENGER — Upcoming / In Progress / Completed (never Unbooked Trips: a
+// passenger row is always a real booking by construction — "ride",
+// "application", "booking" (personal/school-legacy/roadside), and
+// the school hook's "schoolGroup"/"schoolWaiting" rows, covering School
+// Outbound and Return, Personal Ride, Work Helper, and
+// Errands identically).
+// ---------------------------------------------------------------------------
+
+export type PassengerTripStatus =
+  | "booked"
+  | "driverOnWay"
+  | "driverArrived"
+  | "inProgress"
+  | "completed"
+  | "cancelled";
+
+export const getPassengerTripStatus = (row: any): PassengerTripStatus => {
+  if (row._kind === "ride") {
+    // RideBooking's lifecycle lives on `.status` (booked/on_the_way/
+    // arrived/completed/cancelled) — startRide/arriveRide/finishRide in
+    // rideBookingLib.ts always write `.status` and `.tripStatus` together,
+    // so `.status` alone is authoritative here.
+    if (row.status === "completed") return "completed";
+    if (row.status === "cancelled") return "cancelled";
+    if (ARRIVED_VALUES.includes(String(row.status))) return "driverArrived";
+    if (ON_THE_WAY_VALUES.includes(String(row.status))) return "driverOnWay";
+    return "booked";
+  }
+
+  if (row._kind === "application") {
+    if (row.status === "completed") return "completed";
+    if (row.status === "rejected" || row.status === "cancelled") return "cancelled";
+    if (String(row.status) === "in_progress") return "inProgress";
+    if (ARRIVED_VALUES.includes(String(row.status))) return "driverArrived";
+    if (ON_THE_WAY_VALUES.includes(String(row.status))) return "driverOnWay";
+    return "booked";
+  }
+
+  // "booking" (personal/school-legacy/roadside), "schoolGroup",
+  // "schoolWaiting" — status is the coarse booked/completed/cancelled field,
+  // tripStatus (when present) is the finer-grained live-tracking field.
+  if (row.status === "completed") return "completed";
+  if (row.status === "cancelled") return "cancelled";
+
+  const tripStatus = String(row.tripStatus ?? "");
+  if (tripStatus === "completed") return "completed";
+  if (tripStatus === "in_progress") return "inProgress";
+  if (ARRIVED_VALUES.includes(tripStatus)) return "driverArrived";
+  if (ON_THE_WAY_VALUES.includes(tripStatus)) return "driverOnWay";
+  return "booked";
+};
+
+export const isCancelledPassengerStatus = (status: PassengerTripStatus) => status === "cancelled";
+
+export const getPassengerTripBucket = (row: any): BookingBucket => {
+  switch (getPassengerTripStatus(row)) {
+    case "booked":
+      return "upcoming";
+    case "driverOnWay":
+    case "driverArrived":
+    case "inProgress":
+      return "inProgress";
+    default:
+      // "completed" and "cancelled" both bucket as Completed — the UI
+      // (bookings.tsx) renders cancelled rows in their own clearly
+      // separated section within that tab and excludes them from the
+      // Completed count, never as a new main tab (mirrors the Driver
+      // Completed/Cancelled split already built for getDriverTripBucket).
+      return "completed";
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Driver My Bookings — ONE canonical trip-status model, used for BOTH the
+// top-right status badge and bucket placement, so the two can never
+// disagree. Deliberately separate from getPassengerTripStatus/
+// getPassengerTripBucket above (never call one classifier for the other
+// role's rows) — driver needs two distinctions passenger doesn't:
+//   1. "Waiting for booking" (future, zero bookings) vs "Expired — No
+//      bookings" (departure has passed, zero bookings) — both still land in
+//      Unbooked Trips, but show a different badge.
+//   2. A STRICT "In Progress" meaning the passenger trip itself has actually
+//      started (tripStatus/status === "in_progress") — not merely that the
+//      driver is en route to or has arrived at pickup. Per the real
+//      ride-navigation flow (see app/driver/ride-navigation.tsx), Personal
+//      Ride/Work Helper/Errands never even reach "in_progress" —
+//      they go booked → (on the way →) (arrived →) completed directly, so
+//      those categories simply never populate the In Progress tab, which is
+//      correct (not a gap to paper over), never route/date-passed alone.
+// Applied identically to every category — School is not a special case.
+// ---------------------------------------------------------------------------
+
+export type DriverTripStatus =
+  | "waitingForBooking"
+  | "expiredNoBookings"
+  | "booked"
+  | "driverOnWay"
+  | "driverArrived"
+  | "inProgress"
+  | "completed"
+  | "cancelled";
+
+const DRIVER_ON_THE_WAY_VALUES = ["on_the_way", "driver_on_way"];
+const DRIVER_ARRIVED_VALUES = ["arrived", "arrived_pickup"];
+
+export const getDriverTripStatus = (row: any): DriverTripStatus => {
+  // Only a published trip LISTING ("trip": driverRoutes/workJobs/errandJobs,
+  // "schoolTrip": SchoolTrip) can ever be "waiting"/"expired" — every other
+  // kind is, by construction, always a real booking. row.waitingForBooking
+  // is computed once (tagTrip in bookings.tsx / useMySchoolRows.tsx) from
+  // real active passenger booking/application documents — never seats,
+  // labels, or the published trip document alone — and already excludes
+  // completed/cancelled trips internally.
+  if ((row._kind === "trip" || row._kind === "schoolTrip") && row.waitingForBooking === true) {
+    return getTripTimestamp(row) < Date.now() ? "expiredNoBookings" : "waitingForBooking";
+  }
+
+  if (row.status === "cancelled") return "cancelled";
+  if (row._kind === "application" && row.status === "rejected") return "cancelled";
+  if (row.status === "completed") return "completed";
+
+  // RideBooking's coarse `.status` (booked/on_the_way/arrived/completed/
+  // cancelled) has no "in_progress" value of its own — updateTripStatus in
+  // ride-navigation.tsx deliberately leaves `.status` at "arrived" and only
+  // ever advances `.tripStatus` to "in_progress" — so that one case must be
+  // checked there first. Every other kind mirrors its whole lifecycle on
+  // `.tripStatus` alone.
+  if (row._kind === "ride" && String(row.tripStatus) === "in_progress") {
+    return "inProgress";
+  }
+
+  const liveStatus = row._kind === "ride" ? String(row.status) : String(row.tripStatus ?? "");
+
+  if (liveStatus === "completed") return "completed";
+  if (liveStatus === "in_progress") return "inProgress";
+  if (DRIVER_ARRIVED_VALUES.includes(liveStatus)) return "driverArrived";
+  if (DRIVER_ON_THE_WAY_VALUES.includes(liveStatus)) return "driverOnWay";
+  return "booked";
+};
+
+export const isCancelledDriverStatus = (status: DriverTripStatus) => status === "cancelled";
+
+export const getDriverTripBucket = (row: any): BookingBucket => {
+  switch (getDriverTripStatus(row)) {
+    case "waitingForBooking":
+    case "expiredNoBookings":
+      return "unbookedTrips";
+    case "booked":
+    case "driverOnWay":
+    case "driverArrived":
+      return "upcoming";
+    case "inProgress":
+      return "inProgress";
+    default:
+      // "completed" and "cancelled" both bucket as Completed — the UI
+      // (bookings.tsx) renders cancelled rows in their own clearly
+      // separated section within that tab and excludes them from the
+      // Completed count, rather than adding a new main tab.
+      return "completed";
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -619,7 +818,7 @@ export const dismissRatingNotifications = async (bookingId: string) => {
 const asNumber = (value: any): number | null =>
   typeof value === "number" ? value : null;
 
-const buildSearchText = (parts: (string | undefined | null)[]) =>
+export const buildSearchText = (parts: (string | undefined | null)[]) =>
   parts.filter(Boolean).join(" ").toLowerCase();
 
 const normalizeTripStatus = (value: any): TripTrackingStatus => {
@@ -827,13 +1026,13 @@ export const normalizeBooking = (id: string, data: any): BookingItem => {
 // list" helpers in (tabs)/bookings.tsx, which never touch status/tripStatus
 // or notify anyone). Covers every category that goes through the generic
 // `bookings` collection via normalizeBooking above (personal/school
-// quick+weekly bookings, item delivery, roadside) — personal_ride has its
+// quick+weekly bookings, roadside) — personal_ride has its
 // own equivalent, cancelRideBooking, in rideBookingLib.ts.
 //
 // Capacity restore: only bookings created through the weekly/quick
 // driverRoutes flow (weeklyBookingLib.ts's createWeeklyBookings) hold a
 // route seat that needs restoring — mirrors that function's own decrement
-// exactly, in reverse. Roadside/delivery bookings carry no routeId at all
+// exactly, in reverse. Roadside bookings carry no routeId at all
 // (roadsideLib.ts creates them directly, no shared capacity to give back),
 // so they fall through untouched.
 // ---------------------------------------------------------------------------
@@ -983,9 +1182,9 @@ export const normalizeDriverTrip = (
   const from = data.from || "";
   const to = data.to || "";
   const location = data.location || "";
-  const title = data.jobTitle || data.errandTitle || data.storeName || "";
+  const title = data.jobTitle || data.errandTitle || "";
 
-  const date = data.tripDate || data.deliveryDate || data.date || "";
+  const date = data.tripDate || data.date || "";
   const days: string[] = Array.isArray(data.availableDays)
     ? data.availableDays
     : data.day

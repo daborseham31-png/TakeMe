@@ -40,7 +40,7 @@ const statusForDate = (date: string, removed: boolean, explicitCancelled: boolea
 };
 
 const normalizeDriverRoute = (id: string, data: Record<string, any>): AdminRideRow => {
-  const date = data.tripDate || data.deliveryDate || "";
+  const date = data.tripDate || "";
   const category = data.category === "school" ? "school" : "personal";
 
   return {

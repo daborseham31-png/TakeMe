@@ -81,16 +81,12 @@ type DriverRoute = {
   schoolName?: string;
   destinationDetails?: string;
   tripDate?: string;
-  deliveryDate?: string;
   day?: string;
   availableDays?: string[];
   time?: string;
   price?: number;
   seats?: number;
   weeklyTrips?: WeeklyDriverDay[];
-  storeName?: string;
-  recipientPhone?: string;
-  itemDescription?: string;
   rating?: number;
   reviews?: number;
   eta?: number;
@@ -281,7 +277,7 @@ const getDriverRating = (
 };
 
 const getDateText = (driver: DriverRoute) => {
-  return driver.tripDate || driver.deliveryDate || "";
+  return driver.tripDate || "";
 };
 
 const getDaysText = (driver: DriverRoute) => {
@@ -488,16 +484,10 @@ export default function DriverResultsScreen() {
       }
 
       const filtered = commonFiltered.filter((driver) => {
-        const isDelivery = driver.category === "delivery";
-
-        const seatsMatches = isDelivery
-          ? true
-          : Number(driver.seats || 0) >= seats;
+        const seatsMatches = Number(driver.seats || 0) >= seats;
 
         const dateMatches =
-          !requestedDate ||
-          driver.tripDate === requestedDate ||
-          driver.deliveryDate === requestedDate;
+          !requestedDate || driver.tripDate === requestedDate;
 
         const timeMatches =
           !requestedTime || isTimeClose(driver.time, requestedTime);
@@ -518,16 +508,14 @@ const handleBookDriver = async (driver: DriverRoute) => {
 
   const currentCategory = String(driver.category || category || "");
 
-  const isDelivery = currentCategory === "delivery";
   const isPersonal =
     currentCategory === "personal" || currentCategory === "personal_ride";
   const isSchool = currentCategory === "school";
 
   const driverPrice = Number(driver.price || 0);
-  const totalPrice = driverPrice * (isDelivery ? 1 : seats);
+  const totalPrice = driverPrice * seats;
 
-  const selectedDate =
-    driver.tripDate || driver.deliveryDate || requestedDate || "";
+  const selectedDate = driver.tripDate || requestedDate || "";
 
   const selectedDay = driver.day || requestedDay || "";
 
@@ -598,7 +586,7 @@ const handleBookDriver = async (driver: DriverRoute) => {
       date: selectedDate,
       time: selectedTime,
       days: driver.availableDays || [],
-      seats: isDelivery ? null : seats,
+      seats,
       price: totalPrice,
     });
 
@@ -776,9 +764,7 @@ const availableDrivers = drivers.filter((driver: any) => {
         ) : (
           <View style={styles.list}>
             {availableDrivers.map((driver) =>  {
-              const isDelivery = driver.category === "delivery";
-              const totalPrice =
-                Number(driver.price || 0) * (isDelivery ? 1 : seats);
+              const totalPrice = Number(driver.price || 0) * seats;
 
               const driverLanguages = getDriverLanguages(driver);
               const dateText = getDateText(driver);
@@ -953,9 +939,7 @@ const availableDrivers = drivers.filter((driver: any) => {
                               {driver.time || "--:--"}
                             </Text>
                             <Text style={styles.detailSubText}>
-                              {isDelivery
-                                ? t("rides.arrivalTimeLabel")
-                                : t("rides.departureTimeLabel")}
+                              {t("rides.departureTimeLabel")}
                             </Text>
                           </View>
                         </View>
@@ -964,28 +948,26 @@ const availableDrivers = drivers.filter((driver: any) => {
                       <View style={styles.verticalDivider} />
 
                       <View style={styles.detailsColumn}>
-                        {!isDelivery && (
-                          <View style={styles.detailRow}>
-                            <View style={styles.iconCircle}>
-                              <Ionicons
-                                name="people-outline"
-                                size={17}
-                                color="#F58220"
-                              />
-                            </View>
-
-                            <View style={styles.detailTextBox}>
-                              <Text style={styles.detailMainText}>
-                                {t("booking.seatsCount", { count: driver.seats || 1 })}
-                              </Text>
-                              <Text style={styles.detailSubText}>
-                                {t("rides.seatsAvailableSub")}
-                              </Text>
-                            </View>
+                        <View style={styles.detailRow}>
+                          <View style={styles.iconCircle}>
+                            <Ionicons
+                              name="people-outline"
+                              size={17}
+                              color="#F58220"
+                            />
                           </View>
-                        )}
 
-                        {!isDelivery && <View style={styles.softLine} />}
+                          <View style={styles.detailTextBox}>
+                            <Text style={styles.detailMainText}>
+                              {t("booking.seatsCount", { count: driver.seats || 1 })}
+                            </Text>
+                            <Text style={styles.detailSubText}>
+                              {t("rides.seatsAvailableSub")}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.softLine} />
 
                         <View style={styles.detailRow}>
                           <View style={styles.iconCircle}>

@@ -72,7 +72,7 @@ const getTripStatus = (booking: any): TripStatus => {
 // anySchoolPassengerInProgress below (only after a passenger's code is
 // verified, never merely at arrival).
 const shouldTrackDriver = (status: TripStatus) => {
-  return status === "arrived_pickup";
+  return status === "arrived_pickup" || status === "in_progress";
 };
 
 export default function RideNavigationScreen() {
@@ -361,10 +361,12 @@ export default function RideNavigationScreen() {
 
     const tripStatus = getTripStatus(booking);
 
-    // Personal Ride never reaches tripStatus "in_progress" through this
-    // screen's own flow (booked → driver_on_way → arrived_pickup →
-    // completed, with no passenger-verification step), so its tracking
-    // window is arrived_pickup → Finish Trip.
+    // Personal Ride: tracking is active for the whole "driver has arrived
+    // and/or the trip is actually running" window — arrived_pickup (via the
+    // multi-step ride-navigation flow) or in_progress directly (the Driver
+    // My Bookings card's own "Start Ride" button — see startRideInProgress
+    // in rideBookingLib.ts, which sets trackingEnabled true and tripStatus
+    // "in_progress" in one write, skipping arrived_pickup entirely).
     //
     // School Trips: must NOT start merely because the driver pressed "I
     // arrived" — only once at least one passenger's code has been verified
@@ -372,7 +374,7 @@ export default function RideNavigationScreen() {
     // verifyPassengerCodeAndStartTrip in schoolTripsLib.ts).
     const shouldTrack = isSchoolTripsSource
       ? anySchoolPassengerInProgress
-      : tripStatus === "arrived_pickup";
+      : tripStatus === "arrived_pickup" || tripStatus === "in_progress";
 
     if (!shouldTrack) return;
 
@@ -453,6 +455,16 @@ export default function RideNavigationScreen() {
       payload.arrivedPickupAt = serverTimestamp();
     }
 
+    // The real trip start — distinct from "arrived_pickup" (driver waiting
+    // at pickup). No RideStatus/BookingItem `.status` value exists for
+    // "in_progress" (only tripStatus does — see TripStatus above), so
+    // `.status` is deliberately left as "arrived"; getDriverTripStatus/
+    // getPassengerTripStatus (bookingsLib.ts) already read tripStatus for
+    // this distinction.
+    if (nextStatus === "in_progress") {
+      payload.tripStartedAt = serverTimestamp();
+    }
+
     if (nextStatus === "completed") {
       payload.status = "completed";
       payload.tripStatus = "completed";
@@ -511,6 +523,20 @@ export default function RideNavigationScreen() {
         bookingId: id,
         category,
         status: "arrived",
+        targetTab: "passenger",
+      });
+    }
+
+    if (passengerId && nextStatus === "in_progress") {
+      await notify({
+        receiverId: passengerId,
+        type: "ride_trip_in_progress",
+        title: "Trip started",
+        message: "Your trip has started",
+        applicationId: id,
+        bookingId: id,
+        category,
+        status: "in_progress",
         targetTab: "passenger",
       });
     }
@@ -768,6 +794,29 @@ export default function RideNavigationScreen() {
           try {
             setBusy(true);
             await updateTripStatus("arrived_pickup");
+          } catch (error: any) {
+            Alert.alert(t("common.error"), error?.message || t("booking.couldNotUpdate"));
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  // Non-school only — School's real trip start is the per-passenger
+  // verification code flow (verifyPassengerCodeAndStartTrip), never this
+  // button. This is what actually moves the driver's own card from Upcoming
+  // to In Progress (see getDriverTripStatus in bookingsLib.ts).
+  const handleStartTrip = () => {
+    Alert.alert(t("booking.startTripTitle"), t("booking.startTripConfirmMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("booking.startTripButton"),
+        onPress: async () => {
+          try {
+            setBusy(true);
+            await updateTripStatus("in_progress");
           } catch (error: any) {
             Alert.alert(t("common.error"), error?.message || t("booking.couldNotUpdate"));
           } finally {
@@ -1077,7 +1126,9 @@ export default function RideNavigationScreen() {
               </Pressable>
             ) : null}
 
-            {isSchoolTripsSource && schoolPassengerBookings.length > 0 && tripStatus === "arrived_pickup" ? (
+            {isSchoolTripsSource &&
+            schoolPassengerBookings.length > 0 &&
+            (tripStatus === "arrived_pickup" || tripStatus === "in_progress") ? (
               <View style={styles.passengersBox}>
                 <Text style={styles.passengersTitle}>{t("booking.verifyAndStartTrip")}</Text>
 
@@ -1114,15 +1165,16 @@ export default function RideNavigationScreen() {
               </View>
             ) : null}
 
-            {tripStatus === "arrived_pickup" ? (
+            {isSchoolTripsSource &&
+            (tripStatus === "arrived_pickup" || tripStatus === "in_progress") ? (
               <>
                 <Pressable
                   style={[
                     styles.endButton,
-                    (busy || (isSchoolTripsSource && unstartedPassengerCount > 0)) && styles.disabled,
+                    (busy || unstartedPassengerCount > 0) && styles.disabled,
                   ]}
                   onPress={handleFinishTrip}
-                  disabled={busy || (isSchoolTripsSource && unstartedPassengerCount > 0)}
+                  disabled={busy || unstartedPassengerCount > 0}
                 >
                   {busy ? (
                     <ActivityIndicator color="#FFFFFF" />
@@ -1138,10 +1190,51 @@ export default function RideNavigationScreen() {
                   )}
                 </Pressable>
 
-                {isSchoolTripsSource && unstartedPassengerCount > 0 ? (
+                {unstartedPassengerCount > 0 ? (
                   <Text style={styles.gateHint}>{t("booking.verificationRequiredBeforeStart")}</Text>
                 ) : null}
               </>
+            ) : null}
+
+            {/* Non-school: a real, driver-pressed "Start Trip" step between
+                arrival and finish — School's equivalent is the per-passenger
+                verification box above, never this button. */}
+            {!isSchoolTripsSource && tripStatus === "arrived_pickup" ? (
+              <Pressable
+                style={[styles.actionButton, busy && styles.disabled]}
+                onPress={handleStartTrip}
+                disabled={busy}
+              >
+                {busy ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="play-circle-outline" size={19} color="#FFFFFF" />
+                    <Text style={styles.actionText}>{t("booking.startTripButton")}</Text>
+                  </>
+                )}
+              </Pressable>
+            ) : null}
+
+            {!isSchoolTripsSource && tripStatus === "in_progress" ? (
+              <Pressable
+                style={[styles.endButton, busy && styles.disabled]}
+                onPress={handleFinishTrip}
+                disabled={busy}
+              >
+                {busy ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="checkmark-circle-outline"
+                      size={20}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.actionText}>{t("booking.finishTripButton")}</Text>
+                  </>
+                )}
+              </Pressable>
             ) : null}
 
             {shouldTrackDriver(tripStatus) ? (
