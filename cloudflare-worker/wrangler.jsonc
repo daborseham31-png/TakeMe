@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "takeme-id-reader",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-11-01",
+  "observability": {
+    "enabled": true
+  }
+  // GEMINI_API_KEY is NOT set here. It is stored as an encrypted secret
+  // via `wrangler secret put GEMINI_API_KEY` and read at runtime as
+  // env.GEMINI_API_KEY. Never add it to this file.
+}
