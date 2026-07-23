@@ -67,9 +67,9 @@ export type LicenseAnalysisResult = {
 export const SPOKEN_LANGUAGE_OPTIONS = ["Arabic", "Hebrew", "English", "Russian"];
 
 // Always read from EXPO_PUBLIC_BACKEND_URL — set it in the .env file at the
-// PROJECT ROOT (copy .env.example to .env there). On a real phone,
-// "localhost" means the phone itself, not your computer, so this must be
-// your computer's LAN IP (e.g. http://192.168.1.23:3001), not localhost.
+// PROJECT ROOT (copy .env.example to .env there). Points at the deployed
+// Cloudflare Worker (cloudflare-worker/), so it works the same on a real
+// phone, an emulator/simulator, or the web build.
 export const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "";
 
 // ---------------------------------------------------------------------------
