@@ -16,6 +16,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { useLanguage } from "../../../i18n/LanguageProvider";
+import { paddingEnd } from "../../../i18n/rtl";
 import IsraelLocationAutocomplete from "../../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../israelLocations";
 import {
@@ -245,21 +246,21 @@ export default function WorkApplyScreen() {
 
             <View style={styles.detailsGrid}>
               {job.locationEn ? (
-                <View style={styles.detail}>
+                <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                   <Ionicons name="location-outline" size={15} color="#7A665C" />
                   <Text style={styles.detailText}>{job.locationEn}</Text>
                 </View>
               ) : null}
 
               {job.date ? (
-                <View style={styles.detail}>
+                <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                   <Ionicons name="calendar-outline" size={15} color="#7A665C" />
                   <Text style={styles.detailText}>{job.date}</Text>
                 </View>
               ) : null}
 
               {job.workHoursFrom || job.workHoursTo ? (
-                <View style={styles.detail}>
+                <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                   <Ionicons name="time-outline" size={15} color="#7A665C" />
                   <Text style={styles.detailText}>
                     {job.workHoursFrom} - {job.workHoursTo}
@@ -268,7 +269,7 @@ export default function WorkApplyScreen() {
               ) : null}
 
               {job.workersNeeded ? (
-                <View style={styles.detail}>
+                <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                   <Ionicons name="people-outline" size={15} color="#7A665C" />
                   <Text style={styles.detailText}>
                     {t("workErrand.workersNeededCount", { count: job.workersNeeded })}
@@ -277,7 +278,7 @@ export default function WorkApplyScreen() {
               ) : null}
 
               {typeof job.remainingSeats === "number" ? (
-                <View style={styles.detail}>
+                <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                   <Ionicons
                     name="checkmark-done-outline"
                     size={15}
@@ -455,7 +456,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingRight: 6,
   },
   detailText: {
     fontSize: 13,

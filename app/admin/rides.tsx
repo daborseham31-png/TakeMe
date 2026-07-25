@@ -12,6 +12,8 @@ import { EmptyState, ErrorState, LoadingState } from "./components/AdminStates";
 import FilterChips from "./components/FilterChips";
 import SearchBar from "./components/SearchBar";
 import { useAdminCollection } from "./useAdminCollection";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { pushToEnd } from "../i18n/rtl";
 
 type CategoryFilter = "all" | RideCategory;
 type StatusFilter = "all" | RideStatus;
@@ -47,6 +49,7 @@ const statusColor = (status: RideStatus) => {
 
 export default function AdminRidesScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const { data: rides, loading, error, refresh } = useAdminCollection(subscribeAllRides);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
@@ -102,7 +105,7 @@ export default function AdminRidesScreen() {
             {t(`admin.rideCategoryLabel.${item.category}`, { defaultValue: item.category })}
           </Text>
         </View>
-        <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
+        <View style={[styles.statusDot, pushToEnd(isRTL), { backgroundColor: statusColor(item.status) }]} />
         <Text style={styles.statusText}>
           {t(`admin.rideStatusLabel.${item.status}`, { defaultValue: item.status })}
         </Text>
@@ -242,7 +245,6 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 4,
-    marginLeft: "auto",
   },
   statusText: {
     fontSize: 11.5,

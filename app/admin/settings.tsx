@@ -20,6 +20,7 @@ import { signOutAndRedirectToLogin } from "../authLib";
 import { useLanguage } from "../i18n/LanguageProvider";
 import LanguageSelectorModal from "../i18n/LanguageSelectorModal";
 import { SUPPORTED_LANGUAGES } from "../i18n/languages";
+import { chevronForwardIconName } from "../i18n/rtl";
 import { getAdminProfile } from "./adminAuthLib";
 import { adminColors, adminRadius, adminSpacing } from "./adminTheme";
 import AdminScreen from "./components/AdminScreen";
@@ -27,7 +28,7 @@ import { LoadingState } from "./components/AdminStates";
 
 export default function AdminSettingsScreen() {
   const { t } = useTranslation();
-  const { language } = useLanguage();
+  const { language, isRTL } = useLanguage();
 
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
@@ -157,7 +158,7 @@ export default function AdminSettingsScreen() {
             </View>
             <View style={styles.languageRowRight}>
               <Text style={styles.rowValue}>{currentLanguageName}</Text>
-              <Ionicons name="chevron-forward" size={18} color={adminColors.placeholder} />
+              <Ionicons name={chevronForwardIconName(isRTL)} size={18} color={adminColors.placeholder} />
             </View>
           </View>
         </Pressable>

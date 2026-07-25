@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
 import { useLanguage } from "../../../i18n/LanguageProvider";
+import { chevronForwardIconName, positionEnd } from "../../../i18n/rtl";
 import DriverReviewsSection from "../../DriverReviewsSection";
 import { getDisplayedDriverId } from "../../driverReviewsLib";
 
@@ -434,9 +435,9 @@ export default function ErrandsScreen() {
                   >
                     <Text style={styles.bookButtonText}>{t("workErrand.selectAndBook")}</Text>
 
-                    <View style={styles.bookArrowCircle}>
+                    <View style={[styles.bookArrowCircle, positionEnd(14, isRTL)]}>
                       <Ionicons
-                        name="chevron-forward"
+                        name={chevronForwardIconName(isRTL)}
                         size={22}
                         color="#F58220"
                       />
@@ -763,7 +764,6 @@ const styles = StyleSheet.create({
   },
   bookArrowCircle: {
     position: "absolute",
-    right: 14,
     width: 34,
     height: 34,
     borderRadius: 17,

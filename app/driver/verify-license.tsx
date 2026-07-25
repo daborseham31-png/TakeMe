@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { ltrContentStyle } from "../i18n/rtl";
 import {
   analyzeLicenseImage,
   compressImageToBase64,
@@ -281,14 +282,14 @@ export default function VerifyLicenseScreen() {
                 <View style={styles.readOnlyBox}>
                   <Text style={styles.readOnlyLabel}>{t("driverCreate.licenseNumberLabel")}</Text>
                   <TextInput
-                    style={styles.readOnlyInput}
+                    style={[styles.readOnlyInput, ltrContentStyle]}
                     value={licenseResult.licenseNumber || ""}
                     editable={false}
                   />
 
                   <Text style={styles.readOnlyLabel}>{t("driverCreate.expiryDateLabel")}</Text>
                   <TextInput
-                    style={styles.readOnlyInput}
+                    style={[styles.readOnlyInput, ltrContentStyle]}
                     value={licenseResult.expiryDate || ""}
                     editable={false}
                   />

@@ -25,6 +25,7 @@ import { signOutAndRedirectToLogin } from "../authLib";
 import { useLanguage } from "../i18n/LanguageProvider";
 import LanguageSelectorModal from "../i18n/LanguageSelectorModal";
 import { SUPPORTED_LANGUAGES } from "../i18n/languages";
+import { marginStart } from "../i18n/rtl";
 
 // The Firestore `gender` field keeps storing these exact English strings
 // (existing data shape — never changed here); only the label shown for each
@@ -171,7 +172,7 @@ export default function ProfileScreen() {
               </View>
             )}
 
-            <Pressable style={styles.cameraButton} onPress={pickImage}>
+            <Pressable style={[styles.cameraButton, marginStart(80, isRTL)]} onPress={pickImage}>
               <Text style={styles.cameraText}>📷</Text>
             </Pressable>
           </View>
@@ -371,7 +372,6 @@ const styles = StyleSheet.create({
   },
   cameraButton: {
     marginTop: -28,
-    marginLeft: 80,
     width: 36,
     height: 36,
     borderRadius: 18,

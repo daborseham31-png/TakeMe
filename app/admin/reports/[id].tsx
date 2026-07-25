@@ -22,6 +22,8 @@ import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 import AdminScreen from "../components/AdminScreen";
 import { LoadingState } from "../components/AdminStates";
 import { translateReportCategory } from "../../i18n/formatters";
+import { useLanguage } from "../../i18n/LanguageProvider";
+import { chevronForwardIconName } from "../../i18n/rtl";
 
 const toSeconds = (value: unknown): number => {
   const timestamp = value as { seconds?: number } | undefined;
@@ -32,6 +34,7 @@ const STATUS_FLOW: ReportStatus[] = ["open", "under_review", "resolved", "reject
 
 export default function AdminReportDetailScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
   const reportId = String(params.id || "");
 
@@ -153,7 +156,7 @@ export default function AdminReportDetailScreen() {
                   target: t(`admin.targetType.${report.targetType}`, { defaultValue: report.targetType }),
                 })}
               </Text>
-              <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
+              <Ionicons name={chevronForwardIconName(isRTL)} size={16} color={adminColors.placeholder} />
             </Pressable>
           ) : null}
 

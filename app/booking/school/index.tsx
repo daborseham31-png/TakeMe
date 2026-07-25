@@ -28,13 +28,25 @@ export default function SchoolRideScreen() {
   return (
     <SafeAreaView style={styles.page}>
       <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons
-            name={isRTL ? "arrow-forward" : "arrow-back"}
-            size={24}
-            color="#7C5F46"
-          />
-        </Pressable>
+        <View style={styles.topRow}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons
+              name={isRTL ? "arrow-forward" : "arrow-back"}
+              size={24}
+              color="#7C5F46"
+            />
+          </Pressable>
+
+          <Pressable
+            style={styles.myChildrenButton}
+            onPress={() => router.push("/booking/school/my-children" as any)}
+          >
+            <Ionicons name="people-outline" size={16} color="#F58220" />
+            <Text style={styles.myChildrenButtonText}>
+              {t("schoolChildren.manageChildrenLink")}
+            </Text>
+          </Pressable>
+        </View>
 
         <View style={styles.headerRow}>
           <Text style={styles.headerEmoji}>🎒</Text>
@@ -79,11 +91,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 50,
   },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   backButton: {
     width: 40,
     height: 40,
     justifyContent: "center",
     marginBottom: 4,
+  },
+  myChildrenButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#F3ECE3",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  myChildrenButtonText: {
+    color: "#F58220",
+    fontWeight: "800",
+    fontSize: 12.5,
   },
   headerRow: {
     flexDirection: "row",

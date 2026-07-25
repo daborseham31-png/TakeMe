@@ -223,7 +223,11 @@ export default function SchoolTripForm() {
     if (!accountInfo) return;
 
     if (
-      !fromAddress ||
+      // A return_only trip's departure side is always the selected school
+      // itself (see this file's header + handleSubmit's payload-building
+      // below) — the generic "From" field no longer independently defines
+      // anything for this mode, so it's never required here.
+      (!isReturnOnly && !fromAddress) ||
       !toAddress ||
       !schoolQuery ||
       !tripDate ||
@@ -246,7 +250,12 @@ export default function SchoolTripForm() {
       return;
     }
 
-    if (!fromPlace) {
+    // return_only never independently requires "From" — picking a city
+    // there only scopes which schools the school picker suggests (see
+    // schoolAreaLocationId below); reaching a real selectedSchool already
+    // implies a real city was picked, since SchoolAutocomplete stays
+    // disabled until one is.
+    if (!isReturnOnly && !fromPlace) {
       setFromError(t("validation.selectLocationFromList"));
       return;
     }
@@ -258,6 +267,18 @@ export default function SchoolTripForm() {
 
     if (!selectedSchool) {
       setSchoolError(t("schoolTrip.selectSchoolFromList"));
+      return;
+    }
+
+    // A return_only trip's destination must be a genuinely different place
+    // than the school itself — this is what actually prevents a driver from
+    // publishing "home/destination -> school" for a from_school return trip
+    // (the school and destination reversed or identical): the departure
+    // side is now ALWAYS the selected school (see the payload below), so
+    // the only remaining way to end up with a nonsensical route is picking
+    // the same area as both the school's own city and the destination.
+    if (isReturnOnly && toPlace.id === selectedSchool.areaLocationId) {
+      setToError(t("schoolTrip.returnDestinationSameAsSchool"));
       return;
     }
 
@@ -317,8 +338,6 @@ export default function SchoolTripForm() {
     try {
       setLoading(true);
 
-      const fromCoords = await resolveLocationCoordinates(fromPlace, fromAddress);
-      const toCoords = await resolveLocationCoordinates(toPlace, toAddress);
       const schoolLocation = {
         latitude: selectedSchool.latitude,
         longitude: selectedSchool.longitude,
@@ -330,66 +349,99 @@ export default function SchoolTripForm() {
         driverPhone: accountInfo.cleanPhone,
       };
 
-      const mainInput: CreateSchoolTripInput = {
-        fromArea: fromAddress,
-        fromAddress,
-        fromLocation: fromCoords,
-        toArea: toAddress,
-        toAddress,
-        toLocation: toCoords,
-        schoolId: selectedSchool.id,
-        schoolName: selectedSchool.name,
-        schoolAddress: selectedSchool.city,
-        schoolLocation,
-        date: mainValidation.cleanDate,
-        departureTime: mainValidation.cleanTime,
-        pricePerSeat: cleanPrice,
-        totalSeats: cleanSeats,
-        car,
-        carColor,
-        carPlate,
-      };
-
       if (isReturnOnly) {
-        // "Return only" (AGENTS.md #1): the main section IS the return trip
-        // — From is the school area, To is the destination — saved directly
-        // as an independent from_school document, no outbound required.
-        await createSchoolReturnOnlyTrip(mainInput, driver);
-      } else if (showReturnSection && returnValidation) {
-        const returnToCoords = await resolveLocationCoordinates(
-          returnToPlace,
-          returnToAddress,
-        );
+        // "Return only" (AGENTS.md #1): the departure side is ALWAYS the
+        // selected school itself — selectedSchool.city/schoolLocation, never
+        // the generic "From" field's own typed/picked value (that field now
+        // only scopes which schools the school picker suggests — see
+        // schoolAreaLocationId below and this file's header). This is what
+        // makes it structurally impossible to publish a from_school return
+        // trip as "home/destination -> school": there is no longer a
+        // freely-editable field that could hold the destination on the
+        // wrong side.
+        const toCoords = await resolveLocationCoordinates(toPlace, toAddress);
 
-        const returnInput: CreateSchoolTripInput = {
-          // Auto-filled, read-only: the return trip starts from the
-          // outbound trip's "To" area (e.g. "Mashhad") — never the school's
-          // own name or address. The school itself stays attached below,
-          // fully independent of this area label. The real pickup
-          // coordinate is still the school building, since that's
-          // physically where the return trip departs from.
-          fromArea: toAddress,
-          fromAddress: toAddress,
+        const returnOnlyInput: CreateSchoolTripInput = {
+          fromArea: selectedSchool.city,
+          fromAddress: selectedSchool.city,
           fromLocation: schoolLocation,
-          toArea: returnToAddress,
-          toAddress: returnToAddress,
-          toLocation: returnToCoords,
+          toArea: toAddress,
+          toAddress,
+          toLocation: toCoords,
           schoolId: selectedSchool.id,
           schoolName: selectedSchool.name,
           schoolAddress: selectedSchool.city,
           schoolLocation,
           date: mainValidation.cleanDate,
-          departureTime: returnValidation.cleanTime,
-          pricePerSeat: cleanReturnPrice,
-          totalSeats: cleanReturnSeats,
+          departureTime: mainValidation.cleanTime,
+          pricePerSeat: cleanPrice,
+          totalSeats: cleanSeats,
           car,
           carColor,
           carPlate,
         };
 
-        await createSchoolRoundTrip(mainInput, returnInput, driver);
+        await createSchoolReturnOnlyTrip(returnOnlyInput, driver);
       } else {
-        await createSchoolOutboundTrip(mainInput, driver);
+        const fromCoords = await resolveLocationCoordinates(fromPlace, fromAddress);
+        const toCoords = await resolveLocationCoordinates(toPlace, toAddress);
+
+        const mainInput: CreateSchoolTripInput = {
+          fromArea: fromAddress,
+          fromAddress,
+          fromLocation: fromCoords,
+          toArea: toAddress,
+          toAddress,
+          toLocation: toCoords,
+          schoolId: selectedSchool.id,
+          schoolName: selectedSchool.name,
+          schoolAddress: selectedSchool.city,
+          schoolLocation,
+          date: mainValidation.cleanDate,
+          departureTime: mainValidation.cleanTime,
+          pricePerSeat: cleanPrice,
+          totalSeats: cleanSeats,
+          car,
+          carColor,
+          carPlate,
+        };
+
+        if (showReturnSection && returnValidation) {
+          const returnToCoords = await resolveLocationCoordinates(
+            returnToPlace,
+            returnToAddress,
+          );
+
+          const returnInput: CreateSchoolTripInput = {
+            // Auto-filled, read-only: the return trip starts from the
+            // outbound trip's "To" area (e.g. "Mashhad") — never the
+            // school's own name or address. The school itself stays
+            // attached below, fully independent of this area label. The
+            // real pickup coordinate is still the school building, since
+            // that's physically where the return trip departs from.
+            fromArea: toAddress,
+            fromAddress: toAddress,
+            fromLocation: schoolLocation,
+            toArea: returnToAddress,
+            toAddress: returnToAddress,
+            toLocation: returnToCoords,
+            schoolId: selectedSchool.id,
+            schoolName: selectedSchool.name,
+            schoolAddress: selectedSchool.city,
+            schoolLocation,
+            date: mainValidation.cleanDate,
+            departureTime: returnValidation.cleanTime,
+            pricePerSeat: cleanReturnPrice,
+            totalSeats: cleanReturnSeats,
+            car,
+            carColor,
+            carPlate,
+          };
+
+          await createSchoolRoundTrip(mainInput, returnInput, driver);
+        } else {
+          await createSchoolOutboundTrip(mainInput, driver);
+        }
       }
 
       // Best-effort — only after the trip actually saved, never for a
@@ -446,20 +498,26 @@ export default function SchoolTripForm() {
           </Text>
         </View>
 
+        {/* return_only: this field ONLY scopes which schools the school
+            picker below suggests (see schoolAreaLocationId) — it never
+            independently defines the trip's departure side anymore (see
+            handleSubmit's payload, always derived from selectedSchool), so
+            it's labeled as a city/area picker rather than "From" to avoid
+            implying it's an editable route endpoint in its own right. */}
         <IsraelLocationAutocomplete
-          label={t("booking.from")}
+          label={isReturnOnly ? t("schoolChildren.cityLabel") : t("booking.from")}
           value={fromAddress}
           onChangeText={handleFromChange}
           onSelectLocation={(location) => {
             setFromPlace(location);
             setFromError("");
           }}
-          placeholder={t("booking.enterDepartureCity")}
+          placeholder={isReturnOnly ? t("schoolChildren.selectCityPlaceholder") : t("booking.enterDepartureCity")}
           error={fromError}
         />
 
         <IsraelLocationAutocomplete
-          label={t("booking.to")}
+          label={isReturnOnly ? t("schoolTrip.returnDestination") : t("booking.to")}
           value={toAddress}
           onChangeText={handleToChange}
           onSelectLocation={(location) => {
@@ -472,7 +530,7 @@ export default function SchoolTripForm() {
         />
 
         <SchoolAutocomplete
-          label={t("schoolTrip.schoolLabel")}
+          label={isReturnOnly ? t("schoolTrip.pickupSchoolLabel") : t("schoolTrip.schoolLabel")}
           value={schoolQuery}
           onChangeText={handleSchoolChange}
           onSelectSchool={handleSelectSchool}

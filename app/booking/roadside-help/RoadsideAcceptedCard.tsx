@@ -26,6 +26,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { translateProblemTypesList } from "../../i18n/formatters";
+import { ltrContentStyle } from "../../i18n/rtl";
 import {
   buildDirectionsUrl,
   finishRoadsideHelp,
@@ -174,7 +175,7 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
       {request.passengerPhone ? (
         <Pressable style={styles.infoRow} onPress={callPassenger}>
           <Ionicons name="call-outline" size={16} color="#F58220" />
-          <Text style={[styles.infoText, styles.phoneText]}>
+          <Text style={[styles.infoText, styles.phoneText, ltrContentStyle]}>
             {request.passengerPhone}
           </Text>
         </Pressable>

@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 
 import { auth } from "../../firebase";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { marginStart } from "../i18n/rtl";
 import { fetchDriverEligibility } from "./driverEligibility";
 
 type Category = {
@@ -151,10 +152,9 @@ export default function AddDriverRouteScreen() {
                   {
                     width: cardWidth,
                     minHeight: columns === 1 ? 120 : 165,
-                    marginLeft: shouldCenterLastCard
-                      ? (cardWidth + gap) / 2
-                      : 0,
                   },
+                  shouldCenterLastCard &&
+                    marginStart((cardWidth + gap) / 2, isRTL),
                 ]}
                 onPress={() => router.push(category.route as any)}
               >

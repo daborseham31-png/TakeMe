@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
+import { reloadAppAsync } from "expo";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -45,10 +46,32 @@ export default function LanguageSelectorModal({ visible, onClose }: Props) {
       onClose();
 
       if (result === "restart-required") {
+        // The language + native RTL/LTR direction are already saved and
+        // forced at this point (see LanguageProvider.setLanguage) — this
+        // reload only needs to re-render the JS side under the direction
+        // that's already committed natively. reloadAppAsync (re-exported by
+        // the root `expo` package from expo-modules-core) is the safest
+        // mechanism available here: it works in both Expo Go and standalone/
+        // dev-client builds, in debug and release, without requiring the
+        // expo-updates package this project doesn't install (Updates.reloadAsync
+        // would need that dependency and is meant for fetching a new JS bundle,
+        // not just re-mounting the current one under a new native direction).
         Alert.alert(
           t("settings.restartRequiredTitle"),
           t("settings.restartRequiredMessage"),
-          [{ text: t("settings.restartNow") }],
+          [
+            {
+              text: t("settings.restartNow"),
+              onPress: () => {
+                reloadAppAsync("Language direction changed").catch(() => {
+                  // Nothing more we can safely do from JS if even this
+                  // fails — the language is already saved, so the next
+                  // manual app close/reopen still picks up the right
+                  // language and direction (see resolveInitialLanguage).
+                });
+              },
+            },
+          ],
         );
       } else {
         Alert.alert(t("settings.languageUpdated"), t("settings.languageUpdatedMessage"));

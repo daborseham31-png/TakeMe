@@ -55,6 +55,7 @@ type DriverInfo = { ratingAverage: number; ratingCount: number; photoUrl: string
 
 type ParsedChildEntry = {
   localId: string;
+  childId?: string;
   childName?: string;
   returnRequestedTime?: string;
 };
@@ -129,6 +130,7 @@ export default function SchoolTripResultsScreen() {
         .filter((entry) => entry && typeof entry.localId === "string")
         .map((entry) => ({
           localId: entry.localId,
+          childId: entry.childId || undefined,
           childName: entry.childName || undefined,
           returnRequestedTime: entry.returnRequestedTime || undefined,
         }));
@@ -393,6 +395,7 @@ export default function SchoolTripResultsScreen() {
         // Single-child (or legacy, entry-less) return search — the one
         // child this request is for is the only entry parsed, if any.
         childEntryId: parsedChildEntries[0]?.localId || "solo",
+        childId: parsedChildEntries[0]?.childId,
         childName: parsedChildEntries[0]?.childName,
         schoolId: String(params.schoolId || ""),
         schoolName: String(params.schoolName || ""),
@@ -454,6 +457,7 @@ export default function SchoolTripResultsScreen() {
     try {
       await createRideRequest({
         childEntryId: cs.entry.localId,
+        childId: cs.entry.childId,
         childName: cs.entry.childName,
         schoolId: String(params.schoolId || ""),
         schoolName: String(params.schoolName || ""),
@@ -503,7 +507,7 @@ export default function SchoolTripResultsScreen() {
         // eslint-disable-next-line no-await-in-loop
         await bookReturnForChild(
           cs.selectedTripId as string,
-          { localId: cs.entry.localId, childName: cs.entry.childName },
+          { localId: cs.entry.localId, childName: cs.entry.childName, childId: cs.entry.childId },
           paymentMethod,
           bookingGroupId,
         );

@@ -1,0 +1,607 @@
+/* ---------------------------------------------------------------------------
+   School Kiosk — visual identity matches the TakeMe app (warm beige
+   background, orange primary, white rounded cards) — see the Expo app's own
+   color usage (#F58220 orange, #FBF7F1 beige, #111827 dark text, #7C5F46
+   secondary text) for the exact same palette reused here.
+
+   Logical CSS properties (margin-inline-*, text-align: start, etc.) are used
+   wherever practical so RTL (ar/he) and LTR (en/ru) both work from the SAME
+   rules, driven only by the <html dir="rtl|ltr"> attribute app.js sets —
+   never a duplicated RTL stylesheet.
+--------------------------------------------------------------------------- */
+
+:root {
+  --color-bg: #fbf7f1;
+  --color-card: #ffffff;
+  --color-primary: #f58220;
+  --color-primary-dark: #d96f14;
+  --color-text: #111827;
+  --color-text-secondary: #7c5f46;
+  --color-border: #e7dcd1;
+  --color-input-bg: #fffdfc;
+  --color-danger: #b91c1c;
+  --color-danger-bg: #fee2e2;
+  --color-success: #166534;
+  --color-success-bg: #e7f7ec;
+  --color-focus: #1d4ed8;
+  --radius-lg: 22px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* CRITICAL — must come before any rule that sets `display` on a class also
+   used by a hideable element (.screen/.card/.app all set an unconditional
+   `display: flex`). Without this, an element with BOTH `class="screen"` and
+   the `hidden` attribute stays visually visible: the browser's own built-in
+   `[hidden] { display: none }` UA-stylesheet rule and an author rule like
+   `.screen { display: flex }` have the SAME specificity (0,1,0), and an
+   author stylesheet always wins over the UA stylesheet at equal
+   specificity — so `.screen`'s `display: flex` silently overrides `hidden`
+   with no other rule needed. `!important` here is deliberate and required:
+   it's the only way to guarantee this wins regardless of which other rule
+   in this file also sets `display` on the same element, and in what order.
+   This is what previously let the configuration-error screen and the
+   normal entry screen both render at once — app.js's readSchoolId()/init()
+   already correctly toggled the `hidden` attribute on the right elements;
+   only this CSS enforcement was missing. */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  font-size: 18px;
+  line-height: 1.4;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Screen-reader-only content — still present for assistive tech, never
+   visible, never affects layout. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Visible, high-contrast focus ring — never rely on the browser default
+   alone, and never remove it. */
+:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 3px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+}
+
+/* ---------------------------------------------------------------------------
+   Header — the title is centered against the FULL bar width, independent of
+   the language menu button's presence or width. This is done by taking the
+   language menu OUT of normal flow entirely (`position: absolute` inside a
+   `position: relative` bar) rather than balancing it against a mirrored
+   spacer column — a centered flex item never drifts off-center regardless
+   of what's layered on top of it.
+
+   The globe button is pinned to the bar's physical LEFT edge in both RTL
+   (ar/he) and LTR (en/ru) — this is a fixed corner control (like the globe
+   icon in most OS/browser language pickers), not a text element, so it
+   deliberately does NOT mirror with reading direction the way the digit
+   boxes or result rows do.
+--------------------------------------------------------------------------- */
+
+.topbar {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  min-height: 48px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.topbar__title {
+  max-width: calc(100% - 112px);
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: 900;
+  margin: 0;
+  color: var(--color-text);
+}
+
+.lang-menu {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.lang-menu__toggle {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-card);
+  /* Icon color — drives the inline SVG's `stroke="currentColor"` (see
+     index.html). Reuses the existing --color-primary variable (#F58220,
+     the TakeMe app's own primary orange) rather than a second hardcoded
+     copy of the same value. */
+  color: var(--color-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(17, 24, 39, 0.08);
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.lang-menu__icon {
+  display: block;
+}
+
+.lang-menu__toggle:hover {
+  /* Very light orange tint — distinct from (lighter than) the open-state
+     tint just below, so hover and "menu is open" remain visually
+     distinguishable from each other. */
+  background: #fff6ef;
+  border-color: var(--color-primary);
+}
+
+.lang-menu__toggle:active {
+  background: #fff2e8;
+}
+
+.lang-menu__toggle[aria-expanded="true"] {
+  /* Icon stays orange (color: var(--color-primary) above already applies
+     regardless of state) — only the background/border get a subtle tint
+     while the menu is open. */
+  background: #fff2e8;
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 10px rgba(245, 130, 32, 0.25);
+}
+
+/* A small floating panel: light background, rounded corners, soft shadow,
+   subtle border — deliberately its own custom look, never the browser's
+   default <select>/menu styling. Anchored to the toggle button's own left
+   edge (matching the button's fixed-left placement above), so it can never
+   drift under the centered title. */
+.lang-menu__dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 30;
+  min-width: 180px;
+  max-width: calc(100vw - 40px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px rgba(17, 24, 39, 0.16);
+}
+
+.lang-menu__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.lang-menu__option:hover {
+  background: var(--color-bg);
+}
+
+.lang-menu__option:active {
+  background: var(--color-border);
+}
+
+.lang-menu__option[aria-checked="true"] {
+  background: #fff2e8;
+  color: var(--color-primary-dark);
+}
+
+.lang-menu__option-check {
+  color: var(--color-primary);
+  font-weight: 900;
+  opacity: 0;
+}
+
+.lang-menu__option[aria-checked="true"] .lang-menu__option-check {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Screens — exactly one visible at a time (JS toggles the `hidden`
+   attribute); layout never depends on JS-computed positioning.
+--------------------------------------------------------------------------- */
+
+.screen {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.card {
+  width: 100%;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 28px 24px;
+  box-shadow: 0 6px 24px rgba(17, 24, 39, 0.06);
+}
+
+.card--center {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.icon {
+  font-size: 2.5rem;
+  margin: 0;
+}
+
+.icon--warning {
+  color: var(--color-primary);
+}
+
+.instruction {
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0 0 20px;
+}
+
+/* ---------------------------------------------------------------------------
+   Digit boxes — purely decorative (aria-hidden), reflect `code` state only.
+   A filled-but-masked box shows a dot; a just-typed box briefly shows the
+   real digit (see app.js's MASK_DELAY_MS) before masking, so shoulder-surfing
+   only ever sees, at most, the single most-recently-typed digit.
+--------------------------------------------------------------------------- */
+
+.digit-boxes {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 24px;
+  direction: ltr; /* a numeric code always reads left-to-right, even in an RTL UI */
+}
+
+.digit-box {
+  width: 48px;
+  height: 58px;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-input-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  font-weight: 900;
+  color: var(--color-text);
+}
+
+.digit-box[data-filled="true"] {
+  border-color: var(--color-primary);
+}
+
+.digit-box[data-masked="true"]::after {
+  content: "\2022";
+  font-size: 1.6rem;
+  color: var(--color-text);
+}
+
+/* ---------------------------------------------------------------------------
+   Keypad — large touch targets throughout (min 64px), 3-column grid.
+--------------------------------------------------------------------------- */
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.keypad__key {
+  min-height: 68px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-input-bg);
+  font-size: 1.5rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.keypad__key:active {
+  background: var(--color-border);
+}
+
+.keypad__key--action {
+  font-size: 1.1rem;
+  color: var(--color-text-secondary);
+}
+
+.primary-btn,
+.secondary-btn {
+  width: 100%;
+  min-height: 60px;
+  border-radius: var(--radius-md);
+  font-size: 1.15rem;
+  font-weight: 900;
+  cursor: pointer;
+  border: none;
+}
+
+.primary-btn {
+  background: var(--color-primary);
+  color: #ffffff;
+}
+
+.primary-btn:disabled {
+  background: var(--color-border);
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+}
+
+.primary-btn:not(:disabled):active {
+  background: var(--color-primary-dark);
+}
+
+.secondary-btn {
+  background: var(--color-card);
+  color: var(--color-primary);
+  border: 2px solid var(--color-primary);
+}
+
+/* ---------------------------------------------------------------------------
+   Loading
+--------------------------------------------------------------------------- */
+
+.spinner {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 6px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-top-color: var(--color-border);
+  }
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Result screen
+--------------------------------------------------------------------------- */
+
+.result-heading {
+  font-size: 1.4rem;
+  font-weight: 900;
+  margin: 0 0 6px;
+  text-align: center;
+}
+
+.result-heading--success {
+  color: var(--color-success);
+}
+
+.result-heading--danger {
+  color: var(--color-danger);
+}
+
+.result-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 0.95rem;
+  margin: 0 auto 18px;
+}
+
+.result-status-pill--ongoing {
+  background: #fff2e8;
+  color: #b86115;
+}
+
+.result-status-pill--success {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.result-status-pill--danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* Never rely on color alone: every status pill also carries its own icon
+   glyph (set in app.js), not just a background color. */
+.result-status-pill__icon {
+  font-size: 1.1rem;
+}
+
+.result-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 1.05rem;
+}
+
+.result-row:last-of-type {
+  border-bottom: none;
+}
+
+.result-row__label {
+  color: var(--color-text-secondary);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.result-row__value {
+  font-weight: 800;
+  text-align: end;
+  word-break: break-word;
+}
+
+.child-name {
+  text-align: center;
+  font-size: 1.3rem;
+  font-weight: 900;
+  margin: 0 0 4px;
+}
+
+.verification-box {
+  margin-top: 20px;
+  padding: 20px;
+  border-radius: var(--radius-md);
+  background: #fff8f2;
+  border: 2px solid #ffe2c5;
+  text-align: center;
+}
+
+.verification-box__label {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--color-text-secondary);
+  margin: 0 0 8px;
+}
+
+.verification-box__code {
+  font-size: 3rem;
+  font-weight: 900;
+  letter-spacing: 0.3em;
+  color: var(--color-text);
+  direction: ltr;
+  margin: 0 0 8px;
+}
+
+.verification-box__hint {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #b86115;
+  margin: 0;
+}
+
+.result-actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.countdown {
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive — centered max-width layout throughout; a bit more breathing
+   room and a wider keypad on tablet/desktop kiosk screens.
+--------------------------------------------------------------------------- */
+
+@media (min-width: 600px) {
+  body {
+    font-size: 19px;
+  }
+
+  .digit-box {
+    width: 56px;
+    height: 66px;
+    font-size: 2.1rem;
+  }
+
+  .keypad__key {
+    min-height: 76px;
+    font-size: 1.7rem;
+  }
+
+  .verification-box__code {
+    font-size: 3.6rem;
+  }
+}
+
+@media (min-width: 900px) {
+  .screen {
+    max-width: 640px;
+  }
+
+  .card {
+    padding: 40px;
+  }
+}

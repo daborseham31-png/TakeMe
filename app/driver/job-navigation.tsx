@@ -26,6 +26,7 @@ import {
   WorkErrandKind,
 } from "../booking/work-errand/workErrandLib";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { ltrContentStyle } from "../i18n/rtl";
 
 export default function JobNavigationScreen() {
   const { t } = useTranslation();
@@ -203,7 +204,7 @@ export default function JobNavigationScreen() {
               }
             >
               <Ionicons name="call-outline" size={16} color="#F58220" />
-              <Text style={[styles.infoText, styles.phone]}>
+              <Text style={[styles.infoText, styles.phone, ltrContentStyle]}>
                 {app.customerPhone}
               </Text>
             </Pressable>

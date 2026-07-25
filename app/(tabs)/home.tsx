@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next";
 import { auth, db } from "../../firebase";
 import { fetchDriverEligibility } from "../driver/driverEligibility";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { marginEnd, paddingEnd, positionEnd } from "../i18n/rtl";
 import {
   attachDistances,
   buildErrandBookNav,
@@ -473,7 +474,7 @@ export default function HomeScreen() {
           >
             <Ionicons name="notifications-outline" size={22} color="#7C5F46" />
             {unreadNotifs > 0 ? (
-              <View style={styles.iconBadge}>
+              <View style={[styles.iconBadge, positionEnd(-3, isRTL)]}>
                 <Text style={styles.iconBadgeText}>
                   {unreadNotifs > 99 ? "99+" : unreadNotifs}
                 </Text>
@@ -488,7 +489,7 @@ export default function HomeScreen() {
           >
             <Ionicons name="help-buoy-outline" size={22} color="#7C5F46" />
             {unreadHelp > 0 ? (
-              <View style={styles.iconBadge}>
+              <View style={[styles.iconBadge, positionEnd(-3, isRTL)]}>
                 <Text style={styles.iconBadgeText}>
                   {unreadHelp > 99 ? "99+" : unreadHelp}
                 </Text>
@@ -765,12 +766,12 @@ export default function HomeScreen() {
           showsHorizontalScrollIndicator={false}
           data={FILTER_KEYS}
           keyExtractor={(key) => key}
-          contentContainerStyle={styles.filterRow}
+          contentContainerStyle={[styles.filterRow, paddingEnd(28, isRTL)]}
           renderItem={({ item: key }) => {
             const active = filter === key;
 
             return (
-              <Pressable style={styles.filterChip} onPress={() => setFilter(key)}>
+              <Pressable style={[styles.filterChip, marginEnd(8, isRTL)]} onPress={() => setFilter(key)}>
                 {active ? (
                   <LinearGradient
                     colors={["#FFB870", "#F58220"]}
@@ -1145,7 +1146,6 @@ const styles = StyleSheet.create({
   iconBadge: {
     position: "absolute",
     top: -3,
-    right: -3,
     minWidth: 20,
     height: 20,
     borderRadius: 10,
@@ -1268,7 +1268,6 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     paddingHorizontal: 20,
-    paddingRight: 28,
     paddingBottom: 16,
   },
   filterChip: {
@@ -1282,7 +1281,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 9,
-    marginRight: 8,
     shadowColor: "#000",
     shadowOpacity: 0.03,
     shadowOffset: { width: 0, height: 2 },

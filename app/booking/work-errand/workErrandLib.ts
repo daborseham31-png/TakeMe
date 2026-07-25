@@ -191,6 +191,15 @@ export type NotifyInput = {
   // the right one). Left null/omitted for every other notification type.
   childEntryId?: string;
   childName?: string;
+  // The durable schoolChildren/{childId} profile id (see
+  // app/booking/school/schoolChildrenLib.ts) — absent whenever the waiting
+  // rideRequest itself had none (a plain temporary/manual entry with no
+  // saved profile). Carrying this through is what lets trip-confirm.tsx →
+  // bookReturnForChild write it onto the resulting schoolBookings document;
+  // without it, a return booked from tapping this notification would have
+  // no stable childId at all — invisible to anything that looks a child up
+  // by childId (e.g. the School Kiosk — see schoolKiosk.ts).
+  childId?: string;
 };
 
 export const notify = async (input: NotifyInput) => {
@@ -226,6 +235,7 @@ export const notify = async (input: NotifyInput) => {
       passengerId: input.passengerId || null,
       childEntryId: input.childEntryId || null,
       childName: input.childName || null,
+      childId: input.childId || null,
       read: false,
       readAt: null,
       deleted: false,

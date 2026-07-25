@@ -18,6 +18,8 @@ import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import { fetchDriverEligibility } from "../driverEligibility";
+import { useLanguage } from "../../i18n/LanguageProvider";
+import { backIconName } from "../../i18n/rtl";
 import DateInput, { TimeInput } from "./DateInput";
 
 import {
@@ -33,6 +35,7 @@ import {
 
 export default function WorkJobScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const { driverName, phone, driverAge, languages } = useDriverAccount();
 
   const [loading, setLoading] = useState(false);
@@ -252,7 +255,7 @@ export default function WorkJobScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#7C5F46" />
+          <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
         </Pressable>
 
         <View style={styles.card}>

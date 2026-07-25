@@ -19,6 +19,7 @@ import { db } from "../../firebase";
 import i18n from "../i18n";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { translateStoredDayName } from "../i18n/formatters";
+import { marginEnd } from "../i18n/rtl";
 import { createPassengerBooking } from "./bookingsLib";
 import DriverReviewsSection from "./DriverReviewsSection";
 import { getDisplayedDriverId } from "./driverReviewsLib";
@@ -899,7 +900,7 @@ const availableDrivers = drivers.filter((driver: any) => {
                       <View style={styles.detailsColumn}>
                         {(dateText || daysText) && (
                           <View style={styles.detailRow}>
-                            <View style={styles.iconCircle}>
+                            <View style={[styles.iconCircle, marginEnd(10, isRTL)]}>
                               <Ionicons
                                 name="calendar-outline"
                                 size={17}
@@ -1312,7 +1313,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF2E8",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 10,
   },
   detailTextBox: {
     flex: 1,

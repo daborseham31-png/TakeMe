@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
 import { useLanguage } from "../../../i18n/LanguageProvider";
+import { ltrContentStyle, paddingEnd } from "../../../i18n/rtl";
 import DriverReviewsSection from "../../DriverReviewsSection";
 import { getDisplayedDriverId } from "../../driverReviewsLib";
 
@@ -224,7 +225,7 @@ export default function FindWorkScreen() {
             {listings.map((listing) => (
               <View key={listing.id} style={styles.card}>
                 <View style={styles.header}>
-                  <View style={styles.leftHeader}>
+                  <View style={[styles.leftHeader, paddingEnd(10, isRTL)]}>
                     <Text style={styles.name}>
                       {listing.name}{" "}
                       <Text style={styles.gender}>
@@ -257,14 +258,14 @@ export default function FindWorkScreen() {
                 <Text style={styles.description}>{listing.descriptionEn}</Text>
 
                 <View style={styles.detailsGrid}>
-                  <View style={styles.detail}>
+                  <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                     <Ionicons name="time-outline" size={16} color="#7A665C" />
                     <Text style={styles.detailText}>
                       {listing.workHoursFrom} - {listing.workHoursTo}
                     </Text>
                   </View>
 
-                  <View style={styles.detail}>
+                  <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                     <Ionicons
                       name="calendar-outline"
                       size={16}
@@ -276,7 +277,7 @@ export default function FindWorkScreen() {
                     </Text>
                   </View>
 
-                  <View style={styles.detail}>
+                  <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                     <Ionicons
                       name="location-outline"
                       size={16}
@@ -285,14 +286,14 @@ export default function FindWorkScreen() {
                     <Text style={styles.detailText}>{listing.locationEn}</Text>
                   </View>
 
-                  <View style={styles.detail}>
+                  <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                     <Ionicons name="people-outline" size={16} color="#7A665C" />
                     <Text style={styles.detailText}>
                       {t("workErrand.workersNeededCount", { count: listing.workersNeeded })}
                     </Text>
                   </View>
 
-                  <View style={styles.detail}>
+                  <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                     <Ionicons
                       name="checkmark-done-outline"
                       size={16}
@@ -303,12 +304,12 @@ export default function FindWorkScreen() {
                     </Text>
                   </View>
 
-                  <View style={styles.detail}>
+                  <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                     <Ionicons name="call-outline" size={16} color="#7A665C" />
-                    <Text style={styles.detailText}>{listing.phone}</Text>
+                    <Text style={[styles.detailText, ltrContentStyle]}>{listing.phone}</Text>
                   </View>
 
-                  <View style={styles.detail}>
+                  <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                     <Text style={styles.price}>
                       ₪{listing.hourlyRate}{t("booking.perHourShort")}
                     </Text>
@@ -427,7 +428,6 @@ const styles = StyleSheet.create({
   },
   leftHeader: {
     flex: 1,
-    paddingRight: 10,
   },
   name: {
     fontSize: 18,
@@ -482,7 +482,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingRight: 6,
   },
   detailText: {
     fontSize: 13,

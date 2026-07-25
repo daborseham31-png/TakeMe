@@ -13,6 +13,8 @@ import FilterChips from "./components/FilterChips";
 import SearchBar from "./components/SearchBar";
 import { useAdminCollection } from "./useAdminCollection";
 import { translateDriverVerificationStatus } from "../i18n/formatters";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { chevronForwardIconName } from "../i18n/rtl";
 
 type StatusFilter = "all" | "pending_admin_review" | "approved" | "rejected" | "suspended";
 
@@ -32,6 +34,7 @@ const statusColor = (status: string) => {
 
 export default function AdminDriversScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const { data: drivers, loading, error, refresh } = useAdminCollection(subscribeDrivers);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -98,7 +101,7 @@ export default function AdminDriversScreen() {
         </View>
       </View>
 
-      <Ionicons name="chevron-forward" size={18} color={adminColors.placeholder} />
+      <Ionicons name={chevronForwardIconName(isRTL)} size={18} color={adminColors.placeholder} />
     </Pressable>
   );
 

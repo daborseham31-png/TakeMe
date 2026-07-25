@@ -12,6 +12,8 @@ import FilterChips from "./components/FilterChips";
 import SearchBar from "./components/SearchBar";
 import { useAdminCollection } from "./useAdminCollection";
 import { translateCategoryLabel } from "../i18n/formatters";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { pushToEnd } from "../i18n/rtl";
 
 type StatusFilter = "all" | "booked" | "ongoing" | "on_the_way" | "arrived" | "completed" | "cancelled";
 type PaymentFilter = "all" | "paid" | "unpaid" | "cash";
@@ -41,6 +43,7 @@ const statusColor = (status: string) => {
 
 export default function AdminBookingsScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const { data: bookings, loading, error, refresh } = useAdminCollection(subscribeAllBookings);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -86,7 +89,7 @@ export default function AdminBookingsScreen() {
         <Text style={styles.category}>
           {item.category ? translateCategoryLabel(item.category, item.category, t) : t("admin.bookingFallback")}
         </Text>
-        <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
+        <View style={[styles.statusDot, pushToEnd(isRTL), { backgroundColor: statusColor(item.status) }]} />
         <Text style={styles.statusText}>
           {item.status
             ? t(`admin.bookingStatusLabel.${item.status}`, { defaultValue: item.status })
@@ -184,7 +187,6 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 4,
-    marginLeft: "auto",
   },
   statusText: {
     fontSize: 11.5,

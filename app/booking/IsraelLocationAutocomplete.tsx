@@ -26,6 +26,7 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Pressable,
   ScrollView,
@@ -34,7 +35,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useTranslation } from "react-i18next";
 
 import { IsraelLocation } from "./israelLocations";
 import {
@@ -189,7 +189,9 @@ export default function IsraelLocationAutocomplete({
           {results.length === 0 ? (
             <View style={styles.emptyRow}>
               <Ionicons name="search-outline" size={16} color="#8B7B6B" />
-              <Text style={styles.emptyText}>{t("booking.noLocationsFound")}</Text>
+              <Text style={styles.emptyText}>
+                {t("booking.noLocationsFound")}
+              </Text>
             </View>
           ) : (
             <ScrollView
@@ -200,10 +202,7 @@ export default function IsraelLocationAutocomplete({
             >
               {results.map((location) => {
                 const name = getLocationDisplayName(location, language);
-                const [before, match, after] = splitForHighlight(
-                  name,
-                  value,
-                );
+                const [before, match, after] = splitForHighlight(name, value);
 
                 return (
                   <Pressable
@@ -211,11 +210,7 @@ export default function IsraelLocationAutocomplete({
                     style={styles.resultRow}
                     onPress={() => handleSelect(location)}
                   >
-                    <Ionicons
-                      name="location-sharp"
-                      size={16}
-                      color="#F58220"
-                    />
+                    <Ionicons name="location-sharp" size={16} color="#F58220" />
                     <Text
                       style={[styles.resultText, isRTL && styles.resultTextRTL]}
                       numberOfLines={1}

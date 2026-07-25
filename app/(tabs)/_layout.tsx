@@ -10,6 +10,7 @@ import { auth, db } from "../../firebase";
 import { RIDE_CATEGORY } from "../booking/rideBookingLib";
 import { stopDriverLocationTracking } from "../driverLocationTask";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { positionEnd } from "../i18n/rtl";
 import { registerForPushNotificationsAsync } from "../pushNotifications";
 
 const RIDE_LIKE_CATEGORIES = [RIDE_CATEGORY, "school"];
@@ -41,10 +42,12 @@ function BookingsTabIcon({
   color,
   size,
   hasActive,
+  isRTL,
 }: {
   color: string;
   size: number;
   hasActive: boolean;
+  isRTL: boolean;
 }) {
   return (
     <View>
@@ -54,7 +57,7 @@ function BookingsTabIcon({
           style={{
             position: "absolute",
             top: -2,
-            right: -3,
+            ...positionEnd(-3, isRTL),
             width: 11,
             height: 11,
             borderRadius: 6,
@@ -74,10 +77,12 @@ function MessagesTabIcon({
   color,
   size,
   unreadCount,
+  isRTL,
 }: {
   color: string;
   size: number;
   unreadCount: number;
+  isRTL: boolean;
 }) {
   return (
     <View>
@@ -87,7 +92,7 @@ function MessagesTabIcon({
           style={{
             position: "absolute",
             top: -4,
-            right: -8,
+            ...positionEnd(-8, isRTL),
             minWidth: 16,
             height: 16,
             borderRadius: 8,
@@ -110,7 +115,7 @@ function MessagesTabIcon({
 
 export default function TabLayout() {
   const { t } = useTranslation();
-  const { language } = useLanguage();
+  const { language, isRTL } = useLanguage();
   const languageRef = useRef(language);
   const [hasPassengerAttention, setHasPassengerAttention] = useState(false);
   const [hasDriverAttention, setHasDriverAttention] = useState(false);
@@ -240,6 +245,7 @@ export default function TabLayout() {
               color={color}
               size={size}
               hasActive={hasActiveRide}
+              isRTL={isRTL}
             />
           ),
         }}
@@ -250,7 +256,7 @@ export default function TabLayout() {
         options={{
           title: t("messages.tabTitle"),
           tabBarIcon: ({ color, size }) => (
-            <MessagesTabIcon color={color} size={size} unreadCount={unreadChats} />
+            <MessagesTabIcon color={color} size={size} unreadCount={unreadChats} isRTL={isRTL} />
           ),
         }}
       />

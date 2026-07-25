@@ -50,6 +50,7 @@ import { notify } from "../booking/work-errand/workErrandLib";
 import i18n from "../i18n";
 import { normalizeToWesternDigits } from "../i18n/digits";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { ltrContentStyle } from "../i18n/rtl";
 import { getUserLanguage } from "../i18n/userLanguage";
 
 type TripStatus =
@@ -1016,7 +1017,7 @@ export default function RideNavigationScreen() {
                   }
                 >
                   <Ionicons name="call-outline" size={16} color="#F58220" />
-                  <Text style={[styles.infoText, styles.phone]}>
+                  <Text style={[styles.infoText, styles.phone, ltrContentStyle]}>
                     {(booking as any).passengerPhone}
                   </Text>
                 </Pressable>

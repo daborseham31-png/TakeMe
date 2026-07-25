@@ -5,10 +5,9 @@
 // is never logged or echoed back in a response.
 // ---------------------------------------------------------------------------
 
-export interface Env {
-  GEMINI_API_KEY: string;
-  GEMINI_MODEL?: string;
-}
+import type { Env } from "./env";
+
+export type { Env };
 
 // Same default as the local server/gemini.js — Google's self-updating alias
 // for their current lightweight multimodal model.

@@ -58,7 +58,11 @@ export default function SchoolTripConfirmScreen() {
         if (Array.isArray(parsed)) {
           const entries = parsed
             .filter((entry) => entry && typeof entry.localId === "string")
-            .map((entry) => ({ localId: entry.localId, childName: entry.childName || undefined }));
+            .map((entry) => ({
+              localId: entry.localId,
+              childId: entry.childId || undefined,
+              childName: entry.childName || undefined,
+            }));
           if (entries.length > 0) return entries;
         }
       } catch {
@@ -69,15 +73,25 @@ export default function SchoolTripConfirmScreen() {
     // A "suitable ride found for Child N" notification tap (AGENTS.md #8)
     // carries the single child directly as childEntryId/childName rather
     // than a JSON childEntries array — treated the same as a one-child
-    // roster so that booking still tags the right child.
+    // roster so that booking still tags the right child. rideRequestId
+    // (also carried by that same notification — see notifications.tsx) is
+    // the waiting rideRequests/{id} this confirmation is for; carrying it
+    // through as sourceRideRequestId is what lets My Bookings show ONE
+    // continuous return card instead of a stale "searching" card plus a new
+    // "booked" one (see useMySchoolRows.tsx's findLinkedBooking).
     const soloChildEntryId = String(params.childEntryId || "");
     if (soloChildEntryId) {
-      return [{ localId: soloChildEntryId, childName: params.childName ? String(params.childName) : undefined }];
+      return [{
+        localId: soloChildEntryId,
+        childId: params.childId ? String(params.childId) : undefined,
+        childName: params.childName ? String(params.childName) : undefined,
+        sourceRideRequestId: params.rideRequestId ? String(params.rideRequestId) : undefined,
+      }];
     }
 
     return [];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.childEntries, params.childEntryId, params.childName]);
+  }, [params.childEntries, params.childEntryId, params.childName, params.rideRequestId]);
 
   const hasChildRoster = outboundChildEntries.length > 0;
 

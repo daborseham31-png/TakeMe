@@ -1,18 +1,39 @@
 // ---------------------------------------------------------------------------
-// TakeMe ID reader — Cloudflare Worker.
+// TakeMe backend — Cloudflare Worker.
 //
-// GET  /health           -> { ok: true, service: "TakeMe ID reader" }
-// POST /analyze-id       -> { imageBase64, mimeType? } -> ID fields
-// POST /analyze-license  -> { imageBase64, mimeType? } -> license fields
+// GET  /health                    -> { ok: true, service: "TakeMe ID reader" }
+// POST /analyze-id                -> { imageBase64, mimeType? } -> ID fields
+// POST /analyze-license           -> { imageBase64, mimeType? } -> license fields
+// POST /school-children/create     -> auth required -> new School Child profile
+// POST /school-children/reset-code -> auth required -> regenerated return code
+// POST /school-kiosk/lookup        -> PUBLIC, no auth -> today's return-ride info
 //
-// This is a 1:1 migration of the local server/index.js + server/gemini.js
-// Express backend onto the Workers runtime. Request/response shapes are
-// unchanged so the Expo app (app/login/idVerificationLib.ts) keeps working
-// unmodified — only EXPO_PUBLIC_BACKEND_URL changes.
+// The first three routes are a 1:1 migration of the local server/index.js +
+// server/gemini.js Express backend onto the Workers runtime — unchanged by
+// this file's later additions (app/login/idVerificationLib.ts keeps working
+// unmodified).
+//
+// The two /school-children/* routes are createSchoolChildProfile /
+// resetSchoolChildReturnCode, moved here from Firebase Callable Functions
+// because this project's Firebase plan (Spark) can't deploy Cloud Functions.
+// Both require a verified Firebase ID token (see firebaseAuth.ts) — there is
+// no unauthenticated path to either. See schoolChildren.ts for the actual
+// return-code logic and firestoreRest.ts for how this Worker reaches
+// Firestore without the (Workers-incompatible) Admin SDK.
+//
+// /school-kiosk/lookup (Phase 2 of the School Return Kiosk project — see
+// schoolKiosk.ts) is deliberately the ONE public, unauthenticated route in
+// this Worker: a child at a school kiosk device has no Firebase account to
+// present a token for. It is read-only (never writes to Firestore) and is
+// rate-limited far more aggressively than the authenticated routes above
+// (see rateLimit.ts's isKioskLookupRateLimited) precisely because it has no
+// per-uid identity to key off of.
 //
 // Privacy: the ID image and any extracted personal information (names,
 // birth dates, document numbers, etc.) are never logged or persisted
-// anywhere. Only generic error strings are logged.
+// anywhere. School Child and School Kiosk requests never log a token, a
+// permanent or temporary return code, or a service-account credential —
+// only generic error strings/status codes.
 // ---------------------------------------------------------------------------
 
 import {
@@ -25,15 +46,29 @@ import {
   asStringArray,
   GeminiApiKeyError,
 } from "./gemini";
+import { AuthError, verifyFirebaseIdToken } from "./firebaseAuth";
+import { isKioskLookupRateLimited, isRateLimited } from "./rateLimit";
+import {
+  createSchoolChildProfile,
+  hashReturnCode,
+  resetSchoolChildReturnCode,
+  SchoolChildError,
+} from "./schoolChildren";
+import { lookupSchoolKiosk } from "./schoolKiosk";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
   "Access-Control-Max-Age": "86400",
 };
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10mb, same cap as the old Express server
+
+// The School Child endpoints only ever accept two short strings
+// (childName/schoolId) or one id (childId) — a far smaller, stricter cap
+// than the image-upload endpoints above.
+const MAX_SCHOOL_CHILD_BODY_BYTES = 4 * 1024; // 4kb
 
 const SUPPORTED_MIME_TYPES = new Set([
   "image/jpeg",
@@ -227,6 +262,175 @@ const handleAnalyze = async (request: Request, env: Env, kind: AnalyzeKind): Pro
   });
 };
 
+// ---------------------------------------------------------------------------
+// School Child endpoints — shared plumbing (auth, rate limiting, body-size
+// limit, safe structured errors). The actual return-code logic lives in
+// schoolChildren.ts; this is only the HTTP boundary around it.
+// ---------------------------------------------------------------------------
+
+class HttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const SCHOOL_CHILD_ERROR_STATUS: Record<string, number> = {
+  "invalid-argument": 400,
+  "not-found": 404,
+  "permission-denied": 403,
+  "resource-exhausted": 429,
+  internal: 500,
+};
+
+// "Bearer <token>" only — anything else (missing header, wrong scheme, extra
+// whitespace) is treated as no token at all, never partially parsed.
+const getBearerToken = (request: Request): string | null => {
+  const header = request.headers.get("Authorization") || "";
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match ? match[1].trim() : null;
+};
+
+const parseJsonBody = async (request: Request, maxBytes: number): Promise<any> => {
+  const contentType = request.headers.get("Content-Type") || "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new HttpError(415, "Content-Type must be application/json.");
+  }
+
+  const contentLength = Number(request.headers.get("Content-Length") || "0");
+  if (contentLength > maxBytes) {
+    throw new HttpError(413, "Request body is too large.");
+  }
+
+  const rawBody = await request.text();
+  if (rawBody.length > maxBytes) {
+    throw new HttpError(413, "Request body is too large.");
+  }
+
+  try {
+    return rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    throw new HttpError(400, "Request body must be valid JSON.");
+  }
+};
+
+type SchoolChildRequestKind = "create" | "reset";
+
+// One handler for both routes (mirrors handleAnalyze's kind-based shape
+// above) — verifies the bearer token BEFORE touching the body or Firestore,
+// rate-limits per authenticated uid, then delegates to schoolChildren.ts.
+// Every failure path returns a short, safe, generic message — never a raw
+// error object, a stack trace, or a Firestore/Google API response body.
+const handleSchoolChildrenRequest = async (
+  request: Request,
+  env: Env,
+  kind: SchoolChildRequestKind,
+): Promise<Response> => {
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed." }, 405);
+  }
+
+  const logTag = kind === "create" ? "/school-children/create" : "/school-children/reset-code";
+
+  try {
+    const token = getBearerToken(request);
+    if (!token) {
+      return jsonResponse({ error: "Missing or malformed Authorization header." }, 401);
+    }
+
+    let user;
+    try {
+      user = await verifyFirebaseIdToken(token, env.FIREBASE_PROJECT_ID);
+    } catch (error) {
+      // Never forward WHY verification failed (expired vs. malformed vs.
+      // wrong project, etc.) — that's internal detail an attacker could use
+      // to fine-tune a forged token. Logged generically, never the token
+      // itself.
+      console.error(`[${logTag}] token verification failed`, error instanceof AuthError ? error.message : "unknown");
+      return jsonResponse({ error: "Unauthenticated." }, 401);
+    }
+
+    // Keyed by kind + uid — a parent's create attempts and reset attempts
+    // are tracked independently, and never affected by any OTHER parent's
+    // activity (see rateLimit.ts for this counter's per-isolate scope).
+    if (isRateLimited(`${kind}:${user.uid}`)) {
+      return jsonResponse({ error: "Too many requests. Please try again shortly." }, 429);
+    }
+
+    const body = await parseJsonBody(request, MAX_SCHOOL_CHILD_BODY_BYTES);
+
+    const result =
+      kind === "create"
+        ? await createSchoolChildProfile(env, user.uid, body)
+        : await resetSchoolChildReturnCode(env, user.uid, body);
+
+    return jsonResponse(result);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return jsonResponse({ error: error.message }, error.status);
+    }
+
+    if (error instanceof SchoolChildError) {
+      return jsonResponse({ error: error.message }, SCHOOL_CHILD_ERROR_STATUS[error.code] || 500);
+    }
+
+    // Never the raw error/stack — only its name, and only to the Worker's
+    // own logs.
+    console.error(`[${logTag}] unexpected error`, error instanceof Error ? error.name : "unknown");
+    return jsonResponse({ error: "Something went wrong. Please try again." }, 500);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// School Kiosk lookup — PUBLIC (no Authorization header at all; see
+// schoolKiosk.ts's header for why). Same body-size cap as the other School
+// Child routes (a returnCode + schoolId pair is even smaller than
+// childName+schoolId, so the existing 4kb ceiling is already generous), but
+// its own, much stricter rate limiter keyed by IP + the submitted code's own
+// hash (see rateLimit.ts's isKioskLookupRateLimited) since there is no
+// authenticated uid here to key off of at all.
+// ---------------------------------------------------------------------------
+
+const handleSchoolKioskLookup = async (request: Request, env: Env): Promise<Response> => {
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed." }, 405);
+  }
+
+  // Cloudflare sets this at the edge from the real TCP connection — a client
+  // cannot override it by sending its own header of the same name.
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+
+  try {
+    const body = await parseJsonBody(request, MAX_SCHOOL_CHILD_BODY_BYTES);
+
+    // The rate-limit key is the SUBMITTED code's hash, never the plaintext
+    // code itself (matches schoolKiosk.ts's own lookup-by-hash approach) —
+    // an invalid/non-string value still hashes to SOME stable bucket rather
+    // than skipping the per-code limiter entirely.
+    const rawReturnCode = typeof body?.returnCode === "string" ? body.returnCode.trim() : "";
+    const codeHashForRateLimit = await hashReturnCode(rawReturnCode || "invalid");
+
+    if (await isKioskLookupRateLimited(env.SCHOOL_KIOSK_RATE_LIMIT, ip, codeHashForRateLimit)) {
+      return jsonResponse({ error: "Too many requests. Please try again shortly." }, 429);
+    }
+
+    const result = await lookupSchoolKiosk(env, body);
+    return jsonResponse(result);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return jsonResponse({ error: error.message }, error.status);
+    }
+
+    // Never the raw error/stack, never anything from the request body
+    // (which may still contain the plaintext code at this point) — only the
+    // error's own name, and only to the Worker's own logs.
+    console.error("[/school-kiosk/lookup] unexpected error", error instanceof Error ? error.name : "unknown");
+    return jsonResponse({ error: "Something went wrong. Please try again." }, 500);
+  }
+};
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
@@ -245,6 +449,18 @@ export default {
 
     if (url.pathname === "/analyze-license") {
       return handleAnalyze(request, env, "license");
+    }
+
+    if (url.pathname === "/school-children/create") {
+      return handleSchoolChildrenRequest(request, env, "create");
+    }
+
+    if (url.pathname === "/school-children/reset-code") {
+      return handleSchoolChildrenRequest(request, env, "reset");
+    }
+
+    if (url.pathname === "/school-kiosk/lookup") {
+      return handleSchoolKioskLookup(request, env);
     }
 
     return jsonResponse({ error: "Not found." }, 404);

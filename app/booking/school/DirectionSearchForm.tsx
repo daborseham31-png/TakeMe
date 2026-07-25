@@ -2,7 +2,9 @@
 // NEW school-ride search — outbound only / return only / round trip
 // (AGENTS.md #4). Searches the NEW schoolTrips collection via
 // /booking/school/trip-results, independent of the legacy driverRoutes-based
-// LegacySchoolSearchForm reachable from the "Weekly / classic" tab.
+// LegacySchoolSearchForm reachable from the "Weekly / classic" tab (that
+// legacy form has no per-child concept at all, so none of this applies
+// there).
 //
 // School Name / From / To are three fully independent fields, exactly like
 // the driver-side creation form (SchoolTripForm.tsx) — the school is never
@@ -10,15 +12,24 @@
 // correction: "Nazareth" (From) and "Mashhad" (To) are general trip areas;
 // "Mashhad Elementary School" (School) is the exact building, independent
 // of them.
+//
+// Every child slot on this form MUST be linked to a durable
+// schoolChildren/{childId} profile (see schoolChildrenLib.ts) — there is no
+// free-text "just type a name" path anymore. This is what makes the child's
+// own permanent return identification code (schoolChildren.returnCode)
+// available to show read-only on this form, and what makes every return
+// booking resolvable back to a real child (see useMySchoolRows.tsx's
+// childEntryMatchesReturnBooking).
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { useLanguage } from "../../i18n/LanguageProvider";
+import { directionalTextAlign } from "../../i18n/rtl";
 import DateInput, { TimeInput } from "../../driver/create/DateInput";
 import { normalizeDateToYMD, styles } from "../../driver/create/driverHelpers";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
@@ -26,16 +37,32 @@ import { IsraelLocation } from "../israelLocations";
 import { resolveLocationCoordinates } from "../locationSearch";
 import SchoolAutocomplete from "../SchoolAutocomplete";
 import { getLocalizedSchoolName, SchoolLocation } from "../schools";
+import { SchoolChild, subscribeMyChildren } from "./schoolChildrenLib";
 
 type DirectionMode = "outbound" | "return" | "roundTrip";
 
 // One draft row per seat/child (AGENTS.md #3 — "each seat may represent a
 // different child"). localId is a client-only, session-scoped id (never a
 // Firestore id) carried through to SchoolPassengerEntry/RideRequest/
-// SchoolBooking once the parent actually searches/books. Kept local to this
-// form; trip-results.tsx re-derives its own working copy from the
-// `childEntries` param this screen serializes on search.
-type ChildEntryDraft = { localId: string; name: string; returnTime: string };
+// SchoolBooking once the parent actually searches/books.
+//
+// childId/schoolId/returnCode are only ever set TOGETHER, as a snapshot
+// taken at the moment a saved schoolChildren profile is picked
+// (handleSelectChildProfile) — never typed, never edited, never generated
+// here. schoolId is kept on the row (not just re-derived from the form's
+// own selectedSchool) so a stale selection can be detected and cleared if
+// the parent changes the school afterwards (see the selectedSchool effect
+// below). returnCode is the child's own PERMANENT return identification
+// code, shown read-only under the row — this form only ever reads it, it
+// never writes schoolChildren.returnCode.
+type ChildEntryDraft = {
+  localId: string;
+  childId?: string;
+  name: string;
+  schoolId?: string;
+  returnCode?: string;
+  returnTime: string;
+};
 
 const makeLocalId = () => `child_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -88,8 +115,11 @@ export default function DirectionSearchForm() {
   const [morningTime, setMorningTime] = useState("07:30");
   const [showMorningPicker, setShowMorningPicker] = useState(false);
 
-  const [finishTime, setFinishTime] = useState("14:00");
-  const [showFinishPicker, setShowFinishPicker] = useState(false);
+  // Default return time seeded onto a brand-new child row, and the fallback
+  // value for "use the same time for all children" — no longer rendered as
+  // its own standalone field (every child row always has its own time
+  // picker now, even when there's only one child).
+  const [finishTime] = useState("14:00");
   // Which single child row's time picker is open — only one at a time,
   // same "one dropdown/picker open at once" convention used elsewhere.
   const [openChildTimeFor, setOpenChildTimeFor] = useState<string | null>(null);
@@ -97,15 +127,31 @@ export default function DirectionSearchForm() {
   const [seats, setSeats] = useState("1");
   const [saving, setSaving] = useState(false);
 
-  // Per-child return times — only meaningful once a return leg exists
-  // (mode "return"/"roundTrip") AND there's more than one seat/child. Kept
-  // in sync with `seats` below rather than recomputed ad hoc, so editing an
-  // individual child's time/name survives increasing/decreasing the seat
-  // count by an unrelated amount.
   const [children, setChildren] = useState<ChildEntryDraft[]>(
     makeChildDrafts(1, finishTime, []),
   );
-  const showPerChildReturn = mode !== "outbound" && Number(seats) > 1;
+
+  // The parent's own durable School Child profiles (see schoolChildrenLib.ts)
+  // — a live subscription, so a child added/edited/deactivated on the
+  // Manage Children screen (reachable from the empty-state button below)
+  // appears here immediately, with no app restart and no manual refresh:
+  // this is the SAME onSnapshot listener the whole time the parent
+  // navigates to Manage Children and back, never re-subscribed or paused.
+  const [myChildren, setMyChildren] = useState<SchoolChild[]>([]);
+
+  useEffect(() => {
+    const unsub = subscribeMyChildren((next) => setMyChildren(next.filter((c) => c.active)));
+    return unsub;
+  }, []);
+
+  // Saved profiles for the CURRENTLY selected school only — a profile
+  // belongs to one school (schoolChildrenLib.ts), so a child saved for a
+  // different school is never offered here. Compared by schoolId, never by
+  // the school's displayed/localized name.
+  const childProfilesForSchool = useMemo(
+    () => (selectedSchool ? myChildren.filter((c) => c.schoolId === selectedSchool.id) : []),
+    [myChildren, selectedSchool],
+  );
 
   useEffect(() => {
     setChildren((prev) => makeChildDrafts(Math.max(1, Number(seats) || 1), finishTime, prev));
@@ -115,17 +161,73 @@ export default function DirectionSearchForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seats]);
 
-  const handleChildNameChange = (localId: string, name: string) => {
-    setChildren((prev) => prev.map((c) => (c.localId === localId ? { ...c, name } : c)));
-  };
+  // If the parent changes the selected school AFTER already linking
+  // children, any row whose stored schoolId no longer matches the new
+  // school is cleared back to unselected — a mismatched child is never
+  // silently kept (AGENTS.md's school-matching requirement). Rows with no
+  // childId yet are untouched.
+  useEffect(() => {
+    if (!selectedSchool) return;
+    setChildren((prev) =>
+      prev.map((c) =>
+        c.childId && c.schoolId && c.schoolId !== selectedSchool.id
+          ? { localId: c.localId, name: "", returnTime: c.returnTime }
+          : c,
+      ),
+    );
+  }, [selectedSchool]);
 
   const handleChildTimeChange = (localId: string, time: string) => {
     setChildren((prev) => prev.map((c) => (c.localId === localId ? { ...c, returnTime: time } : c)));
   };
 
+  // Picking a saved profile snapshots childId/name/schoolId/returnCode onto
+  // THIS row only (matched by its own stable localId — never by array
+  // index, never by name, never by return time), leaving every other row
+  // untouched. `profile: null` clears the row back to unselected.
+  const handleSelectChildProfile = (localId: string, profile: SchoolChild | null) => {
+    setChildren((prev) =>
+      prev.map((c) =>
+        c.localId === localId
+          ? profile
+            ? {
+                ...c,
+                childId: profile.id,
+                name: profile.childName,
+                schoolId: profile.schoolId,
+                returnCode: profile.returnCode,
+              }
+            : { localId: c.localId, name: "", returnTime: c.returnTime }
+          : c,
+      ),
+    );
+  };
+
   const applySameReturnTimeToAll = (time: string) => {
     setChildren((prev) => prev.map((c) => ({ ...c, returnTime: time })));
   };
+
+  // -------------------------------------------------------------------
+  // Saved-child picker modal — which row (by localId) it's currently open
+  // for. Eligible choices are this school's saved children MINUS whichever
+  // ones are already linked to a DIFFERENT row (duplicate protection by
+  // childId, never by name/position — see AGENTS.md's requirement that the
+  // same child can never be picked into two rows in the same booking).
+  // -------------------------------------------------------------------
+  const [pickerForLocalId, setPickerForLocalId] = useState<string | null>(null);
+
+  const openChildPicker = (localId: string) => setPickerForLocalId(localId);
+  const closeChildPicker = () => setPickerForLocalId(null);
+
+  const eligibleChildrenForPicker = useMemo(() => {
+    if (!pickerForLocalId) return [];
+    const usedElsewhere = new Set(
+      children
+        .filter((c) => c.localId !== pickerForLocalId && c.childId)
+        .map((c) => c.childId),
+    );
+    return childProfilesForSchool.filter((profile) => !usedElsewhere.has(profile.id));
+  }, [pickerForLocalId, children, childProfilesForSchool]);
 
   const handleSchoolChange = (text: string) => {
     setSchoolQuery(text);
@@ -229,6 +331,54 @@ export default function DirectionSearchForm() {
       return;
     }
 
+    const includedChildren = children.slice(0, cleanSeats);
+
+    // ---------------------------------------------------------------
+    // Every included child row must be a real, valid, linked saved-child
+    // selection before this ever reaches the search/booking screens — see
+    // AGENTS.md: no manually typed unlinked name may ever proceed.
+    // ---------------------------------------------------------------
+
+    if (childProfilesForSchool.length === 0) {
+      Alert.alert(t("schoolChildren.genericError"), t("schoolChildren.addChildrenFirstMessage"));
+      return;
+    }
+
+    const missingChild = includedChildren.find((child) => !child.childId);
+    if (missingChild) {
+      Alert.alert(t("schoolChildren.genericError"), t("schoolChildren.childRequiredError"));
+      return;
+    }
+
+    const seenChildIds = new Set<string>();
+    const duplicateChild = includedChildren.find((child) => {
+      if (!child.childId) return false;
+      if (seenChildIds.has(child.childId)) return true;
+      seenChildIds.add(child.childId);
+      return false;
+    });
+    if (duplicateChild) {
+      Alert.alert(t("schoolChildren.genericError"), t("schoolChildren.childAlreadySelectedError"));
+      return;
+    }
+
+    const mismatchedSchoolChild = includedChildren.find(
+      (child) => child.childId && child.schoolId && child.schoolId !== selectedSchool.id,
+    );
+    if (mismatchedSchoolChild) {
+      Alert.alert(t("schoolChildren.genericError"), t("schoolChildren.childSchoolMismatchError"));
+      return;
+    }
+
+    const missingCodeChild = includedChildren.find((child) => child.childId && !child.returnCode);
+    if (missingCodeChild) {
+      Alert.alert(
+        t("schoolChildren.genericError"),
+        t("schoolChildren.missingReturnCodeError", { child: missingCodeChild.name }),
+      );
+      return;
+    }
+
     try {
       setSaving(true);
 
@@ -258,15 +408,16 @@ export default function DirectionSearchForm() {
       const direction = mode === "return" ? "from_school" : "to_school";
       const requestedTime = mode === "return" ? finishTime : morningTime;
 
-      // One entry per seat/child (AGENTS.md #3) — every child always gets
-      // its own localId + optional name; a return-carrying mode also gives
-      // each child its own requested return time (never Child 1's time
-      // reused for Child 2/3). Outbound-only search still produces entries
-      // (for outbound booking tagging later) but with no per-child time.
-      const activeChildren = mode === "outbound" ? makeChildDrafts(cleanSeats, "", []) : children;
-      const childEntries = activeChildren.slice(0, cleanSeats).map((child) => ({
+      // One entry per seat/child (AGENTS.md #3) — every child is now always
+      // a real saved-profile selection (childId always present, validated
+      // above), with its own requested return time for any return-carrying
+      // mode. Never includes schoolId/returnCode here — the permanent code
+      // stays out of every booking document (see this file's header); only
+      // childId/childName travel onward.
+      const childEntries = includedChildren.map((child) => ({
         localId: child.localId,
-        childName: child.name.trim() || undefined,
+        childId: child.childId,
+        childName: child.name,
         returnRequestedTime: mode === "outbound" ? undefined : child.returnTime || finishTime,
       }));
 
@@ -309,49 +460,133 @@ export default function DirectionSearchForm() {
     }
   };
 
-  // One row per child — name (optional) + that child's own return time
-  // (AGENTS.md #3: never reuse Child 1's time for Child 2/3). Shared by the
-  // standalone "return" mode and round trip's return section below.
-  const renderChildRows = (associatedDate: string) => (
-    <View style={localStyles.childrenBox}>
-      <Text style={[styles.label, isRTL && { textAlign: "right" }]}>
-        {t("schoolTrip.childrenReturnTimesTitle")}
-      </Text>
-
-      {children.map((child, index) => (
-        <View key={child.localId} style={localStyles.childRow}>
-          <Text style={localStyles.childRowTitle}>
-            {t("schoolTrip.childNumber", { number: index + 1 })}
-          </Text>
-
-          <TextInput
-            style={[styles.input, isRTL && { textAlign: "right" }]}
-            placeholder={t("schoolTrip.childName")}
-            placeholderTextColor="#8B7B6B"
-            value={child.name}
-            onChangeText={(text) => handleChildNameChange(child.localId, text)}
-          />
-
-          <TimeInput
-            label={t("schoolTrip.finishingTime")}
-            value={child.returnTime}
-            onChange={(value) => handleChildTimeChange(child.localId, value)}
-            showPicker={openChildTimeFor === child.localId}
-            setShowPicker={(value) => setOpenChildTimeFor(value ? child.localId : null)}
-            associatedDate={associatedDate}
-          />
-        </View>
-      ))}
-
-      <Pressable
-        style={localStyles.useSameButton}
-        onPress={() => applySameReturnTimeToAll(children[0]?.returnTime || finishTime)}
+  // A tappable "Child" field — shows the linked child's name once selected,
+  // or a placeholder otherwise. Tapping ALWAYS opens the picker modal for
+  // exactly this row (by localId), never any other row.
+  const renderChildPickerField = (child: ChildEntryDraft) => (
+    <Pressable style={localStyles.childPickerField} onPress={() => openChildPicker(child.localId)}>
+      <Ionicons
+        name="person-circle-outline"
+        size={18}
+        color={child.childId ? "#F58220" : "#8B7B6B"}
+      />
+      <Text
+        style={[localStyles.childPickerText, !child.childId && localStyles.childPickerPlaceholder]}
+        numberOfLines={1}
       >
-        <Ionicons name="copy-outline" size={15} color="#F58220" />
-        <Text style={localStyles.useSameButtonText}>{t("schoolTrip.useSameTimeForAll")}</Text>
-      </Pressable>
-    </View>
+        {child.childId ? child.name : t("schoolChildren.selectChildPlaceholder")}
+      </Text>
+      <Ionicons name="chevron-down" size={16} color="#8B7B6B" />
+    </Pressable>
   );
+
+  const renderManageChildrenCta = () => (
+    <Pressable
+      style={localStyles.manageChildrenLinkButton}
+      onPress={() => {
+        closeChildPicker();
+        router.push("/booking/school/my-children" as any);
+      }}
+    >
+      <Ionicons name="people-outline" size={15} color="#F58220" />
+      <Text style={localStyles.manageChildrenLinkText}>{t("schoolChildren.manageChildrenLink")}</Text>
+    </Pressable>
+  );
+
+  // One row per child — a mandatory saved-child selector + (for a
+  // return-carrying row — withTime: true) that child's own permanent return
+  // identification code (read-only) and own return time (AGENTS.md #3:
+  // never reuse Child 1's time for Child 2/3). Shared by the standalone
+  // "return" mode, round trip's return section, and (withTime: false) both
+  // outbound contexts (standalone "outbound" mode and round trip's own
+  // outbound leg).
+  const renderChildSection = (associatedDate: string, withTime: boolean) => {
+    if (!selectedSchool) {
+      return (
+        <View style={localStyles.childrenBox}>
+          <Text style={[styles.label, isRTL && { textAlign: "right" }]}>
+            {t("schoolChildren.selectChild")}
+          </Text>
+          <Text style={localStyles.noSavedChildrenHint}>{t("schoolTrip.selectSchoolFirst")}</Text>
+        </View>
+      );
+    }
+
+    if (childProfilesForSchool.length === 0) {
+      return (
+        <View style={localStyles.childrenBox}>
+          <Text style={[styles.label, isRTL && { textAlign: "right" }]}>
+            {t("schoolChildren.selectChild")}
+          </Text>
+          <View style={localStyles.noChildrenBox}>
+            <Ionicons name="people-outline" size={22} color="#B86115" />
+            <Text style={localStyles.noChildrenText}>{t("schoolChildren.addChildrenFirstMessage")}</Text>
+            {renderManageChildrenCta()}
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={localStyles.childrenBox}>
+        <Text style={[styles.label, isRTL && { textAlign: "right" }]}>
+          {withTime ? t("schoolTrip.childrenReturnTimesTitle") : t("schoolChildren.selectChild")}
+        </Text>
+
+        {children.map((child, index) => (
+          <View key={child.localId} style={localStyles.childRow}>
+            <Text style={localStyles.childRowTitle}>
+              {t("schoolTrip.childNumber", { number: index + 1 })}
+            </Text>
+
+            <Text style={localStyles.fieldLabel}>{t("schoolChildren.selectChild")}</Text>
+            {renderChildPickerField(child)}
+
+            {withTime && child.childId ? (
+              <View style={localStyles.returnCodeBox}>
+                <Text style={localStyles.returnCodeLabel}>
+                  {t("schoolChildren.returnIdentificationCodeLabel")}
+                </Text>
+                {child.returnCode ? (
+                  <Text style={localStyles.returnCodeValue}>{child.returnCode}</Text>
+                ) : (
+                  <Text
+                    style={[
+                      localStyles.returnCodeErrorText,
+                      { textAlign: directionalTextAlign(isRTL) },
+                    ]}
+                  >
+                    {t("schoolChildren.missingReturnCodeInline")}
+                  </Text>
+                )}
+              </View>
+            ) : null}
+
+            {withTime ? (
+              <TimeInput
+                label={t("schoolTrip.finishingTime")}
+                value={child.returnTime}
+                onChange={(value) => handleChildTimeChange(child.localId, value)}
+                showPicker={openChildTimeFor === child.localId}
+                setShowPicker={(value) => setOpenChildTimeFor(value ? child.localId : null)}
+                associatedDate={associatedDate}
+              />
+            ) : null}
+          </View>
+        ))}
+
+        {withTime && children.length > 1 ? (
+          <Pressable
+            style={localStyles.useSameButton}
+            onPress={() => applySameReturnTimeToAll(children[0]?.returnTime || finishTime)}
+          >
+            <Ionicons name="copy-outline" size={15} color="#F58220" />
+            <Text style={localStyles.useSameButtonText}>{t("schoolTrip.useSameTimeForAll")}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  };
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
@@ -449,22 +684,6 @@ export default function DirectionSearchForm() {
           />
         ) : null}
 
-        {mode === "return" && !showPerChildReturn ? (
-          <TimeInput
-            label={t("schoolTrip.endOfSchoolTime")}
-            value={finishTime}
-            onChange={(value) => {
-              setFinishTime(value);
-              // Single-child case: keep the one child entry's own time in
-              // sync so a later seat increase starts from this value.
-              setChildren((prev) => prev.map((c) => ({ ...c, returnTime: value })));
-            }}
-            showPicker={showFinishPicker}
-            setShowPicker={setShowFinishPicker}
-            associatedDate={date}
-          />
-        ) : null}
-
         <Text style={[styles.label, isRTL && { textAlign: "right" }]}>{t("booking.seats")}</Text>
         <View style={localStyles.seatsRow}>
           <Pressable style={localStyles.seatButton} onPress={decreaseSeats}>
@@ -476,7 +695,7 @@ export default function DirectionSearchForm() {
           </Pressable>
         </View>
 
-        {mode === "return" && showPerChildReturn ? renderChildRows(date) : null}
+        {renderChildSection(date, mode === "return")}
       </View>
 
       {mode === "roundTrip" ? (
@@ -522,21 +741,7 @@ export default function DirectionSearchForm() {
             </View>
           </View>
 
-          {showPerChildReturn ? (
-            renderChildRows(date)
-          ) : (
-            <TimeInput
-              label={t("schoolTrip.endOfSchoolTime")}
-              value={finishTime}
-              onChange={(value) => {
-                setFinishTime(value);
-                setChildren((prev) => prev.map((c) => ({ ...c, returnTime: value })));
-              }}
-              showPicker={showFinishPicker}
-              setShowPicker={setShowFinishPicker}
-              associatedDate={date}
-            />
-          )}
+          {renderChildSection(date, true)}
         </View>
       ) : null}
 
@@ -548,6 +753,54 @@ export default function DirectionSearchForm() {
         <Ionicons name="search-outline" size={18} color="#FFFFFF" />
         <Text style={localStyles.searchText}>{t("booking.searchDrivers")}</Text>
       </Pressable>
+
+      <Modal
+        visible={pickerForLocalId !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={closeChildPicker}
+      >
+        <View style={localStyles.modalOverlay}>
+          <Pressable style={localStyles.modalBackdrop} onPress={closeChildPicker} />
+
+          <View style={localStyles.modalCard}>
+            <View style={localStyles.modalHandle} />
+            <Text style={localStyles.modalTitle}>{t("schoolChildren.selectChild")}</Text>
+            <Text style={localStyles.modalSubtitle}>{t("schoolChildren.chooseSavedChildHint")}</Text>
+
+            {eligibleChildrenForPicker.length === 0 ? (
+              <View style={localStyles.noChildrenBox}>
+                <Ionicons name="people-outline" size={22} color="#B86115" />
+                <Text style={localStyles.noChildrenText}>
+                  {t("schoolChildren.addChildrenFirstMessage")}
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
+                {eligibleChildrenForPicker.map((profile) => (
+                  <Pressable
+                    key={profile.id}
+                    style={localStyles.modalChildRow}
+                    onPress={() => {
+                      if (pickerForLocalId) handleSelectChildProfile(pickerForLocalId, profile);
+                      closeChildPicker();
+                    }}
+                  >
+                    <Ionicons name="person-circle-outline" size={20} color="#F58220" />
+                    <Text style={localStyles.modalChildRowText}>{profile.childName}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+
+            {renderManageChildrenCta()}
+
+            <Pressable style={localStyles.modalCancelButton} onPress={closeChildPicker}>
+              <Text style={localStyles.modalCancelText}>{t("schoolChildren.cancel")}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -573,6 +826,100 @@ const localStyles = {
     fontSize: 12.5,
     marginBottom: 8,
     textTransform: "uppercase" as const,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: "#7C5F46",
+    marginBottom: 6,
+  },
+  noSavedChildrenHint: {
+    color: "#8B7B6B",
+    fontSize: 12,
+    fontWeight: "600" as const,
+    marginBottom: 10,
+  },
+  noChildrenBox: {
+    alignItems: "center" as const,
+    backgroundColor: "#FFF8F0",
+    borderWidth: 1,
+    borderColor: "#FFE2C5",
+    borderRadius: 12,
+    padding: 16,
+    gap: 8,
+  },
+  noChildrenText: {
+    color: "#7C5F46",
+    fontWeight: "700" as const,
+    fontSize: 13,
+    textAlign: "center" as const,
+  },
+  manageChildrenLinkButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 6,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#F58220",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginTop: 4,
+  },
+  manageChildrenLinkText: {
+    color: "#F58220",
+    fontWeight: "900" as const,
+    fontSize: 13,
+  },
+  childPickerField: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  childPickerText: {
+    flex: 1,
+    color: "#111827",
+    fontWeight: "800" as const,
+    fontSize: 14.5,
+  },
+  childPickerPlaceholder: {
+    color: "#8B7B6B",
+    fontWeight: "600" as const,
+  },
+  returnCodeBox: {
+    marginTop: 10,
+    backgroundColor: "#F3ECE3",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+  },
+  returnCodeLabel: {
+    color: "#7C5F46",
+    fontWeight: "800" as const,
+    fontSize: 12,
+  },
+  returnCodeValue: {
+    color: "#111827",
+    fontWeight: "900" as const,
+    fontSize: 16,
+    letterSpacing: 2,
+    writingDirection: "ltr" as const,
+  },
+  returnCodeErrorText: {
+    color: "#B91C1C",
+    fontWeight: "800" as const,
+    fontSize: 11.5,
+    flexShrink: 1,
   },
   useSameButton: {
     flexDirection: "row" as const,
@@ -692,5 +1039,66 @@ const localStyles = {
     color: "#FFFFFF",
     fontWeight: "900" as const,
     fontSize: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end" as const,
+  },
+  modalBackdrop: {
+    ...({ position: "absolute" as const, top: 0, left: 0, right: 0, bottom: 0 }),
+  },
+  modalCard: {
+    backgroundColor: "#FBF7F1",
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    padding: 20,
+    maxHeight: "85%" as const,
+  },
+  modalHandle: {
+    alignSelf: "center" as const,
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#E2D8CF",
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "900" as const,
+    color: "#111827",
+  },
+  modalSubtitle: {
+    fontSize: 12.5,
+    color: "#7C5F46",
+    fontWeight: "600" as const,
+    marginTop: 2,
+    marginBottom: 14,
+  },
+  modalChildRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 8,
+    backgroundColor: "#FFFFFF",
+  },
+  modalChildRowText: {
+    fontSize: 15,
+    fontWeight: "800" as const,
+    color: "#111827",
+  },
+  modalCancelButton: {
+    marginTop: 10,
+    paddingVertical: 10,
+    alignItems: "center" as const,
+  },
+  modalCancelText: {
+    color: "#7C5F46",
+    fontWeight: "800" as const,
   },
 };

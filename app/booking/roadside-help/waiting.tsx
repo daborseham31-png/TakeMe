@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import { db } from "../../../firebase";
 import { translateProblemTypesList } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
+import { ltrContentStyle } from "../../i18n/rtl";
 import { normalizeLanguagesFromAccount } from "../../driver/create/driverHelpers";
 import DriverReviewsSection from "../DriverReviewsSection";
 import { getOfferDriverId } from "../driverReviewsLib";
@@ -445,7 +446,7 @@ export default function RoadsideWaitingScreen() {
                       onPress={() => callDriver(offer.driverPhone)}
                     >
                       <Ionicons name="call-outline" size={16} color="#F58220" />
-                      <Text style={styles.phoneText}>{offer.driverPhone}</Text>
+                      <Text style={[styles.phoneText, ltrContentStyle]}>{offer.driverPhone}</Text>
                     </Pressable>
                   ) : null}
 

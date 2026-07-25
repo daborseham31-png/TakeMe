@@ -11,6 +11,8 @@ import { EmptyState, ErrorState, LoadingState } from "./components/AdminStates";
 import FilterChips from "./components/FilterChips";
 import { useAdminCollection } from "./useAdminCollection";
 import { translateReportCategory } from "../i18n/formatters";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { pushToEnd } from "../i18n/rtl";
 
 type StatusFilter = "all" | ReportStatus;
 
@@ -31,6 +33,7 @@ const statusColor = (status: ReportStatus) => {
 
 export default function AdminReportsScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const { data: reports, loading, error, refresh } = useAdminCollection(subscribeAllReports);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
@@ -50,7 +53,7 @@ export default function AdminReportsScreen() {
     <Pressable style={styles.card} onPress={() => router.push(`/admin/reports/${item.id}` as any)}>
       <View style={styles.cardTop}>
         <Text style={styles.category}>{translateReportCategory(item.category, t)}</Text>
-        <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
+        <View style={[styles.statusDot, pushToEnd(isRTL), { backgroundColor: statusColor(item.status) }]} />
         <Text style={styles.statusText}>
           {t(`admin.reportStatusLabel.${item.status}`, { defaultValue: item.status })}
         </Text>
@@ -131,7 +134,6 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 4,
-    marginLeft: "auto",
   },
   statusText: {
     fontSize: 11.5,

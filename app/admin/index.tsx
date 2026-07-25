@@ -21,6 +21,8 @@ import {
   RecentRide,
 } from "./adminDashboardLib";
 import { translateReportCategory } from "../i18n/formatters";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { chevronForwardIconName, positionEnd } from "../i18n/rtl";
 import { adminColors, adminRadius, adminSpacing } from "./adminTheme";
 import AdminScreen from "./components/AdminScreen";
 import { ErrorState, LoadingState } from "./components/AdminStates";
@@ -28,6 +30,7 @@ import StatCard from "./components/StatCard";
 
 export default function AdminDashboardScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentRides, setRecentRides] = useState<RecentRide[]>([]);
   const [recentReports, setRecentReports] = useState<RecentReport[]>([]);
@@ -97,20 +100,28 @@ export default function AdminDashboardScreen() {
           </View>
 
           <View style={styles.quickActions}>
-            <QuickAction icon="people-outline" label={t("admin.users")} onPress={() => router.push("/admin/users" as any)} />
-            <QuickAction icon="car-outline" label={t("admin.drivers")} onPress={() => router.push("/admin/drivers" as any)} />
-            <QuickAction icon="navigate-outline" label={t("admin.rides")} onPress={() => router.push("/admin/rides" as any)} />
-            <QuickAction icon="book-outline" label={t("admin.bookings")} onPress={() => router.push("/admin/bookings" as any)} />
+            <QuickAction icon="people-outline" label={t("admin.users")} onPress={() => router.push("/admin/users" as any)} isRTL={isRTL} />
+            <QuickAction icon="car-outline" label={t("admin.drivers")} onPress={() => router.push("/admin/drivers" as any)} isRTL={isRTL} />
+            <QuickAction icon="navigate-outline" label={t("admin.rides")} onPress={() => router.push("/admin/rides" as any)} isRTL={isRTL} />
+            <QuickAction icon="book-outline" label={t("admin.bookings")} onPress={() => router.push("/admin/bookings" as any)} isRTL={isRTL} />
             <QuickAction
               icon="flag-outline"
               label={t("admin.reports")}
               badge={stats.openReports}
               onPress={() => router.push("/admin/reports" as any)}
+              isRTL={isRTL}
             />
             <QuickAction
               icon="notifications-outline"
               label={t("admin.notifyAction")}
               onPress={() => router.push("/admin/notifications" as any)}
+              isRTL={isRTL}
+            />
+            <QuickAction
+              icon="school-outline"
+              label={t("admin.schoolKioskLinks")}
+              onPress={() => router.push("/admin/school-kiosk-links" as any)}
+              isRTL={isRTL}
             />
           </View>
 
@@ -157,7 +168,7 @@ export default function AdminDashboardScreen() {
               onPress={() => router.push("/admin/rides" as any)}
             >
               <Text style={styles.viewAllText}>{t("admin.viewAll")}</Text>
-              <Ionicons name="chevron-forward" size={14} color={adminColors.primary} />
+              <Ionicons name={chevronForwardIconName(isRTL)} size={14} color={adminColors.primary} />
             </Pressable>
           </View>
           {recentRides.length === 0 ? (
@@ -184,7 +195,7 @@ export default function AdminDashboardScreen() {
               onPress={() => router.push("/admin/reports" as any)}
             >
               <Text style={styles.viewAllText}>{t("admin.viewAll")}</Text>
-              <Ionicons name="chevron-forward" size={14} color={adminColors.primary} />
+              <Ionicons name={chevronForwardIconName(isRTL)} size={14} color={adminColors.primary} />
             </Pressable>
           </View>
           {recentReports.length === 0 ? (
@@ -214,15 +225,17 @@ const QuickAction = ({
   label,
   badge,
   onPress,
+  isRTL,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   badge?: number;
   onPress: () => void;
+  isRTL: boolean;
 }) => (
   <Pressable style={styles.quickActionButton} onPress={onPress}>
     {!!badge && badge > 0 ? (
-      <View style={styles.quickActionBadge}>
+      <View style={[styles.quickActionBadge, positionEnd(8, isRTL)]}>
         <Text style={styles.quickActionBadgeText}>
           {badge > 99 ? "99+" : badge}
         </Text>
@@ -304,7 +317,6 @@ const styles = StyleSheet.create({
   quickActionBadge: {
     position: "absolute",
     top: 8,
-    right: 8,
     minWidth: 18,
     height: 18,
     borderRadius: 9,

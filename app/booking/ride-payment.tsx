@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next";
 import { auth, db } from "../../firebase";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { translateStoredDayName } from "../i18n/formatters";
+import { ltrContentStyle } from "../i18n/rtl";
 import BitBadge from "./BitBadge";
 import { openBitPayment } from "./bitPayment";
 import { isDateTimeExpired } from "./homeFeedLib";
@@ -132,7 +133,12 @@ export default function RidePaymentScreen() {
       if (!Array.isArray(parsed)) return [];
       return parsed
         .filter((entry: any) => entry && typeof entry.localId === "string")
-        .map((entry: any) => ({ localId: entry.localId, childName: entry.childName || undefined }));
+        .map((entry: any) => ({
+          localId: entry.localId,
+          childId: entry.childId || undefined,
+          childName: entry.childName || undefined,
+          sourceRideRequestId: entry.sourceRideRequestId || undefined,
+        }));
     } catch {
       return [];
     }
@@ -245,11 +251,26 @@ export default function RidePaymentScreen() {
   // a child roster is known and which direction this trip is:
   //   - outbound + a known roster → one multi-seat booking tagging every
   //     child riding together (AGENTS.md #3's childEntries array).
-  //   - return + exactly one known child → that child individually
-  //     (childEntryId/childName — the same shape every other return
-  //     booking uses).
+  //   - return + one or more known children → one INDEPENDENT booking PER
+  //     child (childEntryId/childId/childName — the same shape every other
+  //     return booking uses). Every entry gets its own bookReturnForChild
+  //     call; this must never collapse to a single combined booking — a
+  //     return leg is never shared between children (AGENTS.md's per-child
+  //     return system), unlike an outbound leg.
   //   - anything else (no child data at all) → the original plain
   //     seats-only booking, unchanged.
+  //
+  // BUG FIX: this used to require `schoolChildEntries.length === 1` for the
+  // return branch, silently falling through to the untagged
+  // bookSchoolTripSingle() below for ANY other count — including the common
+  // 2+-child round-trip case. That produced exactly one plain, untagged
+  // return booking with no childEntryId/childId at all, which
+  // useMySchoolRows.tsx's "no return ride needed" check (matched by
+  // childId/childEntryId) could never associate with ANY child — so every
+  // child appeared to have no return booked, regardless of what was
+  // actually selected/entered. Looping over every entry here closes that
+  // gap for good, independent of which screen happened to reach this
+  // function.
   const createSchoolTripsBookingAfterPayment = async (
     paymentMethod: SchoolBookingPaymentMethod,
   ): Promise<{ bookingGroupId: string }> => {
@@ -261,8 +282,11 @@ export default function RidePaymentScreen() {
 
     if (schoolChildEntries.length > 0 && schoolDirection === "to_school") {
       await bookOutboundForChildren(schoolTripId, schoolChildEntries, paymentMethod, groupId);
-    } else if (schoolChildEntries.length === 1 && schoolDirection === "from_school") {
-      await bookReturnForChild(schoolTripId, schoolChildEntries[0], paymentMethod, groupId);
+    } else if (schoolChildEntries.length > 0 && schoolDirection === "from_school") {
+      for (const entry of schoolChildEntries) {
+        // eslint-disable-next-line no-await-in-loop
+        await bookReturnForChild(schoolTripId, entry, paymentMethod, groupId);
+      }
     } else {
       await bookSchoolTripSingle(schoolTripId, selectedSeats, paymentMethod, groupId);
     }
@@ -747,7 +771,7 @@ const createBookingAfterPayment = async (
             {driverPhone ? (
               <View style={styles.summaryRow}>
                 <Ionicons name="call-outline" size={15} color="#7C5F46" />
-                <Text style={styles.summaryText}>{driverPhone}</Text>
+                <Text style={[styles.summaryText, ltrContentStyle]}>{driverPhone}</Text>
               </View>
             ) : null}
 
@@ -1009,7 +1033,7 @@ const createBookingAfterPayment = async (
                 {driverPhone ? (
                   <View style={styles.summaryRow}>
                     <Ionicons name="call-outline" size={15} color="#7C5F46" />
-                    <Text style={styles.summaryText}>{driverPhone}</Text>
+                    <Text style={[styles.summaryText, ltrContentStyle]}>{driverPhone}</Text>
                   </View>
                 ) : null}
 

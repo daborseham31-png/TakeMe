@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { auth } from "../firebase";
 import { useLanguage } from "./i18n/LanguageProvider";
 import LanguageSelectorModal from "./i18n/LanguageSelectorModal";
+import { positionEnd } from "./i18n/rtl";
 import { getAccountRestriction, isUserAdmin } from "./admin/adminAuthLib";
 
 export default function AppStartScreen() {
@@ -106,7 +107,7 @@ export default function AppStartScreen() {
   return (
     <SafeAreaView style={styles.page}>
       <Pressable
-        style={styles.languagePill}
+        style={[styles.languagePill, positionEnd(20, isRTL)]}
         onPress={() => setLanguageModalVisible(true)}
         hitSlop={8}
       >
@@ -244,7 +245,6 @@ const styles = StyleSheet.create({
   languagePill: {
     position: "absolute",
     top: 55,
-    right: 20,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,

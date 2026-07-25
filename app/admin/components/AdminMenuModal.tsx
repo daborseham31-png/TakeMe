@@ -13,6 +13,8 @@ import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { signOutAndRedirectToLogin } from "../../authLib";
+import { useLanguage } from "../../i18n/LanguageProvider";
+import { chevronForwardIconName } from "../../i18n/rtl";
 import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 
 type MenuItem = {
@@ -36,6 +38,12 @@ const MENU_ITEMS: MenuItem[] = [
     icon: "notifications-outline",
     path: "/admin/notifications",
   },
+  {
+    key: "schoolKioskLinks",
+    labelKey: "admin.schoolKioskLinks",
+    icon: "school-outline",
+    path: "/admin/school-kiosk-links",
+  },
   { key: "settings", labelKey: "admin.settings", icon: "settings-outline", path: "/admin/settings" },
 ];
 
@@ -47,6 +55,7 @@ type Props = {
 
 export default function AdminMenuModal({ visible, onClose, activeKey }: Props) {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
 
   const handleNavigate = (path: string) => {
     onClose();
@@ -93,7 +102,7 @@ export default function AdminMenuModal({ visible, onClose, activeKey }: Props) {
               >
                 {t(item.labelKey)}
               </Text>
-              <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
+              <Ionicons name={chevronForwardIconName(isRTL)} size={16} color={adminColors.placeholder} />
             </Pressable>
           ))}
 

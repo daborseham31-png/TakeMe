@@ -9,6 +9,8 @@ import { router } from "expo-router";
 import React, { useState } from "react";
 import { Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
 
+import { useLanguage } from "../../i18n/LanguageProvider";
+import { backIconName } from "../../i18n/rtl";
 import { adminColors } from "../adminTheme";
 import AdminMenuModal from "./AdminMenuModal";
 
@@ -27,6 +29,7 @@ export default function AdminScreen({
   headerRight,
   children,
 }: Props) {
+  const { isRTL } = useLanguage();
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -38,7 +41,7 @@ export default function AdminScreen({
             onPress={() => router.back()}
             hitSlop={8}
           >
-            <Ionicons name="arrow-back" size={22} color={adminColors.textMuted} />
+            <Ionicons name={backIconName(isRTL)} size={22} color={adminColors.textMuted} />
           </Pressable>
         ) : (
           <View style={styles.iconButton} />

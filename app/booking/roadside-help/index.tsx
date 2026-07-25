@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 
 import { translateProblemType } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
+import { positionEnd } from "../../i18n/rtl";
 import { createRoadsideRequest } from "./roadsideLib";
 
 // Default map region (Nazareth area) used until the user moves the pin.
@@ -269,7 +270,7 @@ export default function RoadsideHelpScreen() {
               />
             </MapView>
 
-            <Pressable style={styles.recenterButton} onPress={goToMyLocation}>
+            <Pressable style={[styles.recenterButton, positionEnd(12, isRTL)]} onPress={goToMyLocation}>
               <Ionicons name="locate" size={20} color="#F58220" />
             </Pressable>
           </View>
@@ -450,7 +451,6 @@ const styles = StyleSheet.create({
   recenterButton: {
     position: "absolute",
     bottom: 12,
-    right: 12,
     width: 40,
     height: 40,
     borderRadius: 20,

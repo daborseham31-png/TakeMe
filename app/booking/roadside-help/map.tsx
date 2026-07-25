@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 
 import { translateProblemTypesList } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
+import { positionEnd } from "../../i18n/rtl";
 
 // The passenger only watches the helper come/work. Completing the roadside
 // help is the driver's responsibility (from their Help Requests page).
@@ -167,7 +168,7 @@ export default function RoadsideHelpMapScreen() {
         </MapView>
 
         {/* Floating helper actions */}
-        <View style={styles.floatingActions}>
+        <View style={[styles.floatingActions, positionEnd(16, isRTL)]}>
           <Pressable style={styles.circleButton} onPress={handleShare}>
             <Ionicons name="share-social-outline" size={22} color="#F58220" />
           </Pressable>
@@ -268,7 +269,6 @@ const styles = StyleSheet.create({
   floatingActions: {
     position: "absolute",
     top: 16,
-    right: 16,
     gap: 12,
   },
   circleButton: {

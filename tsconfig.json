@@ -13,5 +13,17 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  // cloudflare-worker/ and functions/ are separate sub-projects, each with
+  // their own tsconfig.json/package.json/node_modules and runtime globals
+  // (Workers types, Node types) that conflict with this app's own
+  // (React Native/DOM) lib settings — see cloudflare-worker/tsconfig.json
+  // (its own `npx tsc --noEmit` is the authoritative check for that
+  // project, not this one). Excluded here so this config's broad
+  // "**/*.ts"/"**/*.tsx" include doesn't accidentally sweep them in.
+  "exclude": [
+    "node_modules",
+    "cloudflare-worker",
+    "functions"
   ]
 }
