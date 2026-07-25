@@ -24,7 +24,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,6 +33,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { translateProblemTypesList } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { backIconName } from "../../i18n/rtl";
@@ -189,7 +189,7 @@ export default function RoadsideHelpPaymentScreen() {
     booking?.status === "completed" && booking?.paymentStatus === "pending";
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={backIconName(isRTL)} size={22} color="#7C5F46" />
@@ -359,7 +359,7 @@ export default function RoadsideHelpPaymentScreen() {
           </>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

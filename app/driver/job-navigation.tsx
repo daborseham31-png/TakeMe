@@ -7,7 +7,6 @@ import {
   Alert,
   Linking,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,6 +24,7 @@ import {
   NormalizedApplication,
   WorkErrandKind,
 } from "../booking/work-errand/workErrandLib";
+import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { ltrContentStyle } from "../i18n/rtl";
 
@@ -138,17 +138,17 @@ export default function JobNavigationScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#F58220" />
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   if (!app) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={44} color="#8B7B6B" />
           <Text style={styles.emptyTitle}>{t("rides.bookingNotFound")}</Text>
@@ -156,7 +156,7 @@ export default function JobNavigationScreen() {
             <Text style={styles.backLinkText}>{t("common.goBack")}</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
@@ -164,7 +164,7 @@ export default function JobNavigationScreen() {
   const completed = app.status === "completed";
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <DirectionalScreen style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
@@ -309,7 +309,7 @@ export default function JobNavigationScreen() {
           </Pressable>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

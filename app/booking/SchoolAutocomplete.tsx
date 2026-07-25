@@ -42,12 +42,17 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import {
+  DirectionalCard,
+  DirectionalRow,
+  DirectionalText,
+  DirectionalTextInput,
+  PhysicalDirectionalBlockText,
+} from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { filterSchoolsLocally, getSchoolsForCity, SchoolLocation } from "./schools";
 
@@ -77,7 +82,7 @@ export default function SchoolAutocomplete({
   disabledMessage,
 }: Props) {
   const { t } = useTranslation();
-  const { language, isRTL } = useLanguage();
+  const { language } = useLanguage();
 
   const [modalVisible, setModalVisible] = useState(false);
   const [filterText, setFilterText] = useState("");
@@ -137,34 +142,35 @@ export default function SchoolAutocomplete({
 
   return (
     <View style={styles.wrapper}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? (
+        <PhysicalDirectionalBlockText style={styles.label}>{label}</PhysicalDirectionalBlockText>
+      ) : null}
 
       <Pressable
-        style={[styles.inputRow, disabled && styles.inputRowDisabled]}
         onPress={openPicker}
       >
-        <Ionicons name="school-outline" size={18} color="#8B7B6B" />
-        <Text
-          style={[
-            styles.inputText,
-            !value && styles.inputTextPlaceholder,
-            isRTL && styles.inputTextRTL,
-          ]}
-          numberOfLines={1}
-        >
-          {value || (disabled ? disabledText : placeholder || t("schoolTrip.selectSchoolTitle"))}
-        </Text>
-        {value && !disabled ? (
-          <Pressable hitSlop={8} onPress={handleClear}>
-            <Ionicons name="close-circle" size={18} color="#C7B9AC" />
-          </Pressable>
-        ) : null}
-        {!disabled ? (
-          <Ionicons name="chevron-down" size={16} color="#8B7B6B" />
-        ) : null}
+        <DirectionalRow style={[styles.inputRow, disabled && styles.inputRowDisabled]}>
+          <Ionicons name="school-outline" size={18} color="#8B7B6B" />
+          <DirectionalText
+            style={[styles.inputText, !value && styles.inputTextPlaceholder]}
+            numberOfLines={1}
+          >
+            {value || (disabled ? disabledText : placeholder || t("schoolTrip.selectSchoolTitle"))}
+          </DirectionalText>
+          {value && !disabled ? (
+            <Pressable hitSlop={8} onPress={handleClear}>
+              <Ionicons name="close-circle" size={18} color="#C7B9AC" />
+            </Pressable>
+          ) : null}
+          {!disabled ? (
+            <Ionicons name="chevron-down" size={16} color="#8B7B6B" />
+          ) : null}
+        </DirectionalRow>
       </Pressable>
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {error ? (
+        <PhysicalDirectionalBlockText style={styles.errorText}>{error}</PhysicalDirectionalBlockText>
+      ) : null}
 
       <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={closePicker}>
         <KeyboardAvoidingView
@@ -174,14 +180,16 @@ export default function SchoolAutocomplete({
           <View style={styles.modalOverlay}>
             <Pressable style={styles.modalBackdrop} onPress={closePicker} />
 
-            <View style={styles.modalCard}>
+            <DirectionalCard style={styles.modalCard}>
               <View style={styles.modalHandle} />
-              <Text style={styles.modalTitle}>{t("schoolTrip.selectSchoolTitle")}</Text>
+              <PhysicalDirectionalBlockText style={styles.modalTitle}>
+                {t("schoolTrip.selectSchoolTitle")}
+              </PhysicalDirectionalBlockText>
 
-              <View style={styles.filterRow}>
+              <DirectionalRow style={styles.filterRow}>
                 <Ionicons name="search-outline" size={16} color="#8B7B6B" />
-                <TextInput
-                  style={[styles.filterInput, isRTL && styles.inputTextRTL]}
+                <DirectionalTextInput
+                  style={styles.filterInput}
                   value={filterText}
                   onChangeText={setFilterText}
                   placeholder={t("schoolTrip.searchSchoolPlaceholder")}
@@ -192,13 +200,15 @@ export default function SchoolAutocomplete({
                     <Ionicons name="close-circle" size={16} color="#C7B9AC" />
                   </Pressable>
                 ) : null}
-              </View>
+              </DirectionalRow>
 
               {filteredSchools.length === 0 ? (
-                <View style={styles.emptyRow}>
+                <DirectionalRow style={styles.emptyRow}>
                   <Ionicons name="search-outline" size={16} color="#8B7B6B" />
-                  <Text style={styles.emptyText}>{t("schoolTrip.noSchoolsFound")}</Text>
-                </View>
+                  <DirectionalText style={styles.emptyText}>
+                    {t("schoolTrip.noSchoolsFound")}
+                  </DirectionalText>
+                </DirectionalRow>
               ) : (
                 <FlatList
                   style={styles.resultsList}
@@ -207,23 +217,24 @@ export default function SchoolAutocomplete({
                   keyboardShouldPersistTaps="handled"
                   initialNumToRender={20}
                   renderItem={({ item }) => (
-                    <Pressable style={styles.resultRow} onPress={() => handleSelect(item)}>
-                      <Ionicons name="school" size={16} color="#F58220" />
-                      <Text
-                        style={[styles.resultText, isRTL && styles.resultTextRTL]}
-                        numberOfLines={1}
-                      >
-                        {item.name}
-                      </Text>
+                    <Pressable onPress={() => handleSelect(item)}>
+                      <DirectionalRow style={styles.resultRow}>
+                        <Ionicons name="school" size={16} color="#F58220" />
+                        <DirectionalText style={styles.resultText} numberOfLines={1}>
+                          {item.name}
+                        </DirectionalText>
+                      </DirectionalRow>
                     </Pressable>
                   )}
                 />
               )}
 
               <Pressable style={styles.modalCancelButton} onPress={closePicker}>
-                <Text style={styles.modalCancelText}>{t("common.cancel")}</Text>
+                <DirectionalText style={styles.modalCancelText}>
+                  {t("common.cancel")}
+                </DirectionalText>
               </Pressable>
-            </View>
+            </DirectionalCard>
           </View>
         </KeyboardAvoidingView>
       </Modal>

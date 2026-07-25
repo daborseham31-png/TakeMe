@@ -43,6 +43,12 @@ import {
   normalizeLocationText,
   searchIsraelLocations,
 } from "./locationSearch";
+import {
+  DirectionalRow,
+  DirectionalText,
+  PhysicalDirectionalBlockText,
+} from "../i18n/DirectionalPrimitives";
+import { useLanguage } from "../i18n/LanguageProvider";
 
 type Props = {
   value: string;
@@ -93,6 +99,7 @@ export default function IsraelLocationAutocomplete({
   error,
 }: Props) {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [focused, setFocused] = useState(false);
   const blurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -153,16 +160,32 @@ export default function IsraelLocationAutocomplete({
     setFocused(true);
   };
 
-  const isRTL = language !== "english";
+  // Whether the currently TYPED text (in this one field) reads RTL —
+  // deliberately independent of the app's own UI language (isRTL above):
+  // a parent typing a Hebrew city name while the app itself is in English
+  // still needs that typed text to render RTL for it to be readable at all.
+  const contentIsRTL = language !== "english";
+
+  // The field's own alignment: once the parent has actually typed something,
+  // follow THAT text's own detected language (contentIsRTL, above) so a
+  // Hebrew city name stays readable even in an English-language app. Before
+  // anything is typed, there is no content to detect a direction FROM —
+  // detectInputLanguage("") does not know the app is in Arabic/Hebrew, so it
+  // silently defaulted the empty placeholder to LTR regardless of app
+  // language. Falling back to the app's own isRTL for the placeholder case
+  // fixes that.
+  const fieldIsRTL = value ? contentIsRTL : isRTL;
 
   return (
     <View style={styles.wrapper}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? (
+        <PhysicalDirectionalBlockText style={styles.label}>{label}</PhysicalDirectionalBlockText>
+      ) : null}
 
-      <View style={styles.inputRow}>
+      <DirectionalRow style={styles.inputRow}>
         <Ionicons name="location-outline" size={18} color="#8B7B6B" />
         <TextInput
-          style={[styles.input, isRTL && styles.inputRTL]}
+          style={[styles.input, fieldIsRTL && styles.inputRTL]}
           value={value}
           onChangeText={onChangeText}
           onFocus={handleFocus}
@@ -180,19 +203,21 @@ export default function IsraelLocationAutocomplete({
             <Ionicons name="close-circle" size={18} color="#C7B9AC" />
           </Pressable>
         ) : null}
-      </View>
+      </DirectionalRow>
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {error ? (
+        <PhysicalDirectionalBlockText style={styles.errorText}>{error}</PhysicalDirectionalBlockText>
+      ) : null}
 
       {showDropdown ? (
         <View style={styles.dropdown}>
           {results.length === 0 ? (
-            <View style={styles.emptyRow}>
+            <DirectionalRow style={styles.emptyRow}>
               <Ionicons name="search-outline" size={16} color="#8B7B6B" />
-              <Text style={styles.emptyText}>
+              <DirectionalText style={styles.emptyText}>
                 {t("booking.noLocationsFound")}
-              </Text>
-            </View>
+              </DirectionalText>
+            </DirectionalRow>
           ) : (
             <ScrollView
               style={styles.dropdownScroll}
@@ -207,24 +232,25 @@ export default function IsraelLocationAutocomplete({
                 return (
                   <Pressable
                     key={location.id}
-                    style={styles.resultRow}
                     onPress={() => handleSelect(location)}
                   >
-                    <Ionicons name="location-sharp" size={16} color="#F58220" />
-                    <Text
-                      style={[styles.resultText, isRTL && styles.resultTextRTL]}
-                      numberOfLines={1}
-                    >
-                      {match ? (
-                        <>
-                          {before}
-                          <Text style={styles.resultTextMatch}>{match}</Text>
-                          {after}
-                        </>
-                      ) : (
-                        name
-                      )}
-                    </Text>
+                    <DirectionalRow style={styles.resultRow}>
+                      <Ionicons name="location-sharp" size={16} color="#F58220" />
+                      <Text
+                        style={[styles.resultText, contentIsRTL && styles.resultTextRTL]}
+                        numberOfLines={1}
+                      >
+                        {match ? (
+                          <>
+                            {before}
+                            <Text style={styles.resultTextMatch}>{match}</Text>
+                            {after}
+                          </>
+                        ) : (
+                          name
+                        )}
+                      </Text>
+                    </DirectionalRow>
                   </Pressable>
                 );
               })}

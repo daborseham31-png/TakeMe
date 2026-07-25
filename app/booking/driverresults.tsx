@@ -7,7 +7,6 @@ import {
   Alert,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +16,12 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";
 import i18n from "../i18n";
+import {
+  DirectionalCard,
+  DirectionalRow,
+  DirectionalScreen,
+  DirectionalText,
+} from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { translateStoredDayName } from "../i18n/formatters";
 import { marginEnd } from "../i18n/rtl";
@@ -704,12 +709,12 @@ const confirmWeeklyDayPicker = () => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.page}>
+      <DirectionalScreen style={styles.page}>
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#F58220" />
           <Text style={styles.loadingText}>{t("rides.loadingDrivers")}</Text>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 const availableDrivers = drivers.filter((driver: any) => {
@@ -722,7 +727,7 @@ const availableDrivers = drivers.filter((driver: any) => {
   );
 });
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons
@@ -1069,17 +1074,17 @@ const availableDrivers = drivers.filter((driver: any) => {
         <View style={styles.modalOverlay}>
           <Pressable style={styles.modalBackdrop} onPress={closeWeeklyDayPicker} />
 
-          <View style={styles.modalSheet}>
+          <DirectionalCard style={styles.modalSheet}>
             <View style={styles.modalHandle} />
 
-            <Text style={styles.modalTitle}>
+            <DirectionalText style={styles.modalTitle}>
               {t("rides.chooseDaysModalTitle")}
-            </Text>
+            </DirectionalText>
 
             {dayPickerDriver ? (
-              <Text style={styles.modalSubtitle}>
+              <DirectionalText style={styles.modalSubtitle}>
                 {getDriverName(dayPickerDriver)}
-              </Text>
+              </DirectionalText>
             ) : null}
 
             <ScrollView style={styles.modalList}>
@@ -1090,50 +1095,55 @@ const availableDrivers = drivers.filter((driver: any) => {
                   return (
                     <Pressable
                       key={match.requested.date}
-                      style={styles.modalDayRow}
                       onPress={() => toggleWeeklyDaySelection(match.requested.date)}
                     >
-                      <Ionicons
-                        name={checked ? "checkbox" : "square-outline"}
-                        size={22}
-                        color={checked ? "#F58220" : "#8B7B6B"}
-                      />
+                      <DirectionalRow style={styles.modalDayRow}>
+                        <Ionicons
+                          name={checked ? "checkbox" : "square-outline"}
+                          size={22}
+                          color={checked ? "#F58220" : "#8B7B6B"}
+                        />
 
-                      <View style={styles.modalDayTextBox}>
-                        <Text style={styles.modalDayTitle}>
-                          {translateStoredDayName(match.driverDay.dayName, t)} —{" "}
-                          {match.driverDay.date}
-                        </Text>
-                        <Text style={styles.modalDaySubtitle}>
-                          {match.driverDay.time} ·{" "}
-                          {t("booking.seatsCount", { count: match.requested.seats })} ·{" "}
-                          {match.driverDay.price} ₪
-                        </Text>
-                      </View>
+                        <View style={styles.modalDayTextBox}>
+                          <DirectionalText style={styles.modalDayTitle}>
+                            {translateStoredDayName(match.driverDay.dayName, t)} —{" "}
+                            {match.driverDay.date}
+                          </DirectionalText>
+                          <DirectionalText style={styles.modalDaySubtitle}>
+                            {match.driverDay.time} ·{" "}
+                            {t("booking.seatsCount", { count: match.requested.seats })} ·{" "}
+                            {match.driverDay.price} ₪
+                          </DirectionalText>
+                        </View>
+                      </DirectionalRow>
                     </Pressable>
                   );
                 })}
             </ScrollView>
 
-            <View style={styles.modalButtonsRow}>
+            <DirectionalRow style={styles.modalButtonsRow}>
               <Pressable style={styles.modalSecondaryButton} onPress={selectAllWeeklyDays}>
-                <Text style={styles.modalSecondaryButtonText}>{t("common.selectAll")}</Text>
+                <DirectionalText style={styles.modalSecondaryButtonText}>
+                  {t("common.selectAll")}
+                </DirectionalText>
               </Pressable>
 
               <Pressable style={styles.modalSecondaryButton} onPress={closeWeeklyDayPicker}>
-                <Text style={styles.modalSecondaryButtonText}>{t("common.cancel")}</Text>
+                <DirectionalText style={styles.modalSecondaryButtonText}>
+                  {t("common.cancel")}
+                </DirectionalText>
               </Pressable>
-            </View>
+            </DirectionalRow>
 
             <Pressable style={styles.modalPrimaryButton} onPress={confirmWeeklyDayPicker}>
-              <Text style={styles.modalPrimaryButtonText}>
+              <DirectionalText style={styles.modalPrimaryButtonText}>
                 {t("rides.continueToPayment")}
-              </Text>
+              </DirectionalText>
             </Pressable>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

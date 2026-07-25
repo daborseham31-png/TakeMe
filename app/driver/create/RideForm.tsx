@@ -5,7 +5,6 @@ import React, { useEffect, useState } from "react";
 import {
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { getCategoryMeta } from "../../booking/bookingsLib";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
@@ -498,6 +498,7 @@ export default function RideForm({
                     icon="cash-outline"
                     keyboardType="numeric"
                     formatSuggestion={(v) => `${v} ₪`}
+                    ltr
                   />
                 </View>
 
@@ -579,7 +580,7 @@ export default function RideForm({
   }
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -597,7 +598,7 @@ export default function RideForm({
 
         {content}
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

@@ -31,7 +31,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -40,6 +39,7 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalCard, DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { getIsraelLocationById, IsraelLocation } from "../israelLocations";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
@@ -378,7 +378,7 @@ export default function MyChildrenScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
@@ -470,7 +470,7 @@ export default function MyChildrenScreen() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
+            <DirectionalCard style={styles.modalCard}>
               <ScrollView
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.modalScrollContent}
@@ -543,11 +543,11 @@ export default function MyChildrenScreen() {
                   </Pressable>
                 </View>
               </ScrollView>
-            </View>
+            </DirectionalCard>
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

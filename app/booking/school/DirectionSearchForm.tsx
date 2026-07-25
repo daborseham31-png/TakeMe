@@ -28,8 +28,14 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import {
+  DirectionalCard,
+  DirectionalRow,
+  DirectionalText,
+  PhysicalDirectionalBlockText,
+} from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
-import { directionalTextAlign } from "../../i18n/rtl";
+import { ltrContentStyle } from "../../i18n/rtl";
 import DateInput, { TimeInput } from "../../driver/create/DateInput";
 import { normalizeDateToYMD, styles } from "../../driver/create/driverHelpers";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
@@ -464,32 +470,37 @@ export default function DirectionSearchForm() {
   // or a placeholder otherwise. Tapping ALWAYS opens the picker modal for
   // exactly this row (by localId), never any other row.
   const renderChildPickerField = (child: ChildEntryDraft) => (
-    <Pressable style={localStyles.childPickerField} onPress={() => openChildPicker(child.localId)}>
-      <Ionicons
-        name="person-circle-outline"
-        size={18}
-        color={child.childId ? "#F58220" : "#8B7B6B"}
-      />
-      <Text
-        style={[localStyles.childPickerText, !child.childId && localStyles.childPickerPlaceholder]}
-        numberOfLines={1}
-      >
-        {child.childId ? child.name : t("schoolChildren.selectChildPlaceholder")}
-      </Text>
-      <Ionicons name="chevron-down" size={16} color="#8B7B6B" />
+    <Pressable onPress={() => openChildPicker(child.localId)}>
+      <DirectionalRow style={localStyles.childPickerField}>
+        <Ionicons
+          name="person-circle-outline"
+          size={18}
+          color={child.childId ? "#F58220" : "#8B7B6B"}
+        />
+        <DirectionalText
+          style={[localStyles.childPickerText, !child.childId && localStyles.childPickerPlaceholder]}
+          numberOfLines={1}
+        >
+          {child.childId ? child.name : t("schoolChildren.selectChildPlaceholder")}
+        </DirectionalText>
+        <Ionicons name="chevron-down" size={16} color="#8B7B6B" />
+      </DirectionalRow>
     </Pressable>
   );
 
   const renderManageChildrenCta = () => (
     <Pressable
-      style={localStyles.manageChildrenLinkButton}
       onPress={() => {
         closeChildPicker();
         router.push("/booking/school/my-children" as any);
       }}
     >
-      <Ionicons name="people-outline" size={15} color="#F58220" />
-      <Text style={localStyles.manageChildrenLinkText}>{t("schoolChildren.manageChildrenLink")}</Text>
+      <DirectionalRow style={localStyles.manageChildrenLinkButton}>
+        <Ionicons name="people-outline" size={15} color="#F58220" />
+        <DirectionalText style={localStyles.manageChildrenLinkText}>
+          {t("schoolChildren.manageChildrenLink")}
+        </DirectionalText>
+      </DirectionalRow>
     </Pressable>
   );
 
@@ -504,10 +515,12 @@ export default function DirectionSearchForm() {
     if (!selectedSchool) {
       return (
         <View style={localStyles.childrenBox}>
-          <Text style={[styles.label, isRTL && { textAlign: "right" }]}>
+          <PhysicalDirectionalBlockText style={styles.label}>
             {t("schoolChildren.selectChild")}
-          </Text>
-          <Text style={localStyles.noSavedChildrenHint}>{t("schoolTrip.selectSchoolFirst")}</Text>
+          </PhysicalDirectionalBlockText>
+          <PhysicalDirectionalBlockText style={localStyles.noSavedChildrenHint}>
+            {t("schoolTrip.selectSchoolFirst")}
+          </PhysicalDirectionalBlockText>
         </View>
       );
     }
@@ -515,12 +528,14 @@ export default function DirectionSearchForm() {
     if (childProfilesForSchool.length === 0) {
       return (
         <View style={localStyles.childrenBox}>
-          <Text style={[styles.label, isRTL && { textAlign: "right" }]}>
+          <PhysicalDirectionalBlockText style={styles.label}>
             {t("schoolChildren.selectChild")}
-          </Text>
+          </PhysicalDirectionalBlockText>
           <View style={localStyles.noChildrenBox}>
             <Ionicons name="people-outline" size={22} color="#B86115" />
-            <Text style={localStyles.noChildrenText}>{t("schoolChildren.addChildrenFirstMessage")}</Text>
+            <PhysicalDirectionalBlockText style={localStyles.noChildrenText}>
+              {t("schoolChildren.addChildrenFirstMessage")}
+            </PhysicalDirectionalBlockText>
             {renderManageChildrenCta()}
           </View>
         </View>
@@ -529,37 +544,36 @@ export default function DirectionSearchForm() {
 
     return (
       <View style={localStyles.childrenBox}>
-        <Text style={[styles.label, isRTL && { textAlign: "right" }]}>
+        <PhysicalDirectionalBlockText style={styles.label}>
           {withTime ? t("schoolTrip.childrenReturnTimesTitle") : t("schoolChildren.selectChild")}
-        </Text>
+        </PhysicalDirectionalBlockText>
 
         {children.map((child, index) => (
           <View key={child.localId} style={localStyles.childRow}>
-            <Text style={localStyles.childRowTitle}>
+            <PhysicalDirectionalBlockText style={localStyles.childRowTitle}>
               {t("schoolTrip.childNumber", { number: index + 1 })}
-            </Text>
+            </PhysicalDirectionalBlockText>
 
-            <Text style={localStyles.fieldLabel}>{t("schoolChildren.selectChild")}</Text>
+            <PhysicalDirectionalBlockText style={localStyles.fieldLabel}>
+              {t("schoolChildren.selectChild")}
+            </PhysicalDirectionalBlockText>
             {renderChildPickerField(child)}
 
             {withTime && child.childId ? (
-              <View style={localStyles.returnCodeBox}>
-                <Text style={localStyles.returnCodeLabel}>
+              <DirectionalRow style={localStyles.returnCodeBox}>
+                <DirectionalText style={localStyles.returnCodeLabel}>
                   {t("schoolChildren.returnIdentificationCodeLabel")}
-                </Text>
+                </DirectionalText>
                 {child.returnCode ? (
-                  <Text style={localStyles.returnCodeValue}>{child.returnCode}</Text>
+                  <DirectionalText ltr style={localStyles.returnCodeValue}>
+                    {child.returnCode}
+                  </DirectionalText>
                 ) : (
-                  <Text
-                    style={[
-                      localStyles.returnCodeErrorText,
-                      { textAlign: directionalTextAlign(isRTL) },
-                    ]}
-                  >
+                  <DirectionalText style={localStyles.returnCodeErrorText}>
                     {t("schoolChildren.missingReturnCodeInline")}
-                  </Text>
+                  </DirectionalText>
                 )}
-              </View>
+              </DirectionalRow>
             ) : null}
 
             {withTime ? (
@@ -577,11 +591,14 @@ export default function DirectionSearchForm() {
 
         {withTime && children.length > 1 ? (
           <Pressable
-            style={localStyles.useSameButton}
             onPress={() => applySameReturnTimeToAll(children[0]?.returnTime || finishTime)}
           >
-            <Ionicons name="copy-outline" size={15} color="#F58220" />
-            <Text style={localStyles.useSameButtonText}>{t("schoolTrip.useSameTimeForAll")}</Text>
+            <DirectionalRow style={localStyles.useSameButton}>
+              <Ionicons name="copy-outline" size={15} color="#F58220" />
+              <DirectionalText style={localStyles.useSameButtonText}>
+                {t("schoolTrip.useSameTimeForAll")}
+              </DirectionalText>
+            </DirectionalRow>
           </Pressable>
         ) : null}
       </View>
@@ -590,7 +607,12 @@ export default function DirectionSearchForm() {
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-      <View style={localStyles.tabRow}>
+      <View
+        style={[
+          localStyles.tabRow,
+          { direction: "ltr", flexDirection: isRTL ? "row-reverse" : "row" },
+        ]}
+      >
         {(
           [
             { key: "outbound", labelKey: "schoolTrip.outboundOnly" },
@@ -603,7 +625,16 @@ export default function DirectionSearchForm() {
             style={[localStyles.tab, mode === tab.key && localStyles.tabActive]}
             onPress={() => handleModeChange(tab.key)}
           >
-            <Text style={[localStyles.tabText, mode === tab.key && localStyles.tabTextActive]}>
+            <Text
+              style={[
+                localStyles.tabText,
+                mode === tab.key && localStyles.tabTextActive,
+                {
+                  textAlign: isRTL ? "right" : "left",
+                  writingDirection: isRTL ? "rtl" : "ltr",
+                },
+              ]}
+            >
               {t(tab.labelKey)}
             </Text>
           </Pressable>
@@ -612,10 +643,12 @@ export default function DirectionSearchForm() {
 
       <View style={styles.card}>
         {mode === "roundTrip" ? (
-          <View style={localStyles.sectionHeader}>
+          <DirectionalRow style={localStyles.sectionHeader}>
             <Ionicons name="arrow-up-circle-outline" size={18} color="#F58220" />
-            <Text style={localStyles.sectionTitle}>{t("schoolTrip.outboundTrip")}</Text>
-          </View>
+            <PhysicalDirectionalBlockText style={[localStyles.sectionTitle, { flex: 1 }]}>
+              {t("schoolTrip.outboundTrip")}
+            </PhysicalDirectionalBlockText>
+          </DirectionalRow>
         ) : null}
 
         <IsraelLocationAutocomplete
@@ -684,12 +717,12 @@ export default function DirectionSearchForm() {
           />
         ) : null}
 
-        <Text style={[styles.label, isRTL && { textAlign: "right" }]}>{t("booking.seats")}</Text>
+        <PhysicalDirectionalBlockText style={styles.label}>{t("booking.seats")}</PhysicalDirectionalBlockText>
         <View style={localStyles.seatsRow}>
           <Pressable style={localStyles.seatButton} onPress={decreaseSeats}>
             <Ionicons name="remove" size={20} color="#111827" />
           </Pressable>
-          <Text style={localStyles.seatsNumber}>{seats}</Text>
+          <Text style={[localStyles.seatsNumber, ltrContentStyle]}>{seats}</Text>
           <Pressable style={localStyles.seatButton} onPress={increaseSeats}>
             <Ionicons name="add" size={20} color="#111827" />
           </Pressable>
@@ -700,21 +733,25 @@ export default function DirectionSearchForm() {
 
       {mode === "roundTrip" ? (
         <View style={styles.card}>
-          <View style={localStyles.sectionHeader}>
+          <DirectionalRow style={localStyles.sectionHeader}>
             <Ionicons name="arrow-down-circle-outline" size={18} color="#3B82F6" />
-            <Text style={localStyles.sectionTitle}>{t("schoolTrip.returnTrip")}</Text>
-          </View>
+            <PhysicalDirectionalBlockText style={[localStyles.sectionTitle, { flex: 1 }]}>
+              {t("schoolTrip.returnTrip")}
+            </PhysicalDirectionalBlockText>
+          </DirectionalRow>
 
-          <Text style={styles.label}>{t("booking.from")}</Text>
-          <View style={[styles.inputRow, localStyles.readOnlyRow]}>
+          <PhysicalDirectionalBlockText style={styles.label}>{t("booking.from")}</PhysicalDirectionalBlockText>
+          <DirectionalRow style={[styles.inputRow, localStyles.readOnlyRow]}>
             <Ionicons name="location-outline" size={18} color="#8B7B6B" />
-            <Text style={localStyles.readOnlyText}>
+            <DirectionalText style={localStyles.readOnlyText}>
               {toAddress || t("schoolTrip.selectAreaFirst")}
-            </Text>
+            </DirectionalText>
             <View style={localStyles.autoPill}>
-              <Text style={localStyles.autoPillText}>{t("schoolTrip.automatic")}</Text>
+              <DirectionalText style={localStyles.autoPillText}>
+                {t("schoolTrip.automatic")}
+              </DirectionalText>
             </View>
-          </View>
+          </DirectionalRow>
 
           <IsraelLocationAutocomplete
             label={t("schoolTrip.homeDestinationLabel")}
@@ -728,30 +765,38 @@ export default function DirectionSearchForm() {
             error={returnToError}
           />
 
-          <Text style={styles.label}>{t("schoolTrip.schoolLabel")}</Text>
-          <View style={[styles.inputRow, localStyles.readOnlyRow]}>
+          <PhysicalDirectionalBlockText style={styles.label}>{t("schoolTrip.schoolLabel")}</PhysicalDirectionalBlockText>
+          <DirectionalRow style={[styles.inputRow, localStyles.readOnlyRow]}>
             <Ionicons name="school-outline" size={18} color="#8B7B6B" />
-            <Text style={localStyles.readOnlyText}>
+            <DirectionalText style={localStyles.readOnlyText}>
               {selectedSchool
                 ? getLocalizedSchoolName(selectedSchool, language)
                 : t("schoolTrip.selectSchoolFirst")}
-            </Text>
+            </DirectionalText>
             <View style={localStyles.autoPill}>
-              <Text style={localStyles.autoPillText}>{t("schoolTrip.automatic")}</Text>
+              <DirectionalText style={localStyles.autoPillText}>
+                {t("schoolTrip.automatic")}
+              </DirectionalText>
             </View>
-          </View>
+          </DirectionalRow>
 
           {renderChildSection(date, true)}
         </View>
       ) : null}
 
       <Pressable
-        style={[localStyles.searchButton, saving && { opacity: 0.6 }]}
+        style={[
+          localStyles.searchButton,
+          { flexDirection: isRTL ? "row-reverse" : "row" },
+          saving && { opacity: 0.6 },
+        ]}
         onPress={handleSearch}
         disabled={saving}
       >
         <Ionicons name="search-outline" size={18} color="#FFFFFF" />
-        <Text style={localStyles.searchText}>{t("booking.searchDrivers")}</Text>
+        <DirectionalText style={localStyles.searchText}>
+          {t("booking.searchDrivers")}
+        </DirectionalText>
       </Pressable>
 
       <Modal
@@ -763,31 +808,38 @@ export default function DirectionSearchForm() {
         <View style={localStyles.modalOverlay}>
           <Pressable style={localStyles.modalBackdrop} onPress={closeChildPicker} />
 
-          <View style={localStyles.modalCard}>
+          <DirectionalCard style={localStyles.modalCard}>
             <View style={localStyles.modalHandle} />
-            <Text style={localStyles.modalTitle}>{t("schoolChildren.selectChild")}</Text>
-            <Text style={localStyles.modalSubtitle}>{t("schoolChildren.chooseSavedChildHint")}</Text>
+            <PhysicalDirectionalBlockText style={localStyles.modalTitle}>
+              {t("schoolChildren.selectChild")}
+            </PhysicalDirectionalBlockText>
+            <PhysicalDirectionalBlockText style={localStyles.modalSubtitle}>
+              {t("schoolChildren.chooseSavedChildHint")}
+            </PhysicalDirectionalBlockText>
 
             {eligibleChildrenForPicker.length === 0 ? (
               <View style={localStyles.noChildrenBox}>
                 <Ionicons name="people-outline" size={22} color="#B86115" />
-                <Text style={localStyles.noChildrenText}>
+                <PhysicalDirectionalBlockText style={localStyles.noChildrenText}>
                   {t("schoolChildren.addChildrenFirstMessage")}
-                </Text>
+                </PhysicalDirectionalBlockText>
               </View>
             ) : (
               <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
                 {eligibleChildrenForPicker.map((profile) => (
                   <Pressable
                     key={profile.id}
-                    style={localStyles.modalChildRow}
                     onPress={() => {
                       if (pickerForLocalId) handleSelectChildProfile(pickerForLocalId, profile);
                       closeChildPicker();
                     }}
                   >
-                    <Ionicons name="person-circle-outline" size={20} color="#F58220" />
-                    <Text style={localStyles.modalChildRowText}>{profile.childName}</Text>
+                    <DirectionalRow style={localStyles.modalChildRow}>
+                      <Ionicons name="person-circle-outline" size={20} color="#F58220" />
+                      <DirectionalText style={localStyles.modalChildRowText}>
+                        {profile.childName}
+                      </DirectionalText>
+                    </DirectionalRow>
                   </Pressable>
                 ))}
               </ScrollView>
@@ -796,9 +848,11 @@ export default function DirectionSearchForm() {
             {renderManageChildrenCta()}
 
             <Pressable style={localStyles.modalCancelButton} onPress={closeChildPicker}>
-              <Text style={localStyles.modalCancelText}>{t("schoolChildren.cancel")}</Text>
+              <DirectionalText style={localStyles.modalCancelText}>
+                {t("schoolChildren.cancel")}
+              </DirectionalText>
             </Pressable>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
     </ScrollView>

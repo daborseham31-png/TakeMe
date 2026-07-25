@@ -26,7 +26,6 @@ import {
   Image,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,6 +33,7 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalCard, DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import {
   AlternativeTrip,
@@ -755,7 +755,7 @@ export default function SchoolTripResultsScreen() {
           <View style={styles.modalOverlay}>
             <Pressable style={styles.modalBackdrop} onPress={() => toggleChildAlternatives(cs.entry.localId, false)} />
 
-            <View style={styles.modalSheet}>
+            <DirectionalCard style={styles.modalSheet}>
               <View style={styles.modalHandle} />
               <Text style={styles.modalTitle}>{t("schoolTrip.alternativeTripsFound")}</Text>
               <Text style={styles.modalSubtitle}>{t("schoolTrip.noExactTripMessage")}</Text>
@@ -785,7 +785,7 @@ export default function SchoolTripResultsScreen() {
               >
                 <Text style={styles.modalCloseText}>{t("common.cancel")}</Text>
               </Pressable>
-            </View>
+            </DirectionalCard>
           </View>
         </Modal>
       </View>
@@ -796,7 +796,7 @@ export default function SchoolTripResultsScreen() {
   const firstSelectedTrip = childStates.find((cs) => cs.selectedTripId)?.selectedTripId || null;
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
@@ -918,7 +918,7 @@ export default function SchoolTripResultsScreen() {
           <View style={styles.modalOverlay}>
             <Pressable style={styles.modalBackdrop} onPress={() => setShowAlternatives(false)} />
 
-            <View style={styles.modalSheet}>
+            <DirectionalCard style={styles.modalSheet}>
               <View style={styles.modalHandle} />
               <Text style={styles.modalTitle}>{t("schoolTrip.alternativeTripsFound")}</Text>
               <Text style={styles.modalSubtitle}>{t("schoolTrip.noExactTripMessage")}</Text>
@@ -943,11 +943,11 @@ export default function SchoolTripResultsScreen() {
               <Pressable style={styles.modalCloseButton} onPress={() => setShowAlternatives(false)}>
                 <Text style={styles.modalCloseText}>{t("common.cancel")}</Text>
               </Pressable>
-            </View>
+            </DirectionalCard>
           </View>
         </Modal>
       ) : null}
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

@@ -18,7 +18,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,6 +25,7 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import {
   fetchDriverRating,
@@ -187,29 +187,29 @@ export default function SchoolTripConfirmScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.page}>
+      <DirectionalScreen style={styles.page}>
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#F58220" />
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   if (!trip) {
     return (
-      <SafeAreaView style={styles.page}>
+      <DirectionalScreen style={styles.page}>
         <View style={styles.loadingBox}>
           <Ionicons name="alert-circle-outline" size={40} color="#8B7B6B" />
           <Text style={styles.emptyText}>{t("rides.tripNoLongerAvailable")}</Text>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   const isFull = trip.status !== "active" || trip.availableSeats <= 0;
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
@@ -312,7 +312,7 @@ export default function SchoolTripConfirmScreen() {
           <Text style={styles.primaryButtonText}>{t("schoolTrip.continueToPayment")}</Text>
         </Pressable>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

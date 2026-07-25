@@ -20,7 +20,6 @@ import {
   Linking,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -99,6 +98,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
 import { translateCategoryLabel, translateProblemType, translateStatus, translateStoredDayName } from "../i18n/formatters";
+import { DirectionalCard, DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { accentBorderStart, ltrContentStyle, marginEnd } from "../i18n/rtl";
 
@@ -3619,7 +3619,7 @@ useEffect(() => {
   const isEmpty = rowsForTab.length === 0;
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView
         ref={mainScrollRef}
         contentContainerStyle={styles.scroll}
@@ -3925,7 +3925,7 @@ useEffect(() => {
         <View style={styles.modalBackdrop}>
           <Pressable style={{ flex: 1 }} onPress={() => setRebook(null)} />
 
-          <View style={styles.modalSheet}>
+          <DirectionalCard style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>{t("booking.bookAgainTitle")}</Text>
             <Text style={styles.modalSub}>
@@ -4000,7 +4000,7 @@ useEffect(() => {
                 <Text style={styles.modalSearchText}>{t("booking.searchDrivers")}</Text>
               </Pressable>
             </View>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
 
@@ -4031,7 +4031,7 @@ useEffect(() => {
             }}
           />
 
-          <View style={styles.ratingCard}>
+          <DirectionalCard style={styles.ratingCard}>
             <View style={styles.ratingIconCircle}>
               <Ionicons name="checkmark-circle" size={34} color="#F58220" />
             </View>
@@ -4095,10 +4095,10 @@ useEffect(() => {
                 <Text style={styles.ratingSubmitText}>{t("booking.submitRatingButton")}</Text>
               )}
             </Pressable>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

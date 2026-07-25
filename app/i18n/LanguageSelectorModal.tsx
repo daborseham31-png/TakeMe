@@ -16,11 +16,14 @@ import {
   Modal,
   Pressable,
   StyleSheet,
-  Text,
-  View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import {
+  DirectionalCard,
+  DirectionalRow,
+  DirectionalText,
+} from "./DirectionalPrimitives";
 import { useLanguage } from "./LanguageProvider";
 import { SUPPORTED_LANGUAGES, SupportedLanguage } from "./languages";
 
@@ -31,7 +34,7 @@ type Props = {
 
 export default function LanguageSelectorModal({ visible, onClose }: Props) {
   const { t } = useTranslation();
-  const { language, isRTL, setLanguage } = useLanguage();
+  const { language, setLanguage } = useLanguage();
   const [changing, setChanging] = useState<SupportedLanguage | null>(null);
 
   const handleSelect = async (code: SupportedLanguage) => {
@@ -45,29 +48,26 @@ export default function LanguageSelectorModal({ visible, onClose }: Props) {
       const result = await setLanguage(code);
       onClose();
 
-      if (result === "restart-required") {
-        // The language + native RTL/LTR direction are already saved and
-        // forced at this point (see LanguageProvider.setLanguage) — this
-        // reload only needs to re-render the JS side under the direction
-        // that's already committed natively. reloadAppAsync (re-exported by
-        // the root `expo` package from expo-modules-core) is the safest
-        // mechanism available here: it works in both Expo Go and standalone/
-        // dev-client builds, in debug and release, without requiring the
-        // expo-updates package this project doesn't install (Updates.reloadAsync
-        // would need that dependency and is meant for fetching a new JS bundle,
-        // not just re-mounting the current one under a new native direction).
+      if (result === "restart-available") {
+        // Never reached in Expo Go (see LanguageProvider.setLanguage) — the
+        // JS-controlled direction architecture (DirectionalScreen/
+        // DirectionalCard/etc., see i18n/rtl.ts) already makes the UI fully
+        // correct without this. Only a genuine dev/standalone build ever
+        // gets here, and even then this is an OPTIONAL offer — Cancel
+        // leaves the app exactly as correct as it already is; restarting
+        // only additionally syncs native-only primitives.
         Alert.alert(
           t("settings.restartRequiredTitle"),
           t("settings.restartRequiredMessage"),
           [
+            { text: t("common.cancel"), style: "cancel" },
             {
               text: t("settings.restartNow"),
               onPress: () => {
                 reloadAppAsync("Language direction changed").catch(() => {
                   // Nothing more we can safely do from JS if even this
-                  // fails — the language is already saved, so the next
-                  // manual app close/reopen still picks up the right
-                  // language and direction (see resolveInitialLanguage).
+                  // fails — the language is already saved and the UI is
+                  // already visually correct via JS direction either way.
                 });
               },
             },
@@ -88,16 +88,16 @@ export default function LanguageSelectorModal({ visible, onClose }: Props) {
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={styles.backdrop}>
+      <DirectionalCard style={styles.backdrop}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
-        <View style={styles.card}>
-          <Text style={[styles.title, isRTL && styles.textRTL]}>
+        <DirectionalCard style={styles.card}>
+          <DirectionalText style={styles.title}>
             {t("settings.chooseLanguage")}
-          </Text>
-          <Text style={[styles.subtitle, isRTL && styles.textRTL]}>
+          </DirectionalText>
+          <DirectionalText style={styles.subtitle}>
             {t("settings.languageDescription")}
-          </Text>
+          </DirectionalText>
 
           {SUPPORTED_LANGUAGES.map((lang) => {
             const selected = lang.code === language;
@@ -105,40 +105,39 @@ export default function LanguageSelectorModal({ visible, onClose }: Props) {
             return (
               <Pressable
                 key={lang.code}
-                style={[styles.row, selected && styles.rowSelected]}
                 onPress={() => handleSelect(lang.code)}
                 disabled={!!changing}
               >
-                <Text
-                  style={[
-                    styles.rowText,
-                    selected && styles.rowTextSelected,
-                    lang.direction === "rtl" && styles.textRTL,
-                  ]}
-                >
-                  {lang.nativeName}
-                </Text>
+                <DirectionalRow style={[styles.row, selected && styles.rowSelected]}>
+                  <DirectionalText
+                    style={[styles.rowText, selected && styles.rowTextSelected]}
+                  >
+                    {lang.nativeName}
+                  </DirectionalText>
 
-                {changing === lang.code ? (
-                  <ActivityIndicator size="small" color="#F58220" />
-                ) : selected ? (
-                  <Ionicons name="checkmark-circle" size={22} color="#F58220" />
-                ) : (
-                  <Ionicons
-                    name="ellipse-outline"
-                    size={22}
-                    color="#D8CCBF"
-                  />
-                )}
+                  {changing === lang.code ? (
+                    <ActivityIndicator size="small" color="#F58220" />
+                  ) : selected ? (
+                    <Ionicons name="checkmark-circle" size={22} color="#F58220" />
+                  ) : (
+                    <Ionicons
+                      name="ellipse-outline"
+                      size={22}
+                      color="#D8CCBF"
+                    />
+                  )}
+                </DirectionalRow>
               </Pressable>
             );
           })}
 
           <Pressable style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>{t("common.close")}</Text>
+            <DirectionalText style={styles.closeButtonText}>
+              {t("common.close")}
+            </DirectionalText>
           </Pressable>
-        </View>
-      </View>
+        </DirectionalCard>
+      </DirectionalCard>
     </Modal>
   );
 }
@@ -166,12 +165,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 16,
   },
-  textRTL: {
-    textAlign: "right",
-    writingDirection: "rtl",
-  },
   row: {
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderWidth: 1,

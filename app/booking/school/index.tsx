@@ -11,9 +11,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import {
+  DirectionalRow,
+  DirectionalScreen,
+  DirectionalText,
+  PhysicalDirectionalBlockText,
+} from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import DirectionSearchForm from "./DirectionSearchForm";
 import LegacySchoolSearchForm from "./LegacySchoolSearchForm";
@@ -26,9 +32,9 @@ export default function SchoolRideScreen() {
   const [mode, setMode] = useState<Mode>("direction");
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <View style={styles.header}>
-        <View style={styles.topRow}>
+        <DirectionalRow style={styles.topRow}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Ionicons
               name={isRTL ? "arrow-forward" : "arrow-back"}
@@ -37,48 +43,51 @@ export default function SchoolRideScreen() {
             />
           </Pressable>
 
-          <Pressable
-            style={styles.myChildrenButton}
-            onPress={() => router.push("/booking/school/my-children" as any)}
-          >
-            <Ionicons name="people-outline" size={16} color="#F58220" />
-            <Text style={styles.myChildrenButtonText}>
-              {t("schoolChildren.manageChildrenLink")}
-            </Text>
+          <Pressable onPress={() => router.push("/booking/school/my-children" as any)}>
+            <DirectionalRow style={styles.myChildrenButton}>
+              <Ionicons name="people-outline" size={16} color="#F58220" />
+              <DirectionalText style={styles.myChildrenButtonText}>
+                {t("schoolChildren.manageChildrenLink")}
+              </DirectionalText>
+            </DirectionalRow>
           </Pressable>
-        </View>
+        </DirectionalRow>
 
-        <View style={styles.headerRow}>
+        <DirectionalRow style={styles.headerRow}>
           <Text style={styles.headerEmoji}>🎒</Text>
-          <Text style={styles.title}>{t("school.headerTitle")}</Text>
-        </View>
-        <Text style={styles.subtitle}>{t("school.subtitle")}</Text>
+          <DirectionalText block style={[styles.title, { flex: 1 }]}>
+            {t("school.headerTitle")}
+          </DirectionalText>
+        </DirectionalRow>
+        <PhysicalDirectionalBlockText style={styles.subtitle}>
+          {t("school.subtitle")}
+        </PhysicalDirectionalBlockText>
 
-        <View style={styles.tabRow}>
+        <DirectionalRow style={styles.tabRow}>
           <Pressable
             style={[styles.tab, mode === "direction" && styles.tabActive]}
             onPress={() => setMode("direction")}
           >
-            <Text style={[styles.tabText, mode === "direction" && styles.tabTextActive]}>
+            <DirectionalText style={[styles.tabText, mode === "direction" && styles.tabTextActive]}>
               {t("schoolTrip.modeByDirection")}
-            </Text>
+            </DirectionalText>
           </Pressable>
 
           <Pressable
             style={[styles.tab, mode === "legacy" && styles.tabActive]}
             onPress={() => setMode("legacy")}
           >
-            <Text style={[styles.tabText, mode === "legacy" && styles.tabTextActive]}>
+            <DirectionalText style={[styles.tabText, mode === "legacy" && styles.tabTextActive]}>
               {t("schoolTrip.modeWeekly")}
-            </Text>
+            </DirectionalText>
           </Pressable>
-        </View>
+        </DirectionalRow>
       </View>
 
       <View style={styles.body}>
         {mode === "direction" ? <DirectionSearchForm /> : <LegacySchoolSearchForm />}
       </View>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

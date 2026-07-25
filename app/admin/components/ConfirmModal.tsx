@@ -11,12 +11,15 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
-  View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import {
+  DirectionalCard,
+  DirectionalRow,
+  DirectionalText,
+  DirectionalTextInput,
+} from "../../i18n/DirectionalPrimitives";
 import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 
 export type ConfirmModalProps = {
@@ -72,13 +75,13 @@ export default function ConfirmModal({
       >
         <Pressable style={styles.backdropTouch} onPress={busy ? undefined : onCancel} />
 
-        <View style={styles.card}>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.message}>{message}</Text>
+        <DirectionalCard style={styles.card}>
+          <DirectionalText style={styles.title}>{title}</DirectionalText>
+          <DirectionalText style={styles.message}>{message}</DirectionalText>
 
           {requireReason ? (
             <>
-              <TextInput
+              <DirectionalTextInput
                 style={styles.input}
                 placeholder={reasonPlaceholder || t("admin.enterReasonPlaceholder")}
                 placeholderTextColor={adminColors.placeholder}
@@ -89,13 +92,13 @@ export default function ConfirmModal({
                 }}
                 multiline
               />
-              {reasonError ? <Text style={styles.errorText}>{reasonError}</Text> : null}
+              {reasonError ? <DirectionalText style={styles.errorText}>{reasonError}</DirectionalText> : null}
             </>
           ) : null}
 
-          <View style={styles.buttonsRow}>
+          <DirectionalRow style={styles.buttonsRow}>
             <Pressable style={styles.cancelButton} onPress={onCancel} disabled={busy}>
-              <Text style={styles.cancelText}>{t("common.cancel")}</Text>
+              <DirectionalText style={styles.cancelText}>{t("common.cancel")}</DirectionalText>
             </Pressable>
 
             <Pressable
@@ -110,11 +113,11 @@ export default function ConfirmModal({
               {busy ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.confirmText}>{confirmLabel || t("admin.confirmButton")}</Text>
+                <DirectionalText style={styles.confirmText}>{confirmLabel || t("admin.confirmButton")}</DirectionalText>
               )}
             </Pressable>
-          </View>
-        </View>
+          </DirectionalRow>
+        </DirectionalCard>
       </KeyboardAvoidingView>
     </Modal>
   );

@@ -14,7 +14,6 @@ import {
   Modal,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
@@ -23,8 +22,15 @@ import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { fetchDriverEligibility } from "../driver/driverEligibility";
+import {
+  DirectionalCard,
+  DirectionalRow,
+  DirectionalScreen,
+  DirectionalText,
+  PhysicalDirectionalBlockText,
+} from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
-import { marginEnd, paddingEnd, positionEnd } from "../i18n/rtl";
+import { positionEnd } from "../i18n/rtl";
 import {
   attachDistances,
   buildErrandBookNav,
@@ -449,6 +455,19 @@ export default function HomeScreen() {
     }
   };
 
+  // Display-order-only reversal for these two static filter arrays — never
+  // changes which key a chip represents or which filter is currently
+  // selected (that's still keyed by the real FILTER_KEYS/
+  // SCHOOL_DIRECTION_OPTIONS values via `filter`/`schoolDirectionFilter`),
+  // only what order the FlatList physically renders them in. Reversing the
+  // rendered DATA is what actually works for a horizontal FlatList — its
+  // internal scroll/virtualization does not reliably mirror via a
+  // flexDirection style the way a plain View row does.
+  const visibleFilterKeys = isRTL ? [...FILTER_KEYS].reverse() : FILTER_KEYS;
+  const visibleSchoolDirectionOptions = isRTL
+    ? [...SCHOOL_DIRECTION_OPTIONS].reverse()
+    : SCHOOL_DIRECTION_OPTIONS;
+
   const listHeader = (
     <View>
       {/* Top brand row: logo + wordmark on the left, notification icons on
@@ -517,70 +536,115 @@ export default function HomeScreen() {
             style={styles.heroWatermark}
           />
 
-          <View style={styles.heroBadge}>
+          <DirectionalRow style={styles.heroBadge}>
             <Ionicons name="sparkles" size={13} color="#FFFFFF" />
-            <Text style={styles.heroBadgeText}>{t("home.connectingPeople")}</Text>
-          </View>
+            <DirectionalText style={styles.heroBadgeText}>
+              {t("home.connectingPeople")}
+            </DirectionalText>
+          </DirectionalRow>
 
-          <Text style={styles.heroTitle}>{t("home.whereToGo")}</Text>
+          <PhysicalDirectionalBlockText style={styles.heroTitle}>
+            {t("home.whereToGo")}
+          </PhysicalDirectionalBlockText>
 
-          <Text style={styles.heroDescription}>{t("home.heroDescription")}</Text>
+          <PhysicalDirectionalBlockText style={styles.heroDescription}>
+            {t("home.heroDescription")}
+          </PhysicalDirectionalBlockText>
 
           <Pressable
-            style={({ pressed }) => [
-              styles.heroRow,
-              pressed && styles.heroRowPressed,
-            ]}
+            style={({ pressed }) => [pressed && styles.heroRowPressed]}
             onPress={() => router.push("/booking/ride-category" as any)}
           >
-            <View style={styles.heroRowIcon}>
-              <Ionicons name="search" size={18} color="#F58220" />
-            </View>
-            <View style={styles.heroRowText}>
-              <Text style={styles.heroRowTitle}>{t("home.findARide")}</Text>
-              <Text style={styles.heroRowSubtitle}>
-                {t("home.findARideSubtitle")}
-              </Text>
-            </View>
-            <View style={styles.heroRowArrow}>
-              <Ionicons
-                name={isRTL ? "arrow-back" : "arrow-forward"}
-                size={16}
-                color="#F58220"
-              />
-            </View>
+            <DirectionalRow style={styles.heroRow}>
+              <View style={styles.heroRowIcon}>
+                <Ionicons name="search" size={18} color="#F58220" />
+              </View>
+              <View style={styles.heroRowText}>
+                <Text
+                  style={[
+                    styles.heroRowTitle,
+                    {
+                      width: "100%",
+                      textAlign: isRTL ? "right" : "left",
+                      writingDirection: isRTL ? "rtl" : "ltr",
+                    },
+                  ]}
+                >
+                  {t("home.findARide")}
+                </Text>
+                <Text
+                  style={[
+                    styles.heroRowSubtitle,
+                    {
+                      width: "100%",
+                      textAlign: isRTL ? "right" : "left",
+                      writingDirection: isRTL ? "rtl" : "ltr",
+                    },
+                  ]}
+                >
+                  {t("home.findARideSubtitle")}
+                </Text>
+              </View>
+              <View style={styles.heroRowArrow}>
+                <Ionicons
+                  name={isRTL ? "arrow-back" : "arrow-forward"}
+                  size={16}
+                  color="#F58220"
+                />
+              </View>
+            </DirectionalRow>
           </Pressable>
 
           <Pressable
             style={({ pressed }) => [
-              styles.heroRow,
-              styles.heroRowSecondary,
               pressed && styles.heroRowPressed,
               checkingDriver && styles.outlineButtonDisabled,
             ]}
             onPress={handleBecomeDriver}
             disabled={checkingDriver}
           >
-            <View style={styles.heroRowIcon}>
-              {checkingDriver ? (
-                <ActivityIndicator size="small" color="#F58220" />
-              ) : (
-                <Ionicons name="car-sport-outline" size={18} color="#F58220" />
-              )}
-            </View>
-            <View style={styles.heroRowText}>
-              <Text style={styles.heroRowTitle}>{t("home.becomeADriver")}</Text>
-              <Text style={styles.heroRowSubtitle}>
-                {t("home.becomeADriverSubtitle")}
-              </Text>
-            </View>
-            <View style={styles.heroRowArrow}>
-              <Ionicons
-                name={isRTL ? "arrow-back" : "arrow-forward"}
-                size={16}
-                color="#F58220"
-              />
-            </View>
+            <DirectionalRow style={[styles.heroRow, styles.heroRowSecondary]}>
+              <View style={styles.heroRowIcon}>
+                {checkingDriver ? (
+                  <ActivityIndicator size="small" color="#F58220" />
+                ) : (
+                  <Ionicons name="car-sport-outline" size={18} color="#F58220" />
+                )}
+              </View>
+              <View style={styles.heroRowText}>
+                <Text
+                  style={[
+                    styles.heroRowTitle,
+                    {
+                      width: "100%",
+                      textAlign: isRTL ? "right" : "left",
+                      writingDirection: isRTL ? "rtl" : "ltr",
+                    },
+                  ]}
+                >
+                  {t("home.becomeADriver")}
+                </Text>
+                <Text
+                  style={[
+                    styles.heroRowSubtitle,
+                    {
+                      width: "100%",
+                      textAlign: isRTL ? "right" : "left",
+                      writingDirection: isRTL ? "rtl" : "ltr",
+                    },
+                  ]}
+                >
+                  {t("home.becomeADriverSubtitle")}
+                </Text>
+              </View>
+              <View style={styles.heroRowArrow}>
+                <Ionicons
+                  name={isRTL ? "arrow-back" : "arrow-forward"}
+                  size={16}
+                  color="#F58220"
+                />
+              </View>
+            </DirectionalRow>
           </Pressable>
         </LinearGradient>
       </View>
@@ -588,84 +652,89 @@ export default function HomeScreen() {
       {/* --- Trips near you ------------------------------------------- */}
       <View style={styles.feedSection}>
         <View style={styles.feedHeader}>
-          <View style={styles.feedTitleRow}>
+          <DirectionalRow style={styles.feedTitleRow}>
             <View style={styles.feedTitleIcon}>
               <Ionicons name="navigate" size={16} color="#F58220" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.feedTitle}>
+              <PhysicalDirectionalBlockText style={styles.feedTitle}>
                 {effectiveMode === "nearby"
                   ? t("home.nearbyRides")
                   : t("home.allAvailableRides")}
-              </Text>
-              <Text style={styles.feedSubtitle}>
+              </PhysicalDirectionalBlockText>
+              <PhysicalDirectionalBlockText style={styles.feedSubtitle}>
                 {effectiveMode === "nearby"
                   ? t("home.withinRadius", { radius: NEARBY_RIDE_RADIUS_KM })
                   : t("home.allRidesEverywhere")}
-              </Text>
+              </PhysicalDirectionalBlockText>
             </View>
 
             {filter !== "all" ? (
-              <Pressable
-                style={styles.viewAllChip}
-                onPress={() => setFilter("all")}
-              >
-                <Text style={styles.viewAllChipText}>{t("common.viewAll")}</Text>
-                <Ionicons
-                  name={isRTL ? "arrow-back" : "arrow-forward"}
-                  size={13}
-                  color="#F58220"
-                />
+              <Pressable onPress={() => setFilter("all")}>
+                <DirectionalRow style={styles.viewAllChip}>
+                  <DirectionalText style={styles.viewAllChipText}>
+                    {t("common.viewAll")}
+                  </DirectionalText>
+                  <Ionicons
+                    name={isRTL ? "arrow-back" : "arrow-forward"}
+                    size={13}
+                    color="#F58220"
+                  />
+                </DirectionalRow>
               </Pressable>
             ) : null}
-          </View>
+          </DirectionalRow>
 
           {/* Nearby / All toggle */}
-          <View style={styles.modeRow}>
+          <DirectionalRow style={styles.modeRow}>
             <Pressable
-              style={[
-                styles.modeButton,
-                mode === "nearby" && styles.modeButtonActive,
-              ]}
               onPress={handlePressNearbyTab}
             >
-              <Ionicons
-                name="navigate"
-                size={14}
-                color={mode === "nearby" ? "#FFFFFF" : "#7C5F46"}
-              />
-              <Text
+              <DirectionalRow
                 style={[
-                  styles.modeButtonText,
-                  mode === "nearby" && styles.modeButtonTextActive,
+                  styles.modeButton,
+                  mode === "nearby" && styles.modeButtonActive,
                 ]}
               >
-                {t("home.nearby")}
-              </Text>
+                <Ionicons
+                  name="navigate"
+                  size={14}
+                  color={mode === "nearby" ? "#FFFFFF" : "#7C5F46"}
+                />
+                <DirectionalText
+                  style={[
+                    styles.modeButtonText,
+                    mode === "nearby" && styles.modeButtonTextActive,
+                  ]}
+                >
+                  {t("home.nearby")}
+                </DirectionalText>
+              </DirectionalRow>
             </Pressable>
 
-            <Pressable
-              style={[
-                styles.modeButton,
-                mode === "all" && styles.modeButtonActive,
-              ]}
-              onPress={() => setMode("all")}
-            >
-              <Ionicons
-                name="globe-outline"
-                size={14}
-                color={mode === "all" ? "#FFFFFF" : "#7C5F46"}
-              />
-              <Text
+            <Pressable onPress={() => setMode("all")}>
+              <DirectionalRow
                 style={[
-                  styles.modeButtonText,
-                  mode === "all" && styles.modeButtonTextActive,
+                  styles.modeButton,
+                  mode === "all" && styles.modeButtonActive,
                 ]}
               >
-                {t("home.allRides")}
-              </Text>
+                <Ionicons
+                  name="globe-outline"
+                  size={14}
+                  color={mode === "all" ? "#FFFFFF" : "#7C5F46"}
+                />
+                <DirectionalText
+                  style={[
+                    styles.modeButtonText,
+                    mode === "all" && styles.modeButtonTextActive,
+                  ]}
+                >
+                  {t("home.allRides")}
+                </DirectionalText>
+              </DirectionalRow>
             </Pressable>
-          </View>
+          </DirectionalRow>
 
           {/* Location state banners — only relevant while the user is trying
               to use Nearby mode; "All rides" always works regardless. */}
@@ -764,14 +833,14 @@ export default function HomeScreen() {
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
-          data={FILTER_KEYS}
+          data={visibleFilterKeys}
           keyExtractor={(key) => key}
-          contentContainerStyle={[styles.filterRow, paddingEnd(28, isRTL)]}
+          contentContainerStyle={[styles.filterRow, { paddingRight: 28 }]}
           renderItem={({ item: key }) => {
             const active = filter === key;
 
             return (
-              <Pressable style={[styles.filterChip, marginEnd(8, isRTL)]} onPress={() => setFilter(key)}>
+              <Pressable style={[styles.filterChip, { marginRight: 8 }]} onPress={() => setFilter(key)}>
                 {active ? (
                   <LinearGradient
                     colors={["#FFB870", "#F58220"]}
@@ -802,7 +871,7 @@ export default function HomeScreen() {
           <FlatList
             horizontal
             showsHorizontalScrollIndicator={false}
-            data={SCHOOL_DIRECTION_OPTIONS}
+            data={visibleSchoolDirectionOptions}
             keyExtractor={(option) => option.key}
             contentContainerStyle={styles.schoolDirectionRow}
             renderItem={({ item: option }) => {
@@ -841,7 +910,7 @@ export default function HomeScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <FlatList
         data={feedLoading ? [] : visibleFeedItems}
         keyExtractor={(item) => `${item.category}-${item.id}`}
@@ -895,7 +964,7 @@ export default function HomeScreen() {
         <View style={styles.dayPickerBackdrop}>
           <Pressable style={StyleSheet.absoluteFill} onPress={closeDayPicker} />
 
-          <View style={styles.dayPickerCard}>
+          <DirectionalCard style={styles.dayPickerCard}>
             <Text style={[styles.dayPickerTitle, isRTL && styles.textRTL]}>
               {t("rides.pickDaysTitle")}
             </Text>
@@ -946,7 +1015,7 @@ export default function HomeScreen() {
                 <Text style={styles.dayPickerConfirmText}>{t("common.continue")}</Text>
               </Pressable>
             </View>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
 
@@ -959,7 +1028,7 @@ export default function HomeScreen() {
           setReviewsDriverName("");
         }}
       />
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

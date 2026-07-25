@@ -4,7 +4,6 @@ import React, { useState } from "react";
 import {
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,6 +26,10 @@ import {
 } from "../driver/create/driverHelpers";
 import WeeklyDaysCard from "../driver/create/WeeklyDaysCard";
 import { useTranslation } from "react-i18next";
+import {
+  DirectionalScreen,
+  PhysicalDirectionalBlockText,
+} from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 
 const LANGUAGES_LIST = [
@@ -303,7 +306,7 @@ export default function PersonalRideScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -316,7 +319,9 @@ export default function PersonalRideScreen() {
           <Text style={styles.headerEmoji}>🚗</Text>
           <Text style={styles.title}>{t("rideCategory.categories.personal.title")}</Text>
         </View>
-        <Text style={styles.subtitle}>{t("rideCategory.categories.personal.desc")}</Text>
+        <PhysicalDirectionalBlockText style={styles.subtitle}>
+          {t("rideCategory.categories.personal.desc")}
+        </PhysicalDirectionalBlockText>
 
         <View style={styles.card}>
           <View style={styles.twoColumns}>
@@ -349,11 +354,19 @@ export default function PersonalRideScreen() {
             </View>
           </View>
 
-          <Text style={styles.label}>{t("booking.exactDestination")} </Text>
+          <PhysicalDirectionalBlockText style={styles.label}>
+            {t("booking.exactDestination")}
+          </PhysicalDirectionalBlockText>
           <View style={styles.inputRow}>
             <Ionicons name="flag-outline" size={18} color="#8B7B6B" />
             <TextInput
-              style={styles.rowInput}
+              style={[
+                styles.rowInput,
+                {
+                  textAlign: isRTL ? "right" : "left",
+                  writingDirection: isRTL ? "rtl" : "ltr",
+                },
+              ]}
               placeholder={t("booking.enterExactBuildingHint")}
               placeholderTextColor="#8B7B6B"
               value={destinationDetails}
@@ -362,17 +375,21 @@ export default function PersonalRideScreen() {
           </View>
 
           <View style={styles.navPickupBox}>
-            <Text style={styles.label}>{t("booking.pickupLocationForDriverNav")}</Text>
-            <Text style={styles.navPickupHint}>
+            <PhysicalDirectionalBlockText style={styles.label}>
+              {t("booking.pickupLocationForDriverNav")}
+            </PhysicalDirectionalBlockText>
+            <PhysicalDirectionalBlockText style={styles.navPickupHint}>
               {t("booking.pickupOptionalHint")}
-            </Text>
+            </PhysicalDirectionalBlockText>
 
             <CurrentLocationButton onLocated={handleUseCurrentLocation} />
 
             {navAddress ? (
               <View style={styles.navPickupResult}>
                 <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
-                <Text style={styles.navPickupSavedText}>{t("booking.locationSaved")}</Text>
+                <PhysicalDirectionalBlockText style={styles.navPickupSavedText}>
+                  {t("booking.locationSaved")}
+                </PhysicalDirectionalBlockText>
               </View>
             ) : null}
           </View>
@@ -400,7 +417,9 @@ export default function PersonalRideScreen() {
                 </View>
 
                 <View style={styles.column}>
-                  <Text style={weeklyStyles.label}>{t("booking.seats")}</Text>
+                  <PhysicalDirectionalBlockText style={weeklyStyles.label}>
+                    {t("booking.seats")}
+                  </PhysicalDirectionalBlockText>
                   <View style={styles.seatsRow}>
                     <Pressable style={styles.seatButton} onPress={decreaseSeats}>
                       <Ionicons name="remove" size={20} color="#111827" />
@@ -445,7 +464,9 @@ export default function PersonalRideScreen() {
             <Text style={styles.sectionTitle}>{t("booking.driverPreferences")}</Text>
           </View>
 
-          <Text style={styles.label}>{t("booking.driverGender")}</Text>
+          <PhysicalDirectionalBlockText style={styles.label}>
+            {t("booking.driverGender")}
+          </PhysicalDirectionalBlockText>
           <View style={styles.optionRow}>
             <Pressable
               style={[
@@ -499,7 +520,9 @@ export default function PersonalRideScreen() {
             </Pressable>
           </View>
 
-          <Text style={styles.label}>{t("booking.driverSpeaks")}</Text>
+          <PhysicalDirectionalBlockText style={styles.label}>
+            {t("booking.driverSpeaks")}
+          </PhysicalDirectionalBlockText>
           <View style={styles.languageRow}>
             {LANGUAGES_LIST.map((lang) => {
               const active = selectedLanguages.includes(lang.key);
@@ -532,7 +555,7 @@ export default function PersonalRideScreen() {
           <Text style={styles.searchText}>{t("booking.searchDrivers")}</Text>
         </Pressable>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

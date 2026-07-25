@@ -11,18 +11,23 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
+import {
+  DirectionalRow,
+  DirectionalScreen,
+  DirectionalText,
+  DirectionalTextInput,
+} from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { ltrContentStyle } from "../i18n/rtl";
 import { markConversationRead, sendMessage } from "./chatLib";
 
 type Message = {
@@ -112,8 +117,8 @@ export default function ChatScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
-      <View style={styles.headerBar}>
+    <DirectionalScreen style={styles.page}>
+      <DirectionalRow style={styles.headerBar}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
         </Pressable>
@@ -122,10 +127,10 @@ export default function ChatScreen() {
             {(otherName || "?").charAt(0).toUpperCase()}
           </Text>
         </View>
-        <Text style={styles.headerName} numberOfLines={1}>
+        <DirectionalText style={styles.headerName} numberOfLines={1}>
           {otherName}
-        </Text>
-      </View>
+        </DirectionalText>
+      </DirectionalRow>
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -145,9 +150,9 @@ export default function ChatScreen() {
             }
           >
             {messages.length === 0 ? (
-              <Text style={styles.empty}>
+              <DirectionalText style={styles.empty}>
                 {t("messages.noMessagesYetSayHello")}
-              </Text>
+              </DirectionalText>
             ) : (
               messages.map((m) => {
                 const mine = m.senderId === me;
@@ -165,18 +170,19 @@ export default function ChatScreen() {
                         mine ? styles.bubbleMine : styles.bubbleOther,
                       ]}
                     >
-                      <Text
+                      <DirectionalText
                         style={[
                           styles.bubbleText,
                           mine ? styles.bubbleTextMine : styles.bubbleTextOther,
                         ]}
                       >
                         {m.text}
-                      </Text>
+                      </DirectionalText>
                       <Text
                         style={[
                           styles.bubbleTime,
                           mine ? styles.bubbleTimeMine : styles.bubbleTimeOther,
+                          ltrContentStyle,
                         ]}
                       >
                         {formatTime(m.createdAtSeconds)}
@@ -189,8 +195,8 @@ export default function ChatScreen() {
           </ScrollView>
         )}
 
-        <View style={styles.inputBar}>
-          <TextInput
+        <DirectionalRow style={styles.inputBar}>
+          <DirectionalTextInput
             style={styles.input}
             placeholder={t("messages.typeMessagePlaceholder")}
             placeholderTextColor="#8B7B6B"
@@ -205,9 +211,9 @@ export default function ChatScreen() {
           >
             <Ionicons name="send" size={20} color="#FFFFFF" />
           </Pressable>
-        </View>
+        </DirectionalRow>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

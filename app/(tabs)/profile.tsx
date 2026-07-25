@@ -9,7 +9,6 @@ import {
   Image,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -22,6 +21,11 @@ import { auth, db } from "../../firebase";
 import { createReport } from "../admin/adminReportsLib";
 import { ReportCategory } from "../admin/adminTypes";
 import { signOutAndRedirectToLogin } from "../authLib";
+import {
+  DirectionalCard,
+  DirectionalScreen,
+  PhysicalDirectionalBlockText,
+} from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import LanguageSelectorModal from "../i18n/LanguageSelectorModal";
 import { SUPPORTED_LANGUAGES } from "../i18n/languages";
@@ -160,7 +164,7 @@ export default function ProfileScreen() {
     t("common.noPreference");
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.card}>
           <View style={styles.avatarWrapper}>
@@ -177,18 +181,18 @@ export default function ProfileScreen() {
             </Pressable>
           </View>
 
-          <Text style={[styles.label, isRTL && styles.textRTL]}>
+          <PhysicalDirectionalBlockText style={styles.label}>
             {t("profile.fullName")}
-          </Text>
+          </PhysicalDirectionalBlockText>
           <TextInput
             style={[styles.input, isRTL && styles.textRTL]}
             value={name}
             onChangeText={setName}
           />
 
-          <Text style={[styles.label, isRTL && styles.textRTL]}>
+          <PhysicalDirectionalBlockText style={styles.label}>
             {t("profile.email")}
-          </Text>
+          </PhysicalDirectionalBlockText>
           <TextInput
             style={styles.inputDisabled}
             value={email}
@@ -197,9 +201,9 @@ export default function ProfileScreen() {
             textAlign="left"
           />
 
-          <Text style={[styles.label, isRTL && styles.textRTL]}>
+          <PhysicalDirectionalBlockText style={styles.label}>
             {t("profile.phoneNumber")}
-          </Text>
+          </PhysicalDirectionalBlockText>
           <TextInput
             style={styles.input}
             value={phone}
@@ -209,9 +213,9 @@ export default function ProfileScreen() {
             textAlign="left"
           />
 
-          <Text style={[styles.label, isRTL && styles.textRTL]}>
+          <PhysicalDirectionalBlockText style={styles.label}>
             {t("profile.preferredDriverGender")}
-          </Text>
+          </PhysicalDirectionalBlockText>
           <Pressable style={styles.selectBox} onPress={openGenderPicker}>
             <Text>{genderLabel}</Text>
             <Text>⌄</Text>
@@ -256,7 +260,7 @@ export default function ProfileScreen() {
         onRequestClose={() => setReportVisible(false)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
+          <DirectionalCard style={styles.modalCard}>
             <Text style={[styles.modalTitle, isRTL && styles.textRTL]}>
               {t("profile.reportProblem")}
             </Text>
@@ -322,7 +326,7 @@ export default function ProfileScreen() {
                 )}
               </Pressable>
             </View>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
 
@@ -330,7 +334,7 @@ export default function ProfileScreen() {
         visible={languageModalVisible}
         onClose={() => setLanguageModalVisible(false)}
       />
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

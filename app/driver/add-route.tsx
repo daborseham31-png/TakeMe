@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth } from "../../firebase";
+import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { marginStart } from "../i18n/rtl";
 import { fetchDriverEligibility } from "./driverEligibility";
@@ -108,16 +108,16 @@ export default function AddDriverRouteScreen() {
 
   if (checking) {
     return (
-      <SafeAreaView style={styles.page}>
+      <DirectionalScreen style={styles.page}>
         <View style={styles.checkingBox}>
           <ActivityIndicator size="large" color="#F58220" />
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
@@ -184,7 +184,7 @@ export default function AddDriverRouteScreen() {
           })}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

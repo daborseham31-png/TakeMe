@@ -80,6 +80,7 @@ import {
   getPassengerTripBucket,
   getStartTripBlockedReason,
 } from "../bookingsLib";
+import { DirectionalCard } from "../../i18n/DirectionalPrimitives";
 import { formatLocalizedDateFromYMD, translateCategoryLabel } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { accentBorderStart, pushToEnd } from "../../i18n/rtl";
@@ -1312,7 +1313,7 @@ export default function useMySchoolRows({
     <>
       <Modal visible={!!ratingBooking} animationType="fade" transparent onRequestClose={closeRatingModal}>
         <View style={styles.ratingOverlay}>
-          <View style={styles.ratingSheet}>
+          <DirectionalCard style={styles.ratingSheet}>
             <Text style={styles.ratingTitle}>{t("booking.arrivedSafelyTitle")}</Text>
             <Text style={styles.ratingSubtitle}>{t("booking.rateYourDriverSubtitle")}</Text>
 
@@ -1352,7 +1353,7 @@ export default function useMySchoolRows({
             <Pressable style={styles.ratingCancelButton} onPress={closeRatingModal}>
               <Text style={styles.ratingCancelText}>{t("common.cancel")}</Text>
             </Pressable>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
 
@@ -1363,7 +1364,7 @@ export default function useMySchoolRows({
         onRequestClose={closeCancelTripModal}
       >
         <View style={styles.ratingOverlay}>
-          <View style={styles.ratingSheet}>
+          <DirectionalCard style={styles.ratingSheet}>
             <Ionicons name="warning-outline" size={32} color="#B91C1C" />
             <Text style={styles.ratingTitle}>{t("schoolTrip.cancelTripButton")}</Text>
             <Text style={styles.ratingSubtitle}>
@@ -1401,7 +1402,7 @@ export default function useMySchoolRows({
             <Pressable style={styles.ratingCancelButton} onPress={closeCancelTripModal}>
               <Text style={styles.ratingCancelText}>{t("common.cancel")}</Text>
             </Pressable>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
     </>

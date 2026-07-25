@@ -14,7 +14,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -23,6 +22,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
+import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { translateStoredDayName } from "../i18n/formatters";
 import { ltrContentStyle } from "../i18n/rtl";
@@ -719,7 +719,7 @@ const createBookingAfterPayment = async (
 
   if (schoolAskReturn) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.askReturnBox}>
           <Ionicons name="help-circle-outline" size={48} color="#F58220" />
           <Text style={styles.askReturnTitle}>{t("schoolTrip.bookReturnQuestion")}</Text>
@@ -733,12 +733,12 @@ const createBookingAfterPayment = async (
             <Text style={styles.askReturnSkipText}>{t("common.no")}</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <DirectionalScreen style={styles.safe}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -1077,7 +1077,7 @@ const createBookingAfterPayment = async (
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
+import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Tabs } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
@@ -113,6 +115,101 @@ function MessagesTabIcon({
   );
 }
 
+// A fully custom tab bar — REQUIRED after real-device screenshots proved
+// that reordering the <Tabs.Screen> declarations themselves (an earlier
+// attempt) had NO effect on the actual rendered tab order. Rather than
+// depend on however expo-router/React Navigation internally decide
+// registration order (proven unreliable for this purpose), this component
+// renders every tab BUTTON itself — never touching route names, navigation
+// targets, or badge logic — only which physical position each
+// already-existing button renders at. Each button still navigates via
+// `navigation.navigate(route.name)`, so Home always opens Home, Bookings
+// always opens Bookings, etc., regardless of where it's drawn.
+//
+// `orderedRoutes` is deliberately `state.routes` UNREVERSED — an earlier
+// version reversed this array here AND relied on the bar's own row to
+// mirror it a second time via inherited direction, which silently canceled
+// back out on a real device (see this file's own `tabBarStyles.bar`: the
+// bar neutralizes inherited direction and applies ONE explicit
+// `flexDirection: isRTL ? "row-reverse" : "row"` — that single flip is the
+// only thing that reorders these buttons now).
+function CustomTabBar({
+  state,
+  descriptors,
+  navigation,
+  isRTL,
+}: BottomTabBarProps & { isRTL: boolean }) {
+  const insets = useSafeAreaInsets();
+  const orderedRoutes = state.routes;
+
+  return (
+    <View
+      style={[
+        tabBarStyles.bar,
+        { paddingBottom: Math.max(insets.bottom, 8) },
+        { direction: "ltr", flexDirection: isRTL ? "row-reverse" : "row" },
+      ]}
+    >
+      {orderedRoutes.map((route) => {
+        const { options } = descriptors[route.key];
+        const isFocused = state.routes[state.index]?.key === route.key;
+        const color = isFocused ? "#F58220" : "#8E8E93";
+
+        const onPress = () => {
+          const event = navigation.emit({
+            type: "tabPress",
+            target: route.key,
+            canPreventDefault: true,
+          });
+
+          if (!isFocused && !event.defaultPrevented) {
+            navigation.navigate(route.name);
+          }
+        };
+
+        return (
+          <Pressable
+            key={route.key}
+            onPress={onPress}
+            style={tabBarStyles.item}
+            accessibilityRole="button"
+            accessibilityState={isFocused ? { selected: true } : {}}
+            accessibilityLabel={
+              typeof options.title === "string" ? options.title : route.name
+            }
+          >
+            {options.tabBarIcon?.({ focused: isFocused, color, size: 24 })}
+            <Text style={[tabBarStyles.label, { color }]} numberOfLines={1}>
+              {options.title ?? route.name}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+const tabBarStyles = StyleSheet.create({
+  bar: {
+    flexDirection: "row",
+    backgroundColor: "#FFFFFF",
+    borderTopWidth: 1,
+    borderTopColor: "#E7DCD1",
+    paddingTop: 8,
+  },
+  item: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    paddingVertical: 2,
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+});
+
 export default function TabLayout() {
   const { t } = useTranslation();
   const { language, isRTL } = useLanguage();
@@ -219,8 +316,13 @@ export default function TabLayout() {
     };
   }, []);
 
+  // Registration order here is now purely nominal — CustomTabBar (above) is
+  // what actually decides visual left-to-right order, reordering these same
+  // four routes for RTL without touching any of them. Each `name` still
+  // resolves to the exact same route file regardless of visual position.
   return (
     <Tabs
+      tabBar={(props) => <CustomTabBar {...props} isRTL={isRTL} />}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: "#F58220",

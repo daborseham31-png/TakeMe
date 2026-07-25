@@ -5,7 +5,6 @@ import React, { useState } from "react";
 import {
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   Text,
   TextInput,
@@ -14,6 +13,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
@@ -230,7 +230,7 @@ export default function ErrandJobScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -341,6 +341,7 @@ export default function ErrandJobScreen() {
                 icon="cash-outline"
                 keyboardType="numeric"
                 formatSuggestion={(v) => `${v} ₪`}
+                ltr
               />
             </View>
 
@@ -377,6 +378,6 @@ export default function ErrandJobScreen() {
           </Pressable>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }

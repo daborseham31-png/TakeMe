@@ -1,13 +1,32 @@
 // ---------------------------------------------------------------------------
-// Centralized direction-aware style helpers. React Native's automatic RTL
-// mirroring (I18nManager) only covers a few native primitives (Yoga flips
-// `flexDirection: "row"`, and RN's own `marginStart`/`marginEnd`/`start`/`end`
-// logical properties) — plain `marginLeft`/`marginRight`, `paddingLeft`/
-// `paddingRight`, `borderLeftWidth`/`borderRightWidth`, and absolute
-// `left`/`right` positioning are NOT auto-flipped. Every screen that needs
-// one of those must go through a helper here instead of re-deriving
-// `language === "ar" || language === "he"` (or worse, hardcoding one side)
-// itself — one central place to get this right, reused everywhere.
+// Centralized direction-aware style helpers.
+//
+// CONFIRMED BY REAL-DEVICE DIAGNOSTICS (see LanguageProvider.tsx's RTL_* logs
+// and this project's own RTL runtime diagnosis): React Native's automatic
+// native RTL mirroring (driven by I18nManager.isRTL) never actually applies
+// inside Expo Go. app/_layout.tsx instead sets a JS-controlled `direction`
+// style on the app's own root View, driven by useLanguage().isRTL. That root
+// direction CAN cascade into ordinary nested Views, which creates a real
+// double-mirroring risk for anything that ALSO applies its own explicit
+// `flexDirection: isRTL ? "row-reverse" : "row"` — an already-mirrored
+// ambient direction plus an explicit reverse cancels back out. So
+// `directionalRowStyle` below (and DirectionalPrimitives.tsx's
+// DirectionalRow/DirectionalHeader) always NEUTRALIZE first — setting
+// `direction: "ltr"` on the exact node that controls order — before applying
+// the explicit flexDirection, so that node's visual order depends on
+// EXACTLY one thing: its own isRTL check, never on whatever an ancestor
+// happened to set.
+//
+// This file's remaining helpers cover everything an explicit flexDirection
+// doesn't: `marginLeft`/`marginRight`, `paddingLeft`/`paddingRight`,
+// `borderLeftWidth`/`borderRightWidth`, absolute `left`/`right` positioning,
+// and text alignment (all physical, never auto-flipped by anything).
+// `textAlign`/`writingDirection` must also be set directly on the exact Text/
+// TextInput that needs to visibly align — never assumed to inherit from an
+// ancestor. Every screen that needs one of those must go through a helper
+// here instead of re-deriving `language === "ar" || language === "he"` (or
+// worse, hardcoding one side) itself — one central place to get this right,
+// reused everywhere.
 //
 // Every helper takes `isRTL` as a plain argument (from useLanguage().isRTL)
 // rather than reading language state itself, so these stay pure, easily
@@ -17,6 +36,12 @@
 
 // "start" = right in RTL, left in LTR (how reading order begins).
 // "end" = left in RTL, right in LTR (how reading order finishes).
+//
+// NOTE: DirectionalText/DirectionalTextInput (DirectionalPrimitives.tsx) no
+// longer call this — they set textAlign via a direct ternary instead, so
+// there is no indirection through this helper's own start/end inversion
+// logic for that specific, previously-broken case. This function is kept
+// for every OTHER existing call site across the app that already uses it.
 export function directionalTextAlign(
   isRTL: boolean,
   edge: "start" | "end" = "start",
@@ -25,11 +50,18 @@ export function directionalTextAlign(
   return startsRight ? "right" : "left";
 }
 
-// A row whose children must read in logical start→end order — mirrors to
-// row-reverse in RTL. Only use this for a row you build/order yourself;
-// never wrap something that already relies on RN's native auto-mirroring.
-export function directionalRow(isRTL: boolean): "row" | "row-reverse" {
-  return isRTL ? "row-reverse" : "row";
+// Explicit, self-contained row-order style object — the same
+// neutralize-then-reverse pair as DirectionalRow/DirectionalHeader (see
+// this file's header), for callers that can't use those components directly
+// (e.g. a FlatList's own `style`, which needs a plain style object, not a
+// wrapping component). `direction: "ltr"` resets whatever this exact node
+// inherited from an ancestor BEFORE the explicit flexDirection is applied,
+// so the result never depends on ambient direction, only on isRTL here.
+export function directionalRowStyle(isRTL: boolean): {
+  direction: "ltr";
+  flexDirection: "row" | "row-reverse";
+} {
+  return { direction: "ltr", flexDirection: isRTL ? "row-reverse" : "row" };
 }
 
 // `value` accepts a percentage string (e.g. "26%") as well as a number of

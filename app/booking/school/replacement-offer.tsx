@@ -18,7 +18,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,6 +26,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import {
   acceptReplacementOffer,
@@ -185,29 +185,29 @@ export default function ReplacementOfferScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.page}>
+      <DirectionalScreen style={styles.page}>
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#F58220" />
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   if (!offer) {
     return (
-      <SafeAreaView style={styles.page}>
+      <DirectionalScreen style={styles.page}>
         <View style={styles.loadingBox}>
           <Ionicons name="alert-circle-outline" size={40} color="#8B7B6B" />
           <Text style={styles.emptyText}>{t("booking.replacementNoLongerAvailable")}</Text>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   const alreadyResolved = offer.status === "accepted" || offer.status === "declined";
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
@@ -315,7 +315,7 @@ export default function ReplacementOfferScreen() {
           </Pressable>
         ) : null}
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

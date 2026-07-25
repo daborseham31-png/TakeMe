@@ -16,7 +16,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,6 +26,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
+import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { translateProblemType } from "../i18n/formatters";
 import { useLanguage } from "../i18n/LanguageProvider";
 import RoadsideAcceptedCard from "../booking/roadside-help/RoadsideAcceptedCard";
@@ -451,7 +451,7 @@ export default function DriverHelpRequestsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
@@ -497,7 +497,7 @@ export default function DriverHelpRequestsScreen() {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

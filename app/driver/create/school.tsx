@@ -12,9 +12,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { Pressable, SafeAreaView, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { styles } from "./driverHelpers";
 import RideForm from "./RideForm";
@@ -28,7 +29,7 @@ export default function SchoolRideScreen() {
   const [tripFrequency, setTripFrequency] = useState<TripFrequency>("oneTime");
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <View style={{ paddingHorizontal: 16, paddingTop: 45 }}>
         <View style={modeStyles.headerRow}>
           <Pressable style={modeStyles.headerBackButton} onPress={() => router.back()}>
@@ -88,7 +89,7 @@ export default function SchoolRideScreen() {
           <RideForm category="school" embedded forceRecurring />
         </View>
       </View>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

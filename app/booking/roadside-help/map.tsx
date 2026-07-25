@@ -5,7 +5,6 @@ import {
   Alert,
   Linking,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
@@ -13,6 +12,7 @@ import {
 import MapView, { Marker, Polyline, Region } from "react-native-maps";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { translateProblemTypesList } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { positionEnd } from "../../i18n/rtl";
@@ -131,7 +131,7 @@ export default function RoadsideHelpMapScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       {/* Top info bar */}
       <View style={styles.topBar}>
         <Pressable style={styles.topBack} onPress={() => router.back()}>
@@ -217,7 +217,7 @@ export default function RoadsideHelpMapScreen() {
           )}
         </View>
       </View>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

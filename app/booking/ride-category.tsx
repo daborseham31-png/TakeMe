@@ -3,7 +3,6 @@ import { router } from "expo-router";
 import React from "react";
 import {
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { marginStart } from "../i18n/rtl";
 
@@ -68,7 +68,7 @@ workErrands: "/booking/work-errand",
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.title}>{t("rideCategory.title")}</Text>
 
@@ -105,7 +105,7 @@ workErrands: "/booking/work-errand",
           })}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

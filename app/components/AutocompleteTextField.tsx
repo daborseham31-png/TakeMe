@@ -20,6 +20,8 @@ import {
 } from "react-native";
 
 import { styles as sharedStyles } from "../driver/create/driverHelpers";
+import { PhysicalDirectionalBlockText } from "../i18n/DirectionalPrimitives";
+import { useLanguage } from "../i18n/LanguageProvider";
 
 type Props = {
   label: string;
@@ -34,6 +36,10 @@ type Props = {
   // Price shows "40 ₪" in the dropdown but still fills the field with the
   // plain "40" — the underlying suggestion value is never the formatted one.
   formatSuggestion?: (value: string) => string;
+  // Set for fixed LTR content (plate numbers, prices, other codes/digits) so
+  // this shared field never flips to RTL alignment for those — only natural-
+  // language values (car model, car color) should follow the app's isRTL.
+  ltr?: boolean;
 };
 
 export default function AutocompleteTextField({
@@ -47,7 +53,10 @@ export default function AutocompleteTextField({
   maxLength,
   error,
   formatSuggestion,
+  ltr,
 }: Props) {
+  const { isRTL: appIsRTL } = useLanguage();
+  const isRTL = ltr ? false : appIsRTL;
   const [focused, setFocused] = useState(false);
   const blurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -77,12 +86,20 @@ export default function AutocompleteTextField({
 
   return (
     <View style={localStyles.wrapper}>
-      <Text style={sharedStyles.label}>{label}</Text>
+      <PhysicalDirectionalBlockText style={sharedStyles.label}>
+        {label}
+      </PhysicalDirectionalBlockText>
 
       <View style={sharedStyles.inputRow}>
         {icon ? <Ionicons name={icon} size={18} color="#8B7B6B" /> : null}
         <TextInput
-          style={sharedStyles.rowInput}
+          style={[
+            sharedStyles.rowInput,
+            {
+              textAlign: isRTL ? "right" : "left",
+              writingDirection: isRTL ? "rtl" : "ltr",
+            },
+          ]}
           placeholder={placeholder}
           placeholderTextColor="#8B7B6B"
           value={value}
@@ -94,7 +111,11 @@ export default function AutocompleteTextField({
         />
       </View>
 
-      {error ? <Text style={localStyles.errorText}>{error}</Text> : null}
+      {error ? (
+        <PhysicalDirectionalBlockText style={localStyles.errorText}>
+          {error}
+        </PhysicalDirectionalBlockText>
+      ) : null}
 
       {showDropdown ? (
         <View style={localStyles.dropdown}>

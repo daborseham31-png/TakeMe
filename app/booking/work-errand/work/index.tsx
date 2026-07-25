@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
+import { DirectionalScreen } from "../../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../../i18n/LanguageProvider";
 import { ltrContentStyle, paddingEnd } from "../../../i18n/rtl";
 import DriverReviewsSection from "../../DriverReviewsSection";
@@ -190,17 +190,17 @@ export default function FindWorkScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#F58220" />
           <Text style={styles.loadingText}>{t("workErrand.loadingWorkJobs")}</Text>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <DirectionalScreen style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons
@@ -346,7 +346,7 @@ export default function FindWorkScreen() {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

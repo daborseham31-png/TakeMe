@@ -12,6 +12,11 @@ import { EmptyState, ErrorState, LoadingState } from "./components/AdminStates";
 import FilterChips from "./components/FilterChips";
 import SearchBar from "./components/SearchBar";
 import { useAdminCollection } from "./useAdminCollection";
+import {
+  DirectionalCard,
+  DirectionalRow,
+  DirectionalText,
+} from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { pushToEnd } from "../i18n/rtl";
 
@@ -153,31 +158,32 @@ export default function AdminRidesScreen() {
         onRequestClose={() => setSortMenuOpen(false)}
       >
         <Pressable style={styles.sortBackdrop} onPress={() => setSortMenuOpen(false)}>
-          <View style={styles.sortSheet}>
+          <DirectionalCard style={styles.sortSheet}>
             {sortOptions.map((option) => {
               const active = option.key === sort;
 
               return (
                 <Pressable
                   key={option.key}
-                  style={styles.sortOptionRow}
                   onPress={() => {
                     setSort(option.key);
                     setSortMenuOpen(false);
                   }}
                 >
-                  <Text style={[styles.sortOptionText, active && styles.sortOptionTextActive]}>
-                    {option.label}
-                  </Text>
-                  <Ionicons
-                    name={active ? "radio-button-on" : "radio-button-off"}
-                    size={20}
-                    color={active ? adminColors.primary : adminColors.border}
-                  />
+                  <DirectionalRow style={styles.sortOptionRow}>
+                    <DirectionalText style={[styles.sortOptionText, active && styles.sortOptionTextActive]}>
+                      {option.label}
+                    </DirectionalText>
+                    <Ionicons
+                      name={active ? "radio-button-on" : "radio-button-off"}
+                      size={20}
+                      color={active ? adminColors.primary : adminColors.border}
+                    />
+                  </DirectionalRow>
                 </Pressable>
               );
             })}
-          </View>
+          </DirectionalCard>
         </Pressable>
       </Modal>
 
