@@ -33,6 +33,7 @@ import {
 import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { fetchDriverEligibility } from "../driverEligibility";
+import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
 import DateInput, { TimeInput } from "./DateInput";
 import {
   getDigitsOnly,
@@ -216,6 +217,12 @@ export default function SchoolTripForm() {
 
     if (!eligibility.eligible) {
       Alert.alert(t("driver.verificationRequired"), t("driver.mustVerifyLicense"));
+      return;
+    }
+
+    const suspensionBlocked = await getDriverSuspensionBlockedReason(user.uid);
+    if (suspensionBlocked) {
+      Alert.alert(t("driver.accountSuspendedTitle"), suspensionBlocked);
       return;
     }
 

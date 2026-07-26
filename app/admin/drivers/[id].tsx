@@ -29,8 +29,22 @@ import AdminScreen from "../components/AdminScreen";
 import { LoadingState } from "../components/AdminStates";
 import ConfirmModal from "../components/ConfirmModal";
 import { translateDriverVerificationStatus } from "../../i18n/formatters";
+import {
+  DriverCancellationStanding,
+  DriverCancellationViolation,
+  excuseDriverCancellationViolation,
+  liftDriverCancellationSuspension,
+  normalizeCancellationStanding,
+  subscribeDriverCancellationViolations,
+} from "../../booking/driverViolationsLib";
 
 type PendingAction = { type: DriverVerificationStatus } | null;
+
+const SUSPENSION_TIER_LABEL_KEY: Record<number, string> = {
+  1: "admin.suspensionTierSeven",
+  2: "admin.suspensionTierThirty",
+  3: "admin.suspensionTierIndefinite",
+};
 
 export default function AdminDriverDetailScreen() {
   const { t } = useTranslation();
@@ -38,12 +52,18 @@ export default function AdminDriverDetailScreen() {
   const driverId = String(params.id || "");
 
   const [driver, setDriver] = useState<AdminUserRow | null>(null);
+  const [standing, setStanding] = useState<DriverCancellationStanding | null>(null);
+  const [violations, setViolations] = useState<DriverCancellationViolation[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [liftSuspensionModalOpen, setLiftSuspensionModalOpen] = useState(false);
+  const [liftingSuspension, setLiftingSuspension] = useState(false);
+  const [excusingViolationId, setExcusingViolationId] = useState<string | null>(null);
+  const [excuseBusy, setExcuseBusy] = useState(false);
 
   useEffect(() => {
     if (!driverId) {
@@ -58,8 +78,10 @@ export default function AdminDriverDetailScreen() {
         if (!snap.exists()) {
           setNotFound(true);
           setDriver(null);
+          setStanding(null);
         } else {
           setDriver(normalizeAdminUser(snap.id, snap.data()));
+          setStanding(normalizeCancellationStanding(snap.data()));
         }
         setLoading(false);
       },
@@ -69,7 +91,16 @@ export default function AdminDriverDetailScreen() {
       },
     );
 
-    return unsubscribe;
+    const unsubscribeViolations = subscribeDriverCancellationViolations(
+      driverId,
+      setViolations,
+      () => setViolations([]),
+    );
+
+    return () => {
+      unsubscribe();
+      unsubscribeViolations();
+    };
   }, [driverId]);
 
   const missingRequirements = driver ? getMissingDriverRequirements(driver) : [];
@@ -98,6 +129,40 @@ export default function AdminDriverDetailScreen() {
       Alert.alert(t("common.error"), error?.message || t("admin.couldNotUpdateDriver"));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const canLiftSuspension =
+    !!standing?.suspensionActive &&
+    (!standing.suspensionMinEndAt || standing.suspensionMinEndAt.toMillis() <= Date.now());
+
+  const runLiftSuspension = async (reason: string) => {
+    if (liftingSuspension) return;
+
+    try {
+      setLiftingSuspension(true);
+      await liftDriverCancellationSuspension(driverId, reason);
+      setLiftSuspensionModalOpen(false);
+      Alert.alert(t("admin.savedTitle"), t("admin.suspensionLiftedMessage"));
+    } catch (error: any) {
+      Alert.alert(t("common.error"), error?.message || t("admin.couldNotUpdateDriver"));
+    } finally {
+      setLiftingSuspension(false);
+    }
+  };
+
+  const runExcuseViolation = async (reason: string) => {
+    if (!excusingViolationId || excuseBusy) return;
+
+    try {
+      setExcuseBusy(true);
+      await excuseDriverCancellationViolation(driverId, excusingViolationId, reason);
+      setExcusingViolationId(null);
+      Alert.alert(t("admin.savedTitle"), t("admin.violationExcusedMessage"));
+    } catch (error: any) {
+      Alert.alert(t("common.error"), error?.message || t("admin.couldNotUpdateDriver"));
+    } finally {
+      setExcuseBusy(false);
     }
   };
 
@@ -250,6 +315,108 @@ export default function AdminDriverDetailScreen() {
           </View>
 
           <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("admin.cancellationStandingTitle")}</Text>
+
+            {standing?.suspensionActive ? (
+              <>
+                <Row
+                  icon="ban-outline"
+                  label={t("admin.suspensionTierLabel")}
+                  value={t(SUSPENSION_TIER_LABEL_KEY[standing.suspensionTier] || "admin.suspensionTierSeven")}
+                />
+                <Row
+                  icon="calendar-outline"
+                  label={t("admin.suspensionStartLabel")}
+                  value={
+                    standing.suspensionStartAt
+                      ? standing.suspensionStartAt.toDate().toLocaleDateString()
+                      : "—"
+                  }
+                />
+                {standing.suspensionMinEndAt ? (
+                  <Row
+                    icon="time-outline"
+                    label={t("admin.suspensionMinEndLabel")}
+                    value={standing.suspensionMinEndAt.toDate().toLocaleDateString()}
+                  />
+                ) : null}
+                <Row
+                  icon="document-text-outline"
+                  label={t("admin.suspensionReasonLabel")}
+                  value={standing.suspensionReason || "—"}
+                />
+
+                {!canLiftSuspension ? (
+                  <Text style={styles.missingText}>{t("admin.liftSuspensionTooEarlyMessage")}</Text>
+                ) : null}
+
+                <ActionButton
+                  icon="play-circle-outline"
+                  label={t("admin.liftSuspensionButton")}
+                  tone="success"
+                  onPress={() => setLiftSuspensionModalOpen(true)}
+                  disabled={!canLiftSuspension}
+                />
+              </>
+            ) : (
+              <Text style={styles.rowValue}>{t("admin.noActiveSuspensionLabel")}</Text>
+            )}
+
+            {standing && standing.suspensionCount > 0 ? (
+              <Row
+                icon="repeat-outline"
+                label={t("admin.suspensionCountLabel")}
+                value={String(standing.suspensionCount)}
+              />
+            ) : null}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("admin.suspensionHistoryTitle")}</Text>
+
+            {violations.length === 0 ? (
+              <Text style={styles.rowValue}>{t("admin.noViolationsYetLabel")}</Text>
+            ) : (
+              violations.map((violation) => (
+                <View key={violation.id} style={styles.violationRow}>
+                  <View style={styles.violationHeader}>
+                    <Text style={styles.violationDate}>
+                      {violation.createdAtSeconds
+                        ? new Date(violation.createdAtSeconds * 1000).toLocaleDateString()
+                        : "—"}
+                    </Text>
+                    <Text style={styles.violationCategory}>{violation.sourceCategory}</Text>
+                  </View>
+
+                  <View style={styles.violationBadgeRow}>
+                    {violation.lateCancellation ? (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{t("admin.lateCancellationBadge")}</Text>
+                      </View>
+                    ) : null}
+                    {violation.adminExcused ? (
+                      <View style={[styles.badge, styles.badgeExcused]}>
+                        <Text style={styles.badgeText}>{t("admin.adminExcusedBadge")}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  {!violation.adminExcused ? (
+                    <Pressable
+                      style={styles.excuseButton}
+                      onPress={() => setExcusingViolationId(violation.id)}
+                    >
+                      <Text style={styles.excuseButtonText}>{t("admin.excuseViolationButton")}</Text>
+                    </Pressable>
+                  ) : violation.excuseReason ? (
+                    <Text style={styles.violationExcuseReason}>{violation.excuseReason}</Text>
+                  ) : null}
+                </View>
+              ))
+            )}
+          </View>
+
+          <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t("admin.internalAdminNoteTitle")}</Text>
             <TextInput
               style={styles.noteInput}
@@ -288,6 +455,32 @@ export default function AdminDriverDetailScreen() {
         onCancel={() => setPendingAction(null)}
         onConfirm={runAction}
       />
+
+      <ConfirmModal
+        visible={liftSuspensionModalOpen}
+        title={t("admin.liftSuspensionThisDriverQ")}
+        message={t("admin.driverNotifiedImmediately")}
+        confirmLabel={t("admin.confirmButton")}
+        destructive={false}
+        requireReason
+        reasonPlaceholder={t("admin.reasonShownToDriverPlaceholder")}
+        busy={liftingSuspension}
+        onCancel={() => setLiftSuspensionModalOpen(false)}
+        onConfirm={runLiftSuspension}
+      />
+
+      <ConfirmModal
+        visible={!!excusingViolationId}
+        title={t("admin.excuseViolationButton")}
+        message={t("admin.excuseViolationReasonPlaceholder")}
+        confirmLabel={t("admin.confirmButton")}
+        destructive={false}
+        requireReason
+        reasonPlaceholder={t("admin.excuseViolationReasonPlaceholder")}
+        busy={excuseBusy}
+        onCancel={() => setExcusingViolationId(null)}
+        onConfirm={runExcuseViolation}
+      />
     </AdminScreen>
   );
 }
@@ -315,11 +508,13 @@ const ActionButton = ({
   label,
   tone,
   onPress,
+  disabled,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   tone: "danger" | "warning" | "success";
   onPress: () => void;
+  disabled?: boolean;
 }) => (
   <Pressable
     style={[
@@ -327,8 +522,10 @@ const ActionButton = ({
       tone === "danger" && styles.actionDanger,
       tone === "warning" && styles.actionWarning,
       tone === "success" && styles.actionSuccess,
+      disabled && styles.actionDisabled,
     ]}
     onPress={onPress}
+    disabled={disabled}
   >
     <Ionicons
       name={icon}
@@ -483,10 +680,71 @@ const styles = StyleSheet.create({
     borderColor: adminColors.success,
     backgroundColor: adminColors.successBg,
   },
+  actionDisabled: {
+    opacity: 0.5,
+  },
   actionText: {
     fontSize: 14,
     fontWeight: "800",
     color: adminColors.text,
+  },
+  violationRow: {
+    borderWidth: 1,
+    borderColor: adminColors.border,
+    borderRadius: adminRadius.sm,
+    padding: 10,
+    gap: 6,
+  },
+  violationHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  violationDate: {
+    color: adminColors.text,
+    fontWeight: "800",
+    fontSize: 12.5,
+  },
+  violationCategory: {
+    color: adminColors.textMuted,
+    fontWeight: "700",
+    fontSize: 12.5,
+    textTransform: "capitalize",
+  },
+  violationBadgeRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  badge: {
+    backgroundColor: adminColors.warningBg,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: adminRadius.pill,
+  },
+  badgeExcused: {
+    backgroundColor: adminColors.successBg,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: adminColors.text,
+  },
+  excuseButton: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: adminColors.borderStrong,
+    borderRadius: adminRadius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  excuseButtonText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: adminColors.text,
+  },
+  violationExcuseReason: {
+    fontSize: 12,
+    fontStyle: "italic",
+    color: adminColors.textMuted,
   },
   noteInput: {
     borderWidth: 1,

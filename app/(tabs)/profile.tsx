@@ -7,18 +7,22 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
-import { createReport } from "../admin/adminReportsLib";
+import { compressReportImage, createReport } from "../admin/adminReportsLib";
 import { ReportCategory } from "../admin/adminTypes";
 import { signOutAndRedirectToLogin } from "../authLib";
 import {
@@ -63,6 +67,7 @@ export default function ProfileScreen() {
   const [reportVisible, setReportVisible] = useState(false);
   const [reportCategory, setReportCategory] = useState<ReportCategory>("other");
   const [reportDescription, setReportDescription] = useState("");
+  const [reportImage, setReportImage] = useState<string | null>(null);
   const [submittingReport, setSubmittingReport] = useState(false);
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
 
@@ -128,15 +133,70 @@ export default function ProfileScreen() {
     await signOutAndRedirectToLogin();
   };
 
+  const pickReportPhoto = () => {
+    Alert.alert(t("profile.addPhotoTitle"), t("profile.addPhotoMessage"), [
+      {
+        text: t("common.takePhoto"),
+        onPress: async () => {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== "granted") {
+            Alert.alert(
+              t("auth.cameraPermissionNeededTitle"),
+              t("profile.cameraPermissionMessage"),
+            );
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            quality: 0.7,
+          });
+          if (!result.canceled) {
+            setReportImage(result.assets[0].uri);
+          }
+        },
+      },
+      {
+        text: t("common.chooseFromGallery"),
+        onPress: async () => {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== "granted") {
+            Alert.alert(
+              t("auth.photoLibraryPermissionNeededTitle"),
+              t("profile.libraryPermissionMessage"),
+            );
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            quality: 0.7,
+          });
+          if (!result.canceled) {
+            setReportImage(result.assets[0].uri);
+          }
+        },
+      },
+      { text: t("common.cancel"), style: "cancel" },
+    ]);
+  };
+
   const submitReport = async () => {
     if (!reportDescription.trim() || submittingReport) return;
 
     try {
       setSubmittingReport(true);
-      await createReport({ category: reportCategory, description: reportDescription });
+      let imageUrl: string | undefined;
+      if (reportImage) {
+        imageUrl = await compressReportImage(reportImage);
+      }
+      await createReport({
+        category: reportCategory,
+        description: reportDescription,
+        imageUrl,
+      });
       setReportVisible(false);
       setReportDescription("");
       setReportCategory("other");
+      setReportImage(null);
       Alert.alert(t("profile.reportSentTitle"), t("profile.reportSent"));
     } catch (error: any) {
       Alert.alert(t("common.error"), error?.message || t("profile.couldNotSendReport"));
@@ -259,75 +319,111 @@ export default function ProfileScreen() {
         animationType="fade"
         onRequestClose={() => setReportVisible(false)}
       >
-        <View style={styles.modalBackdrop}>
-          <DirectionalCard style={styles.modalCard}>
-            <Text style={[styles.modalTitle, isRTL && styles.textRTL]}>
-              {t("profile.reportProblem")}
-            </Text>
-
-            <Text style={[styles.label, isRTL && styles.textRTL]}>
-              {t("profile.reportSubject")}
-            </Text>
-            <View style={styles.categoryRow}>
-              {REPORT_CATEGORIES.map((option) => (
-                <Pressable
-                  key={option.key}
-                  style={[
-                    styles.categoryChip,
-                    reportCategory === option.key && styles.categoryChipActive,
-                  ]}
-                  onPress={() => setReportCategory(option.key)}
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalBackdropFill}>
+              <DirectionalCard style={styles.modalCard}>
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
                 >
-                  <Text
-                    style={[
-                      styles.categoryChipText,
-                      reportCategory === option.key && styles.categoryChipTextActive,
-                    ]}
-                  >
-                    {t(option.labelKey)}
+                  <Text style={[styles.modalTitle, isRTL && styles.textRTL]}>
+                    {t("profile.reportProblem")}
                   </Text>
-                </Pressable>
-              ))}
+
+                  <Text style={[styles.label, isRTL && styles.textRTL]}>
+                    {t("profile.reportSubject")}
+                  </Text>
+                  <View style={styles.categoryRow}>
+                    {REPORT_CATEGORIES.map((option) => (
+                      <Pressable
+                        key={option.key}
+                        style={[
+                          styles.categoryChip,
+                          reportCategory === option.key && styles.categoryChipActive,
+                        ]}
+                        onPress={() => setReportCategory(option.key)}
+                      >
+                        <Text
+                          style={[
+                            styles.categoryChipText,
+                            reportCategory === option.key && styles.categoryChipTextActive,
+                          ]}
+                        >
+                          {t(option.labelKey)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  <Text style={[styles.label, isRTL && styles.textRTL]}>
+                    {t("profile.reportDescription")}
+                  </Text>
+                  <TextInput
+                    style={[styles.input, styles.reportInput, isRTL && styles.textRTL]}
+                    value={reportDescription}
+                    onChangeText={setReportDescription}
+                    placeholder={t("profile.reportDescriptionPlaceholder")}
+                    placeholderTextColor="#8B7B6B"
+                    multiline
+                    returnKeyType="done"
+                    submitBehavior="blurAndSubmit"
+                    onSubmitEditing={Keyboard.dismiss}
+                  />
+
+                  <Text style={[styles.label, isRTL && styles.textRTL]}>
+                    {t("profile.reportPhotoLabel")}
+                  </Text>
+                  {reportImage ? (
+                    <View style={styles.reportPhotoPreviewWrapper}>
+                      <Image source={{ uri: reportImage }} style={styles.reportPhotoPreview} />
+                      <Pressable
+                        style={styles.reportPhotoRemoveButton}
+                        onPress={() => setReportImage(null)}
+                      >
+                        <Ionicons name="close" size={16} color="#FFFFFF" />
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable style={styles.addPhotoButton} onPress={pickReportPhoto}>
+                      <Ionicons name="add-circle-outline" size={22} color="#F58220" />
+                      <Text style={styles.addPhotoText}>{t("profile.addPhoto")}</Text>
+                    </Pressable>
+                  )}
+
+                  <View style={styles.modalButtonsRow}>
+                    <Pressable
+                      style={styles.modalCancelButton}
+                      onPress={() => setReportVisible(false)}
+                      disabled={submittingReport}
+                    >
+                      <Text style={styles.modalCancelText}>{t("common.cancel")}</Text>
+                    </Pressable>
+
+                    <Pressable
+                      style={[
+                        styles.modalSubmitButton,
+                        (!reportDescription.trim() || submittingReport) &&
+                          styles.modalSubmitDisabled,
+                      ]}
+                      onPress={submitReport}
+                      disabled={!reportDescription.trim() || submittingReport}
+                    >
+                      {submittingReport ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.modalSubmitText}>{t("common.submit")}</Text>
+                      )}
+                    </Pressable>
+                  </View>
+                </ScrollView>
+              </DirectionalCard>
             </View>
-
-            <Text style={[styles.label, isRTL && styles.textRTL]}>
-              {t("profile.reportDescription")}
-            </Text>
-            <TextInput
-              style={[styles.input, styles.reportInput, isRTL && styles.textRTL]}
-              value={reportDescription}
-              onChangeText={setReportDescription}
-              placeholder={t("profile.reportDescriptionPlaceholder")}
-              placeholderTextColor="#8B7B6B"
-              multiline
-            />
-
-            <View style={styles.modalButtonsRow}>
-              <Pressable
-                style={styles.modalCancelButton}
-                onPress={() => setReportVisible(false)}
-                disabled={submittingReport}
-              >
-                <Text style={styles.modalCancelText}>{t("common.cancel")}</Text>
-              </Pressable>
-
-              <Pressable
-                style={[
-                  styles.modalSubmitButton,
-                  (!reportDescription.trim() || submittingReport) && styles.modalSubmitDisabled,
-                ]}
-                onPress={submitReport}
-                disabled={!reportDescription.trim() || submittingReport}
-              >
-                {submittingReport ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.modalSubmitText}>{t("common.submit")}</Text>
-                )}
-              </Pressable>
-            </View>
-          </DirectionalCard>
-        </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
 
       <LanguageSelectorModal
@@ -497,10 +593,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 20,
   },
+  modalBackdropFill: {
+    flex: 1,
+    justifyContent: "center",
+  },
   modalCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 18,
     padding: 20,
+    maxHeight: "85%",
   },
   modalTitle: {
     fontSize: 18,
@@ -536,6 +637,44 @@ const styles = StyleSheet.create({
   reportInput: {
     minHeight: 90,
     textAlignVertical: "top",
+  },
+  addPhotoButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    paddingVertical: 14,
+    backgroundColor: "#FFFDFC",
+  },
+  addPhotoText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  reportPhotoPreviewWrapper: {
+    alignSelf: "flex-start",
+  },
+  reportPhotoPreview: {
+    width: 84,
+    height: 84,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+  },
+  reportPhotoRemoveButton: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#DC2626",
+    justifyContent: "center",
+    alignItems: "center",
   },
   modalButtonsRow: {
     flexDirection: "row",

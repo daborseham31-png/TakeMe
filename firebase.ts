@@ -21,6 +21,10 @@ export const db = getFirestore(app);
 // that would have used a callable instead run on the existing Cloudflare
 // Worker (see app/booking/school/schoolChildrenLib.ts, which calls it over
 // plain HTTPS with a Firebase ID token, not the firebase/functions SDK).
+// Same reason there's no Storage export: Firebase Storage needs the Blaze
+// plan, so report photos are compressed to a small Base64 data URI and
+// stored directly on the Firestore document instead (see
+// compressReportImage in app/admin/adminReportsLib.ts).
 
 // Reused wherever a Firebase Auth action link needs to point back at a real
 // page of this app's own web build (e.g. the password-reset continue URL) —

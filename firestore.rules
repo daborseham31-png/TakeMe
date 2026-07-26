@@ -108,6 +108,23 @@ service cloud.firestore {
         newData.ratingAverage >= 0 && newData.ratingAverage <= 5;
     }
 
+    // Lets a driver's own client (recordDriverCancellationViolation) flip
+    // their own cancellationStanding.suspensionActive from false to true
+    // when a 5th qualifying cancellation fires — but never the other way,
+    // and never touching lastSuspensionLiftedAt (admin-lift-only, see
+    // liftDriverCancellationSuspension in app/booking/driverViolationsLib.ts).
+    function isValidSelfViolationStandingUpdate(userId) {
+      let oldStanding = resource.data.get("cancellationStanding", {});
+      let newStanding = request.resource.data.cancellationStanding;
+      return isSelf(userId) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["cancellationStanding", "updatedAt"]) &&
+        (oldStanding.get("suspensionActive", false) == false ||
+          newStanding.suspensionActive == true) &&
+        oldStanding.get("lastSuspensionLiftedAt", null) ==
+          newStanding.get("lastSuspensionLiftedAt", null);
+    }
+
     // ---------------------------------------------------------------
     // users/{userId}
     // ---------------------------------------------------------------
@@ -133,7 +150,8 @@ service cloud.firestore {
         unchanged("role") &&
         unchanged("isDriver") &&
         unchanged("driverVerificationStatus") &&
-        unchanged("accountStatus")
+        unchanged("accountStatus") &&
+        unchanged("cancellationStanding")
       ) || (
         // A passenger who just rated THIS user as their driver credits
         // exactly one new rating onto the running-average fields — see
@@ -145,6 +163,15 @@ service cloud.firestore {
         // {bookingId} doc and marks the booking rated. Never touches
         // name/role/phone/verification/anything else about the profile.
         isValidDriverRatingCredit(userId)
+      ) || (
+        // recordDriverCancellationViolation (app/booking/driverViolationsLib.ts)
+        // runs as the driver's OWN client — this is the one narrow path that
+        // lets a driver's session flip their own cancellationStanding from
+        // not-suspended to suspended when they hit the 5th violation. It can
+        // never go the other way (a driver can never self-lift), and can
+        // never touch lastSuspensionLiftedAt, which only
+        // liftDriverCancellationSuspension (admin-only call site) sets.
+        isValidSelfViolationStandingUpdate(userId)
       );
 
       allow delete: if isAdmin() && request.auth.uid != userId;
@@ -157,6 +184,20 @@ service cloud.firestore {
       // ever shown to anyone else.
       match /savedFormValues/{docId} {
         allow read, write: if isSelf(userId);
+      }
+
+      // users/{userId}/cancellationViolations/{violationId} — one doc per
+      // driver-initiated cancellation of an already-booked trip (see
+      // app/booking/driverViolationsLib.ts). The driver's own client creates
+      // it at cancel time (never adminExcused:true — that flag can only ever
+      // be flipped by an admin, via excuseDriverCancellationViolation).
+      match /cancellationViolations/{violationId} {
+        allow read: if isAdmin() || isSelf(userId);
+        allow create: if isSelf(userId) &&
+          request.resource.data.driverId == userId &&
+          request.resource.data.adminExcused == false;
+        allow update: if isAdmin();
+        allow delete: if false;
       }
     }
 

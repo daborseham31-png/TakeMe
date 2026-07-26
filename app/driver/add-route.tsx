@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +15,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth } from "../../firebase";
+import { getDriverSuspensionBlockedReason } from "../booking/driverViolationsLib";
 import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { marginStart } from "../i18n/rtl";
@@ -93,9 +95,16 @@ export default function AddDriverRouteScreen() {
     }
 
     fetchDriverEligibility(user.uid)
-      .then((result) => {
+      .then(async (result) => {
         if (!result.eligible) {
           router.replace("/driver/verify-license" as any);
+          return;
+        }
+
+        const suspensionBlocked = await getDriverSuspensionBlockedReason(user.uid);
+        if (suspensionBlocked) {
+          Alert.alert(t("driver.accountSuspendedTitle"), suspensionBlocked);
+          router.back();
           return;
         }
 
@@ -104,7 +113,7 @@ export default function AddDriverRouteScreen() {
       .catch(() => {
         router.replace("/driver/verify-license" as any);
       });
-  }, []);
+  }, [t]);
 
   if (checking) {
     return (
