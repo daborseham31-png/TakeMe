@@ -18,6 +18,7 @@ import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import { fetchDriverEligibility } from "../driverEligibility";
+import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { backIconName } from "../../i18n/rtl";
 import DateInput, { TimeInput } from "./DateInput";
@@ -81,6 +82,12 @@ export default function WorkJobScreen() {
         t("driver.verificationRequired"),
         t("driver.mustVerifyLicense"),
       );
+      return;
+    }
+
+    const suspensionBlocked = await getDriverSuspensionBlockedReason(user.uid);
+    if (suspensionBlocked) {
+      Alert.alert(t("driver.accountSuspendedTitle"), suspensionBlocked);
       return;
     }
 

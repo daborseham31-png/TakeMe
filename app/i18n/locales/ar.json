@@ -376,7 +376,16 @@
     "errandCreated": "تم إنشاء المشوار بنجاح.",
     "couldNotCreateTrip": "تعذّر إنشاء الرحلة.",
     "couldNotCreateWorkJob": "تعذّر إنشاء وظيفة العمل.",
-    "couldNotCreateErrand": "تعذّر إنشاء المشوار."
+    "couldNotCreateErrand": "تعذّر إنشاء المشوار.",
+    "accountSuspendedTitle": "الحساب معلّق",
+    "cancellationSuspensionBlockedMessage": "تم تعليق حساب السائق مؤقتًا بسبب تكرار إلغاء الرحلات المحجوزة. لا يزال بإمكانك الوصول إلى رحلاتك ورسائلك السابقة، لكن لا يمكنك نشر أو قبول رحلات جديدة. يرجى التواصل مع الإدارة لطلب المراجعة.",
+    "cancellationWarningTitle": "تحذير بشأن الإلغاء",
+    "cancellationWarningThird": "لقد ألغيت {{count}} رحلات محجوزة خلال آخر 30 يومًا. استمرار الإلغاءات قد يؤدي إلى تعليق حساب السائق.",
+    "cancellationWarningFourth": "تحذير أخير: لقد ألغيت {{count}} رحلات محجوزة خلال آخر 30 يومًا. الإلغاء القادم سيؤدي إلى تعليق حساب السائق.",
+    "violationExcusedTitle": "تم إعفاؤك من مخالفة",
+    "violationExcusedMessage": "قام أحد المسؤولين بإعفائك من إحدى المخالفات المسجلة بعد مراجعة الظروف.",
+    "suspensionLiftedTitle": "تم فك التعليق",
+    "suspensionLiftedMessage": "تم فك تعليق حسابك كسائق. يمكنك الآن نشر الرحلات وقبولها من جديد."
   },
   "passenger": {
     "bookRide": "احجز الرحلة",
@@ -696,7 +705,29 @@
     "schoolKioskCopyFailed": "تعذر نسخ الرابط. حاول مرة أخرى.",
     "schoolKioskOpenFailed": "تعذر فتح رابط الكشك.",
     "schoolKioskInvalidUrl": "رابط الكشك هذا غير صالح.",
-    "noSchoolsFound": "لم يتم العثور على مدارس"
+    "noSchoolsFound": "لم يتم العثور على مدارس",
+    "cancellationStandingTitle": "سجل مخالفات الإلغاء",
+    "suspensionTierLabel": "مستوى التعليق",
+    "suspensionTierSeven": "تعليق 7 أيام",
+    "suspensionTierThirty": "تعليق 30 يومًا",
+    "suspensionTierIndefinite": "تعليق إلى أجل غير محدد",
+    "suspensionStartLabel": "معلّق منذ",
+    "suspensionMinEndLabel": "أقرب تاريخ لفك التعليق",
+    "suspensionReasonLabel": "السبب",
+    "liftSuspensionTooEarlyMessage": "لا يمكن فك هذا التعليق قبل انتهاء الحد الأدنى لمدته.",
+    "liftSuspensionButton": "فك التعليق",
+    "liftSuspensionThisDriverQ": "هل تريد فك تعليق هذا السائق؟",
+    "noActiveSuspensionLabel": "لا يوجد تعليق نشط حاليًا.",
+    "suspensionCountLabel": "عدد مرات التعليق",
+    "suspensionHistoryTitle": "مخالفات الإلغاء",
+    "noViolationsYetLabel": "لا توجد مخالفات إلغاء مسجلة بعد.",
+    "lateCancellationBadge": "إلغاء متأخر",
+    "adminExcusedBadge": "معفى",
+    "excuseViolationButton": "إعفاء",
+    "excuseViolationReasonPlaceholder": "السبب (مثال: عطل في المركبة، حالة طبية طارئة، ظروف جوية، مشكلة تقنية)",
+    "suspensionLiftedMessage": "تم فك تعليق السائق وتم إشعاره بذلك.",
+    "violationExcusedMessage": "تم إعفاء المخالفة ولن تُحتسب ضمن عدد المخالفات المؤدية للتعليق.",
+    "driverNotCurrentlySuspended": "هذا السائق غير معلّق حاليًا."
   },
   "profile": {
     "tabTitle": "الملف الشخصي",
@@ -722,7 +753,13 @@
       "payment": "الدفع",
       "other": "أخرى"
     },
-    "couldNotSendReport": "تعذّر إرسال البلاغ."
+    "couldNotSendReport": "تعذّر إرسال البلاغ.",
+    "reportPhotoLabel": "صورة (اختياري)",
+    "addPhoto": "إضافة صورة",
+    "addPhotoTitle": "إضافة صورة",
+    "addPhotoMessage": "التقط صورة أو اختر واحدة من معرض الصور لمساعدتنا في فهم المشكلة.",
+    "cameraPermissionMessage": "يرجى السماح باستخدام الكاميرا لالتقاط صورة.",
+    "libraryPermissionMessage": "يرجى السماح بالوصول إلى معرض الصور لاختيار صورة."
   },
   "settings": {
     "language": "اللغة",

@@ -38,6 +38,9 @@ import {
   getCancellationEligibility,
   PASSENGER_CANCEL_LOCK_HOURS,
 } from "./cancellationEligibility";
+
+import { recordDriverCancellationViolation } from "./driverViolationsLib";
+
 import { notify } from "./work-errand/workErrandLib";
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -1233,24 +1236,44 @@ export const cancelGeneralBooking = async (
     }
   });
 
-  // Only notify for a REAL transition — a no-op re-cancel (already-cancelled
-  // early return above) must never send a second cancellation notification.
-  if (!didCancel || !notifyReceiverId) return;
+// Only continue after a real cancellation transition.
+// Re-cancelling an already-cancelled booking must not create another
+// violation or send another notification.
+if (!didCancel) return;
 
-  await notify({
-    receiverId: notifyReceiverId,
-    type: "cancelled",
-    title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
-    message:
-      cancelledBy === "passenger"
-        ? `${notifyPassengerName || "The passenger"} cancelled their booking`
-        : `${notifyDriverName || "The driver"} cancelled your booking`,
-    applicationId: bookingId,
-    bookingId,
-    category: booking.category,
-    status: "cancelled",
-    targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
-  });
+if (cancelledBy === "driver" && booking.driverId) {
+  const date = getBookingDateYMD(booking);
+  const time = getBookingTime(booking);
+
+  if (date) {
+    await recordDriverCancellationViolation({
+      driverId: booking.driverId,
+      sourceCollection: "bookings",
+      sourceId: bookingId,
+      sourceCategory: booking.category || "",
+      scheduledDeparture: new Date(
+        `${date}T${time || "00:00"}:00`
+      ),
+    });
+  }
+}
+
+if (!notifyReceiverId) return;
+
+await notify({
+  receiverId: notifyReceiverId,
+  type: "cancelled",
+  title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
+  message:
+    cancelledBy === "passenger"
+      ? `${notifyPassengerName || "The passenger"} cancelled their booking`
+      : `${notifyDriverName || "The driver"} cancelled your booking`,
+  applicationId: bookingId,
+  bookingId,
+  category: booking.category,
+  status: "cancelled",
+  targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
+});
 };
 
 export type DriverTripItem = {

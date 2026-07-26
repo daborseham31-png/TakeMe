@@ -4,7 +4,9 @@ import { doc, onSnapshot } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -44,6 +46,7 @@ export default function AdminReportDetailScreen() {
   const [response, setResponse] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
 
   useEffect(() => {
     if (!reportId) {
@@ -135,6 +138,12 @@ export default function AdminReportDetailScreen() {
             </View>
             <Text style={styles.description}>{report.description}</Text>
             <Text style={styles.reporter}>{t("admin.reportedByLabel", { name: report.reporterName })}</Text>
+
+            {report.imageUrl ? (
+              <Pressable onPress={() => setImageViewerVisible(true)}>
+                <Image source={{ uri: report.imageUrl }} style={styles.attachedPhoto} />
+              </Pressable>
+            ) : null}
           </View>
 
           {report.targetType && report.targetId ? (
@@ -208,6 +217,26 @@ export default function AdminReportDetailScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {report.imageUrl ? (
+        <Modal
+          visible={imageViewerVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setImageViewerVisible(false)}
+        >
+          <Pressable
+            style={styles.imageViewerBackdrop}
+            onPress={() => setImageViewerVisible(false)}
+          >
+            <Image
+              source={{ uri: report.imageUrl }}
+              style={styles.imageViewerPhoto}
+              resizeMode="contain"
+            />
+          </Pressable>
+        </Modal>
+      ) : null}
     </AdminScreen>
   );
 }
@@ -259,6 +288,24 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     color: adminColors.textMuted,
     marginTop: 8,
+  },
+  attachedPhoto: {
+    width: 120,
+    height: 120,
+    borderRadius: adminRadius.md,
+    borderWidth: 1,
+    borderColor: adminColors.border,
+    marginTop: 12,
+  },
+  imageViewerBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.9)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imageViewerPhoto: {
+    width: "100%",
+    height: "80%",
   },
   linkRow: {
     flexDirection: "row",

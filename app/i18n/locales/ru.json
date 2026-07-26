@@ -371,7 +371,16 @@
     "errandCreated": "Ваше поручение успешно создано.",
     "couldNotCreateTrip": "Не удалось создать поездку.",
     "couldNotCreateWorkJob": "Не удалось создать работу.",
-    "couldNotCreateErrand": "Не удалось создать поручение."
+    "couldNotCreateErrand": "Не удалось создать поручение.",
+    "accountSuspendedTitle": "Аккаунт заблокирован",
+    "cancellationSuspensionBlockedMessage": "Ваш аккаунт водителя временно заблокирован из-за повторных отмен забронированных поездок. Вы всё ещё можете просматривать свои прошлые поездки и сообщения, но не можете публиковать или принимать новые поездки. Пожалуйста, свяжитесь с администрацией, чтобы запросить пересмотр.",
+    "cancellationWarningTitle": "Предупреждение об отмене",
+    "cancellationWarningThird": "Вы отменили {{count}} забронированных поездок за последние 30 дней. Дальнейшие отмены могут привести к приостановке вашего аккаунта водителя.",
+    "cancellationWarningFourth": "Последнее предупреждение: вы отменили {{count}} забронированных поездок за последние 30 дней. Следующая отмена приведёт к приостановке вашего аккаунта водителя.",
+    "violationExcusedTitle": "Нарушение прощено",
+    "violationExcusedMessage": "Администратор простил одну из ваших зафиксированных отмен после рассмотрения обстоятельств.",
+    "suspensionLiftedTitle": "Блокировка снята",
+    "suspensionLiftedMessage": "Блокировка вашего аккаунта водителя снята. Вы снова можете публиковать и принимать поездки."
   },
   "passenger": {
     "bookRide": "Забронировать поездку",
@@ -689,7 +698,29 @@
     "schoolKioskCopyFailed": "Не удалось скопировать ссылку. Попробуйте снова.",
     "schoolKioskOpenFailed": "Не удалось открыть ссылку киоска.",
     "schoolKioskInvalidUrl": "Эта ссылка киоска недействительна.",
-    "noSchoolsFound": "Школы не найдены"
+    "noSchoolsFound": "Школы не найдены",
+    "cancellationStandingTitle": "История отмен",
+    "suspensionTierLabel": "Уровень блокировки",
+    "suspensionTierSeven": "Блокировка на 7 дней",
+    "suspensionTierThirty": "Блокировка на 30 дней",
+    "suspensionTierIndefinite": "Блокировка на неопределённый срок",
+    "suspensionStartLabel": "Заблокирован с",
+    "suspensionMinEndLabel": "Дата возможного снятия",
+    "suspensionReasonLabel": "Причина",
+    "liftSuspensionTooEarlyMessage": "Эту блокировку нельзя снять до истечения минимального срока.",
+    "liftSuspensionButton": "Снять блокировку",
+    "liftSuspensionThisDriverQ": "Снять блокировку с этого водителя?",
+    "noActiveSuspensionLabel": "Активной блокировки нет.",
+    "suspensionCountLabel": "Количество блокировок",
+    "suspensionHistoryTitle": "Нарушения отмен",
+    "noViolationsYetLabel": "Нарушений отмен пока не зафиксировано.",
+    "lateCancellationBadge": "Поздняя отмена",
+    "adminExcusedBadge": "Прощено",
+    "excuseViolationButton": "Простить",
+    "excuseViolationReasonPlaceholder": "Причина (например: поломка автомобиля, экстренная медицинская ситуация, погода, техническая проблема)",
+    "suspensionLiftedMessage": "Блокировка водителя снята, и он был уведомлён.",
+    "violationExcusedMessage": "Нарушение прощено и больше не будет учитываться при блокировке.",
+    "driverNotCurrentlySuspended": "Этот водитель сейчас не заблокирован."
   },
   "profile": {
     "tabTitle": "Профиль",
@@ -715,7 +746,13 @@
       "payment": "Оплата",
       "other": "Другое"
     },
-    "couldNotSendReport": "Не удалось отправить вашу жалобу."
+    "couldNotSendReport": "Не удалось отправить вашу жалобу.",
+    "reportPhotoLabel": "Фото (необязательно)",
+    "addPhoto": "Добавить фото",
+    "addPhotoTitle": "Добавить фото",
+    "addPhotoMessage": "Сделайте фото или выберите его из галереи, чтобы помочь объяснить проблему.",
+    "cameraPermissionMessage": "Пожалуйста, разрешите доступ к камере, чтобы сделать фото.",
+    "libraryPermissionMessage": "Пожалуйста, разрешите доступ к галерее, чтобы выбрать фото."
   },
   "settings": {
     "language": "Язык",

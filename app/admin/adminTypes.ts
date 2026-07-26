@@ -128,7 +128,9 @@ export type AdminAuditAction =
   | "booking_cancelled"
   | "report_status_changed"
   | "report_resolved"
-  | "notification_sent";
+  | "notification_sent"
+  | "driver_cancellation_violation_excused"
+  | "driver_cancellation_suspension_lifted";
 
 export type AdminAuditLogEntry = {
   adminId: string;

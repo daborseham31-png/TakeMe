@@ -82,6 +82,10 @@ import {
   getStartTripBlockedReason,
   translateCancellationError,
 } from "../bookingsLib";
+import {
+  getDriverSuspensionBlockedReason,
+  recordDriverCancellationViolation,
+} from "../driverViolationsLib";
 import { DirectionalCard } from "../../i18n/DirectionalPrimitives";
 import { formatLocalizedDateFromYMD, translateCategoryLabel } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
@@ -419,6 +423,17 @@ export default function useMySchoolRows({
     setCancelSubmitting(true);
     try {
       await cancelSchoolTrip(cancelTripTarget.id, cancelReasonInput.trim());
+      if (cancelTripTarget.driverId) {
+        await recordDriverCancellationViolation({
+          driverId: cancelTripTarget.driverId,
+          sourceCollection: "schoolTrips",
+          sourceId: cancelTripTarget.id,
+          sourceCategory: "school",
+          scheduledDeparture: new Date(
+            `${cancelTripTarget.date}T${cancelTripTarget.departureTime || "00:00"}:00`,
+          ),
+        });
+      }
       closeCancelTripModal();
     } catch (error: any) {
       Alert.alert(
@@ -503,13 +518,21 @@ export default function useMySchoolRows({
     );
   };
 
-  const handleStartOrContinueTrip = (trip: SchoolTrip) => {
-    if (trip.tripStatus === "booked" && !canStartTrip(trip)) {
-      Alert.alert(
-        t("booking.notAvailableYetTitle"),
-        getStartTripBlockedReason(trip) || t("booking.startTripOnlyOnTripDate"),
-      );
-      return;
+  const handleStartOrContinueTrip = async (trip: SchoolTrip) => {
+    if (trip.tripStatus === "booked") {
+      if (!canStartTrip(trip)) {
+        Alert.alert(
+          t("booking.notAvailableYetTitle"),
+          getStartTripBlockedReason(trip) || t("booking.startTripOnlyOnTripDate"),
+        );
+        return;
+      }
+
+      const blocked = await getDriverSuspensionBlockedReason(trip.driverId);
+      if (blocked) {
+        Alert.alert(t("driver.accountSuspendedTitle"), blocked);
+        return;
+      }
     }
 
     router.push({

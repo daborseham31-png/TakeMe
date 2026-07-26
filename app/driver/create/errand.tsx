@@ -19,6 +19,7 @@ import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import AutocompleteTextField from "../../components/AutocompleteTextField";
 import { fetchDriverEligibility } from "../driverEligibility";
+import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { backIconName } from "../../i18n/rtl";
 import DateInput, { TimeInput } from "./DateInput";
@@ -82,6 +83,12 @@ export default function ErrandJobScreen() {
         t("driver.verificationRequired"),
         t("driver.mustVerifyLicense"),
       );
+      return;
+    }
+
+    const suspensionBlocked = await getDriverSuspensionBlockedReason(user.uid);
+    if (suspensionBlocked) {
+      Alert.alert(t("driver.accountSuspendedTitle"), suspensionBlocked);
       return;
     }
 

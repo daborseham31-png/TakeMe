@@ -18,6 +18,7 @@ import {
 
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";
+import { compressImageToBase64 } from "../login/idVerificationLib";
 import { notify } from "../booking/work-errand/workErrandLib";
 import { writeAuditLog } from "./adminAuditLib";
 import { AdminReportRow, ReportCategory, ReportStatus } from "./adminTypes";
@@ -48,6 +49,17 @@ export type CreateReportInput = {
   targetType?: "user" | "ride" | "booking";
   targetId?: string;
   imageUrl?: string;
+};
+
+// Report photos are picked as a local device URI (file://...), which is
+// only readable on the reporter's own device. This project's Firebase plan
+// doesn't support Storage, so instead of uploading the file, it's resized,
+// compressed, and turned into a small Base64 data URI that gets saved
+// directly on the Firestore document — that's a real string every device
+// (including the admin's) can render straight into an <Image>.
+export const compressReportImage = async (localUri: string): Promise<string> => {
+  const base64 = await compressImageToBase64(localUri);
+  return `data:image/jpeg;base64,${base64}`;
 };
 
 export const createReport = async (input: CreateReportInput): Promise<void> => {

@@ -46,6 +46,8 @@ import {
   eligibilityReasonToErrorCode,
   getCancellationEligibility,
 } from "./cancellationEligibility";
+
+import { recordDriverCancellationViolation } from "./driverViolationsLib";
 import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
 export const RIDE_CATEGORY = "personal_ride";
