@@ -56,6 +56,10 @@ import {
   sortMyBookings,
 } from "../booking/bookingsLib";
 import {
+  getDriverSuspensionBlockedReason,
+  recordDriverCancellationViolation,
+} from "../booking/driverViolationsLib";
+import {
   arriveRide,
   cancelRideBooking,
   finishRide,
@@ -1304,6 +1308,12 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     }
 
     runApp(a.id, async () => {
+      const blocked = await getDriverSuspensionBlockedReason(a.providerId);
+      if (blocked) {
+        Alert.alert(t("driver.accountSuspendedTitle"), blocked);
+        return;
+      }
+
       // Work Helper only — pressing Start is the one real "this assignment
       // has actually started" action, so it persists tripStatus
       // "in_progress" directly (same beginJobTrip write the old, separate
@@ -1369,13 +1379,32 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         text: t("common.yesCancel"),
         style: "destructive",
         onPress: () =>
-          runApp(a.id, () => cancelApplication(a.kind, a.id, a, by)),
+          runApp(a.id, async () => {
+            await cancelApplication(a.kind, a.id, a, by);
+
+            if (by === "driver" && a.providerId && a.date) {
+              await recordDriverCancellationViolation({
+                driverId: a.providerId,
+                sourceCollection: a.kind === "work" ? "workJobs" : "errandJobs",
+                sourceId: a.id,
+                sourceCategory: a.category,
+                scheduledDeparture: new Date(`${a.date}T${a.startTime || "00:00"}:00`),
+              });
+            }
+          }),
       },
     ]);
   };
 
   const handleAppAccept = (a: NormalizedApplication) =>
-    runApp(a.id, () => acceptRequest(a.kind, a.id, a));
+    runApp(a.id, async () => {
+      const blocked = await getDriverSuspensionBlockedReason(a.providerId);
+      if (blocked) {
+        Alert.alert(t("driver.accountSuspendedTitle"), blocked);
+        return;
+      }
+      await acceptRequest(a.kind, a.id, a);
+    });
 
   const handleAppReject = (a: NormalizedApplication) =>
     Alert.alert(t("booking.rejectRequestTitle"), t("booking.rejectRequestConfirm"), [
@@ -1769,6 +1798,12 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     }
 
     runApp(r.id, async () => {
+      const blocked = await getDriverSuspensionBlockedReason(r.driverId);
+      if (blocked) {
+        Alert.alert(t("driver.accountSuspendedTitle"), blocked);
+        return;
+      }
+
       await startRideInProgress(r.id, r);
       router.push({
         pathname: "/driver/ride-navigation",

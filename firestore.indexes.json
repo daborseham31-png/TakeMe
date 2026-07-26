@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "cancellationViolations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminExcused", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "schoolTrips",
       "queryScope": "COLLECTION",
       "fields": [

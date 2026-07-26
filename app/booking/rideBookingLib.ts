@@ -40,6 +40,7 @@ import {
   PASSENGER_CANCEL_LOCK_HOURS,
   TripTrackingStatus,
 } from "./bookingsLib";
+import { recordDriverCancellationViolation } from "./driverViolationsLib";
 import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
 export const RIDE_CATEGORY = "personal_ride";
@@ -286,6 +287,16 @@ export const cancelRideBooking = async (
     status: "cancelled" as RideStatus,
     updatedAt: serverTimestamp(),
   });
+
+  if (cancelledBy === "driver" && ride.driverId) {
+    await recordDriverCancellationViolation({
+      driverId: ride.driverId,
+      sourceCollection: "bookings",
+      sourceId: bookingId,
+      sourceCategory: RIDE_CATEGORY,
+      scheduledDeparture: new Date(`${ride.date}T${ride.time || "00:00"}:00`),
+    });
+  }
 
   const receiverId = cancelledBy === "passenger" ? ride.driverId : ride.passengerId;
 

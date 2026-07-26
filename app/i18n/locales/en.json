@@ -365,7 +365,16 @@
     "errandCreated": "Your errand was created successfully.",
     "couldNotCreateTrip": "Could not create trip.",
     "couldNotCreateWorkJob": "Could not create work job.",
-    "couldNotCreateErrand": "Could not create errand."
+    "couldNotCreateErrand": "Could not create errand.",
+    "accountSuspendedTitle": "Account Suspended",
+    "cancellationSuspensionBlockedMessage": "Your driver account has been temporarily suspended due to repeated cancellations of booked rides. You can still access your previous rides and messages, but you cannot publish or accept new rides. Please contact the administration to request a review.",
+    "cancellationWarningTitle": "Cancellation Warning",
+    "cancellationWarningThird": "You have cancelled {{count}} booked trips in the last 30 days. Continued cancellations may lead to suspension of your driver account.",
+    "cancellationWarningFourth": "Final warning: you have cancelled {{count}} booked trips in the last 30 days. The next cancellation will suspend your driver account.",
+    "violationExcusedTitle": "Cancellation Excused",
+    "violationExcusedMessage": "An admin has excused one of your recorded cancellations after reviewing the circumstances.",
+    "suspensionLiftedTitle": "Suspension Lifted",
+    "suspensionLiftedMessage": "Your driver suspension has been lifted. You can publish and accept trips again."
   },
   "passenger": {
     "bookRide": "Book Ride",
@@ -681,7 +690,29 @@
     "schoolKioskCopyFailed": "Could not copy the link. Please try again.",
     "schoolKioskOpenFailed": "Could not open the kiosk link.",
     "schoolKioskInvalidUrl": "This kiosk link is invalid.",
-    "noSchoolsFound": "No schools found"
+    "noSchoolsFound": "No schools found",
+    "cancellationStandingTitle": "Cancellation Standing",
+    "suspensionTierLabel": "Suspension Level",
+    "suspensionTierSeven": "7-day suspension",
+    "suspensionTierThirty": "30-day suspension",
+    "suspensionTierIndefinite": "Indefinite suspension",
+    "suspensionStartLabel": "Suspended Since",
+    "suspensionMinEndLabel": "Earliest Lift Date",
+    "suspensionReasonLabel": "Reason",
+    "liftSuspensionTooEarlyMessage": "This suspension cannot be lifted before its minimum duration has passed.",
+    "liftSuspensionButton": "Lift Suspension",
+    "liftSuspensionThisDriverQ": "Lift this driver's suspension?",
+    "noActiveSuspensionLabel": "No active suspension.",
+    "suspensionCountLabel": "Times Suspended",
+    "suspensionHistoryTitle": "Cancellation Violations",
+    "noViolationsYetLabel": "No cancellation violations recorded yet.",
+    "lateCancellationBadge": "Late cancellation",
+    "adminExcusedBadge": "Excused",
+    "excuseViolationButton": "Excuse",
+    "excuseViolationReasonPlaceholder": "Reason (e.g. vehicle breakdown, medical emergency, weather, app issue)",
+    "suspensionLiftedMessage": "The driver's suspension has been lifted and they've been notified.",
+    "violationExcusedMessage": "The violation has been excused and will no longer count toward suspension.",
+    "driverNotCurrentlySuspended": "This driver is not currently suspended."
   },
   "profile": {
     "tabTitle": "Profile",
@@ -707,7 +738,13 @@
       "payment": "Payment",
       "other": "Other"
     },
-    "couldNotSendReport": "Could not send your report."
+    "couldNotSendReport": "Could not send your report.",
+    "reportPhotoLabel": "Photo (optional)",
+    "addPhoto": "Add Photo",
+    "addPhotoTitle": "Add a photo",
+    "addPhotoMessage": "Take a photo or choose one from your gallery to help explain the issue.",
+    "cameraPermissionMessage": "Please allow camera access to take a photo.",
+    "libraryPermissionMessage": "Please allow photo library access to choose a photo."
   },
   "settings": {
     "language": "Language",

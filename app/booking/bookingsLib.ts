@@ -28,6 +28,7 @@ import {
 
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";
+import { recordDriverCancellationViolation } from "./driverViolationsLib";
 import { notify } from "./work-errand/workErrandLib";
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -1125,6 +1126,20 @@ export const cancelGeneralBooking = async (
       });
     }
   });
+
+  if (cancelledBy === "driver" && booking.driverId) {
+    const date = getBookingDateYMD(booking);
+    const time = getBookingTime(booking);
+    if (date) {
+      await recordDriverCancellationViolation({
+        driverId: booking.driverId,
+        sourceCollection: "bookings",
+        sourceId: bookingId,
+        sourceCategory: booking.category || "",
+        scheduledDeparture: new Date(`${date}T${time || "00:00"}:00`),
+      });
+    }
+  }
 
   const receiverId = cancelledBy === "passenger" ? booking.driverId : booking.passengerId;
 

@@ -368,7 +368,16 @@
     "errandCreated": "השליחות נוצרה בהצלחה.",
     "couldNotCreateTrip": "לא ניתן היה ליצור את הנסיעה.",
     "couldNotCreateWorkJob": "לא ניתן היה ליצור את עבודת העבודה.",
-    "couldNotCreateErrand": "לא ניתן היה ליצור את השליחות."
+    "couldNotCreateErrand": "לא ניתן היה ליצור את השליחות.",
+    "accountSuspendedTitle": "החשבון הושעה",
+    "cancellationSuspensionBlockedMessage": "חשבון הנהג שלך הושעה זמנית עקב ביטולים חוזרים של נסיעות מוזמנות. עדיין ניתן לגשת לנסיעות ולהודעות הקודמות שלך, אך לא ניתן לפרסם או לקבל נסיעות חדשות. אנא צור קשר עם ההנהלה כדי לבקש בדיקה מחדש.",
+    "cancellationWarningTitle": "אזהרת ביטול",
+    "cancellationWarningThird": "ביטלת {{count}} נסיעות מוזמנות ב-30 הימים האחרונים. המשך ביטולים עלול להוביל להשעיית חשבון הנהג שלך.",
+    "cancellationWarningFourth": "אזהרה אחרונה: ביטלת {{count}} נסיעות מוזמנות ב-30 הימים האחרונים. הביטול הבא יגרום להשעיית חשבון הנהג שלך.",
+    "violationExcusedTitle": "בוטלה חריגה עבורך",
+    "violationExcusedMessage": "מנהל מערכת פטר אותך מאחד הביטולים שנרשמו, לאחר בדיקת הנסיבות.",
+    "suspensionLiftedTitle": "ההשעיה בוטלה",
+    "suspensionLiftedMessage": "השעיית הנהג שלך בוטלה. תוכל לפרסם ולקבל נסיעות מחדש."
   },
   "passenger": {
     "bookRide": "הזמן נסיעה",
@@ -685,7 +694,29 @@
     "schoolKioskCopyFailed": "לא ניתן היה להעתיק את הקישור. נסו שוב.",
     "schoolKioskOpenFailed": "לא ניתן היה לפתוח את קישור העמדה.",
     "schoolKioskInvalidUrl": "קישור העמדה הזה אינו תקין.",
-    "noSchoolsFound": "לא נמצאו בתי ספר"
+    "noSchoolsFound": "לא נמצאו בתי ספר",
+    "cancellationStandingTitle": "מצב ביטולים",
+    "suspensionTierLabel": "רמת השעיה",
+    "suspensionTierSeven": "השעיה ל-7 ימים",
+    "suspensionTierThirty": "השעיה ל-30 יום",
+    "suspensionTierIndefinite": "השעיה ללא הגבלת זמן",
+    "suspensionStartLabel": "מושעה מתאריך",
+    "suspensionMinEndLabel": "תאריך ביטול מוקדם ביותר",
+    "suspensionReasonLabel": "סיבה",
+    "liftSuspensionTooEarlyMessage": "לא ניתן לבטל השעיה זו לפני שחלף משך הזמן המינימלי שלה.",
+    "liftSuspensionButton": "בטל השעיה",
+    "liftSuspensionThisDriverQ": "לבטל את השעיית הנהג הזה?",
+    "noActiveSuspensionLabel": "אין השעיה פעילה כרגע.",
+    "suspensionCountLabel": "מספר פעמים שהושעה",
+    "suspensionHistoryTitle": "ביטולים שנרשמו",
+    "noViolationsYetLabel": "טרם נרשמו ביטולים.",
+    "lateCancellationBadge": "ביטול מאוחר",
+    "adminExcusedBadge": "פטור",
+    "excuseViolationButton": "פטור",
+    "excuseViolationReasonPlaceholder": "סיבה (לדוגמה: תקלה ברכב, מקרה חירום רפואי, מזג אוויר, תקלת אפליקציה)",
+    "suspensionLiftedMessage": "השעיית הנהג בוטלה והוא קיבל הודעה על כך.",
+    "violationExcusedMessage": "הביטול נפטר ולא ייספר עוד לקראת השעיה.",
+    "driverNotCurrentlySuspended": "הנהג הזה אינו מושעה כרגע."
   },
   "profile": {
     "tabTitle": "פרופיל",
@@ -711,7 +742,13 @@
       "payment": "תשלום",
       "other": "אחר"
     },
-    "couldNotSendReport": "לא ניתן היה לשלוח את הדיווח."
+    "couldNotSendReport": "לא ניתן היה לשלוח את הדיווח.",
+    "reportPhotoLabel": "תמונה (אופציונלי)",
+    "addPhoto": "הוסף תמונה",
+    "addPhotoTitle": "הוספת תמונה",
+    "addPhotoMessage": "צלם תמונה או בחר אחת מהגלריה כדי לעזור להסביר את הבעיה.",
+    "cameraPermissionMessage": "יש לאשר גישה למצלמה כדי לצלם תמונה.",
+    "libraryPermissionMessage": "יש לאשר גישה לגלריית התמונות כדי לבחור תמונה."
   },
   "settings": {
     "language": "שפה",

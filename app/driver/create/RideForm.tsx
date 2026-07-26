@@ -30,6 +30,7 @@ import { backIconName } from "../../i18n/rtl";
 import AutocompleteTextField from "../../components/AutocompleteTextField";
 import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { fetchDriverEligibility } from "../driverEligibility";
+import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
 import DateInput, { TimeInput } from "./DateInput";
 import WeeklyDaysCard from "./WeeklyDaysCard";
 import YesNoField from "./YesNoField";
@@ -169,6 +170,12 @@ export default function RideForm({
         t("driver.verificationRequired"),
         t("driver.mustVerifyLicense"),
       );
+      return;
+    }
+
+    const suspensionBlocked = await getDriverSuspensionBlockedReason(user.uid);
+    if (suspensionBlocked) {
+      Alert.alert(t("driver.accountSuspendedTitle"), suspensionBlocked);
       return;
     }
 

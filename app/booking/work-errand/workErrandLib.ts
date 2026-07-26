@@ -951,6 +951,11 @@ export const cancelApplication = async (
     });
   }
 
+  // Note: recording a driver-cancellation violation for this application is
+  // done by the CALLER (app/(tabs)/bookings.tsx's handleAppCancel), not here
+  // — driverViolationsLib.ts itself imports notify() from this same file, so
+  // calling it from inside cancelApplication would create a circular import.
+
   // Notify the other side.
   const otherId = cancelledBy === "passenger" ? data.providerId : data.customerId;
   await notify({
