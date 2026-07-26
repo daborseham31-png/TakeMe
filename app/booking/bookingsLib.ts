@@ -353,8 +353,9 @@ const ARRIVED_VALUES = ["arrived", "arrived_pickup"];
 // PASSENGER — Upcoming / In Progress / Completed (never Unbooked Trips: a
 // passenger row is always a real booking by construction — "ride",
 // "application", "booking" (personal/school-legacy/roadside), and
-// the school hook's "schoolGroup"/"schoolWaiting" rows, covering School
-// Outbound and Return, Personal Ride, Work Helper, and
+// the school hook's "schoolBooking"/"schoolWaiting" rows (one independent
+// row per actual outbound/return booking — never a round-trip group),
+// covering School Outbound and Return, Personal Ride, Work Helper, and
 // Errands identically).
 // ---------------------------------------------------------------------------
 
@@ -388,7 +389,7 @@ export const getPassengerTripStatus = (row: any): PassengerTripStatus => {
     return "booked";
   }
 
-  // "booking" (personal/school-legacy/roadside), "schoolGroup",
+  // "booking" (personal/school-legacy/roadside), "schoolBooking",
   // "schoolWaiting" — status is the coarse booked/completed/cancelled field,
   // tripStatus (when present) is the finer-grained live-tracking field.
   if (row.status === "completed") return "completed";
@@ -1073,16 +1074,21 @@ export const cancelGeneralBooking = async (
     const data = bookingSnap.data();
     if (data.status === "completed" || data.status === "cancelled") return;
 
+    // Read the route BEFORE any write in this transaction — Firestore
+    // requires every transaction.get() to run before the first
+    // transaction.update()/set()/delete(); this used to read routeRef AFTER
+    // writing bookingRef below, which throws "Firestore transactions
+    // require all reads to be executed before all writes" for any booking
+    // with a routeId.
+    const routeRef = booking.routeId ? doc(db, "driverRoutes", booking.routeId) : null;
+    const routeSnap = routeRef ? await transaction.get(routeRef) : null;
+
     transaction.update(bookingRef, {
       status: "cancelled",
       updatedAt: serverTimestamp(),
     });
 
-    if (!booking.routeId) return;
-
-    const routeRef = doc(db, "driverRoutes", booking.routeId);
-    const routeSnap = await transaction.get(routeRef);
-    if (!routeSnap.exists()) return;
+    if (!routeRef || !routeSnap || !routeSnap.exists()) return;
 
     const routeData: any = routeSnap.data();
     const hasWeeklyTrips =

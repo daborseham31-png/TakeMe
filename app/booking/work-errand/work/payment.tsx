@@ -19,7 +19,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,6 +27,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
+import { DirectionalScreen } from "../../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../../i18n/LanguageProvider";
 import BitBadge from "../../BitBadge";
 import { openBitPayment } from "../../bitPayment";
@@ -136,17 +136,17 @@ export default function WorkPaymentScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#F58220" />
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   if (notFound) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={44} color="#8B7B6B" />
           <Text style={styles.emptyTitle}>{t("rides.bookingNotFound")}</Text>
@@ -154,13 +154,13 @@ export default function WorkPaymentScreen() {
             <Text style={styles.backLinkText}>{t("common.goBack")}</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   if (alreadyPaid) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.center}>
           <Ionicons name="checkmark-circle-outline" size={54} color="#16A34A" />
           <Text style={styles.emptyTitle}>{t("workErrand.alreadyPaidTitle")}</Text>
@@ -174,12 +174,12 @@ export default function WorkPaymentScreen() {
             <Text style={styles.backLinkText}>{t("rides.goToMyBookings")}</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <DirectionalScreen style={styles.safe}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -311,7 +311,7 @@ export default function WorkPaymentScreen() {
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

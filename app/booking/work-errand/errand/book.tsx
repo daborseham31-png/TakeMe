@@ -6,7 +6,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,7 +14,9 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalScreen } from "../../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../../i18n/LanguageProvider";
+import { paddingEnd } from "../../../i18n/rtl";
 import IsraelLocationAutocomplete from "../../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../israelLocations";
 import {
@@ -197,7 +198,7 @@ export default function ErrandsBookScreen() {
 
   if (submitted) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.successContainer}>
           <Ionicons name="checkmark-circle-outline" size={90} color="#F58220" />
 
@@ -227,11 +228,11 @@ export default function ErrandsBookScreen() {
             </Pressable>
           </View>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
   return (
-    <SafeAreaView style={styles.safe}>
+    <DirectionalScreen style={styles.safe}>
       <KeyboardAvoidingView
         style={styles.keyboard}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -295,26 +296,26 @@ export default function ErrandsBookScreen() {
             </View>
 
             <View style={styles.detailsGrid}>
-              <View style={styles.detailItem}>
+              <View style={[styles.detailItem, paddingEnd(6, isRTL)]}>
                 <Ionicons name="calendar-outline" size={16} color="#F58220" />
                 <Text style={styles.detailText}>
                   {driver.date} ({driver.day})
                 </Text>
               </View>
 
-              <View style={styles.detailItem}>
+              <View style={[styles.detailItem, paddingEnd(6, isRTL)]}>
                 <Ionicons name="time-outline" size={16} color="#F58220" />
                 <Text style={styles.detailText}>
                   {driver.departureTime} → {driver.returnTime}
                 </Text>
               </View>
 
-              <View style={styles.detailItem}>
+              <View style={[styles.detailItem, paddingEnd(6, isRTL)]}>
                 <Ionicons name="location-outline" size={16} color="#F58220" />
                 <Text style={styles.detailText}>{driver.location}</Text>
               </View>
 
-              <View style={styles.detailItem}>
+              <View style={[styles.detailItem, paddingEnd(6, isRTL)]}>
                 <Text style={styles.price}>{driver.price} ₪</Text>
               </View>
             </View>
@@ -407,7 +408,7 @@ export default function ErrandsBookScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 
@@ -504,7 +505,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingRight: 6,
   },
   detailText: {
     fontSize: 14,

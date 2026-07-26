@@ -21,6 +21,8 @@ import FilterChips from "./components/FilterChips";
 import SearchBar from "./components/SearchBar";
 import { useAdminCollection } from "./useAdminCollection";
 import { translateAccountStatus, translateUserRole } from "../i18n/formatters";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { chevronForwardIconName } from "../i18n/rtl";
 
 type RoleFilter = "all" | "passenger" | "driver" | "admin";
 type StatusFilter = "all" | "active" | "blocked" | "suspended";
@@ -47,6 +49,7 @@ const statusColor = (status: string) => {
 
 export default function AdminUsersScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const { data: users, loading, error, refresh } = useAdminCollection(subscribeAllUsers);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
@@ -113,7 +116,7 @@ export default function AdminUsersScreen() {
         </View>
       </View>
 
-      <Ionicons name="chevron-forward" size={18} color={adminColors.placeholder} />
+      <Ionicons name={chevronForwardIconName(isRTL)} size={18} color={adminColors.placeholder} />
     </Pressable>
   );
 

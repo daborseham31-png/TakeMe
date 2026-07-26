@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { db } from "../../firebase";
 import { TRIP_LOCATIONS_COLLECTION } from "../booking/schoolTripsLib";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { positionEnd } from "../i18n/rtl";
 
 type LatLng = {
   latitude: number;
@@ -340,7 +341,7 @@ export default function LiveTrackingScreen() {
             </MapView>
 
             {driverLocation ? (
-              <Pressable style={styles.recenterButton} onPress={recenter} hitSlop={8}>
+              <Pressable style={[styles.recenterButton, positionEnd(14, isRTL)]} onPress={recenter} hitSlop={8}>
                 <Ionicons name="locate" size={20} color="#F58220" />
               </Pressable>
             ) : null}
@@ -519,7 +520,6 @@ const styles = StyleSheet.create({
   },
   recenterButton: {
     position: "absolute",
-    right: 14,
     bottom: 14,
     width: 44,
     height: 44,

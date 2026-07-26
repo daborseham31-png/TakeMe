@@ -1,0 +1,26 @@
+# Cloudflare Pages-style `_headers` file — also honored by Cloudflare
+# Workers Static Assets (the `assets` binding in wrangler.jsonc) for files
+# served directly out of this `public/` directory, without needing any
+# Worker code to run. Only the School Kiosk page gets a locked-down CSP;
+# this file must never affect the Worker's own API routes (/health,
+# /analyze-id, /analyze-license, /school-children/*, /school-kiosk/lookup),
+# none of which are static files in this directory in the first place, so
+# none of them are matched by any pattern below.
+#
+# MANUAL VERIFICATION NEEDED: confirm these headers actually appear on a
+# real deployed response (e.g. `curl -I https://<worker>.workers.dev/school-kiosk`)
+# after deploying — this repo has no way to execute a live HTTP request
+# against a deployed Worker, only `wrangler deploy --dry-run` (bundling
+# only, no live headers to inspect).
+
+/school-kiosk
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+
+/school-kiosk/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer

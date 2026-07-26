@@ -5,7 +5,6 @@ import React, { useState } from "react";
 import {
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   Text,
   TextInput,
@@ -14,11 +13,14 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import AutocompleteTextField from "../../components/AutocompleteTextField";
 import { fetchDriverEligibility } from "../driverEligibility";
+import { useLanguage } from "../../i18n/LanguageProvider";
+import { backIconName } from "../../i18n/rtl";
 import DateInput, { TimeInput } from "./DateInput";
 import { recordUsedFormValues, useSavedFormValues } from "./savedFormValuesLib";
 import YesNoField from "./YesNoField";
@@ -35,6 +37,7 @@ import {
 
 export default function ErrandJobScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const { driverName, phone, driverAge, languages } = useDriverAccount();
 
   const [loading, setLoading] = useState(false);
@@ -227,13 +230,13 @@ export default function ErrandJobScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#7C5F46" />
+          <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
         </Pressable>
 
         <View style={styles.card}>
@@ -338,6 +341,7 @@ export default function ErrandJobScreen() {
                 icon="cash-outline"
                 keyboardType="numeric"
                 formatSuggestion={(v) => `${v} ₪`}
+                ltr
               />
             </View>
 
@@ -374,6 +378,6 @@ export default function ErrandJobScreen() {
           </Pressable>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }

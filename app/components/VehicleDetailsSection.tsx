@@ -74,6 +74,7 @@ export default function VehicleDetailsSection({
         placeholder={t("driverCreate.enterCarPlateNumber")}
         icon="barcode-outline"
         keyboardType="number-pad"
+        ltr
       />
     </View>
   );

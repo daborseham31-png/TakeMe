@@ -13,6 +13,8 @@ import AdminScreen from "../components/AdminScreen";
 import { LoadingState } from "../components/AdminStates";
 import ConfirmModal from "../components/ConfirmModal";
 import { translateStatus } from "../../i18n/formatters";
+import { useLanguage } from "../../i18n/LanguageProvider";
+import { chevronForwardIconName } from "../../i18n/rtl";
 
 const toSeconds = (value: unknown): number => {
   const timestamp = value as { seconds?: number } | undefined;
@@ -21,6 +23,7 @@ const toSeconds = (value: unknown): number => {
 
 export default function AdminBookingDetailScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
   const bookingId = String(params.id || "");
 
@@ -162,7 +165,7 @@ export default function AdminBookingDetailScreen() {
             <Ionicons name="person-outline" size={16} color={adminColors.textMuted} />
             <Text style={styles.linkLabel}>{t("admin.passengerLabel")}</Text>
             <Text style={styles.linkValue}>{booking.passengerName}</Text>
-            <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
+            <Ionicons name={chevronForwardIconName(isRTL)} size={16} color={adminColors.placeholder} />
           </Pressable>
 
           <Pressable
@@ -172,7 +175,7 @@ export default function AdminBookingDetailScreen() {
             <Ionicons name="car-outline" size={16} color={adminColors.textMuted} />
             <Text style={styles.linkLabel}>{t("common.driver")}</Text>
             <Text style={styles.linkValue}>{booking.driverName}</Text>
-            <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
+            <Ionicons name={chevronForwardIconName(isRTL)} size={16} color={adminColors.placeholder} />
           </Pressable>
 
           {booking.routeId ? (
@@ -183,7 +186,7 @@ export default function AdminBookingDetailScreen() {
               <Ionicons name="navigate-outline" size={16} color={adminColors.textMuted} />
               <Text style={styles.linkLabel}>{t("admin.rideListingLabel")}</Text>
               <Text style={styles.linkValue}>{t("admin.viewLabel")}</Text>
-              <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
+              <Ionicons name={chevronForwardIconName(isRTL)} size={16} color={adminColors.placeholder} />
             </Pressable>
           ) : null}
         </View>

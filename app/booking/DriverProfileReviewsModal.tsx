@@ -14,12 +14,16 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";
+import {
+  DirectionalCard,
+  DirectionalRow,
+  DirectionalText,
+} from "../i18n/DirectionalPrimitives";
 import { formatLocalizedDate } from "../i18n/formatters";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { DriverReviewItem, loadDriverReviews } from "./driverReviewsLib";
@@ -46,7 +50,7 @@ export default function DriverProfileReviewsModal({
   onClose,
 }: Props) {
   const { t } = useTranslation();
-  const { isRTL, language } = useLanguage();
+  const { language } = useLanguage();
 
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -114,68 +118,70 @@ export default function DriverProfileReviewsModal({
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} />
 
-        <View style={styles.sheet}>
+        <DirectionalCard style={styles.sheet}>
           <View style={styles.handle} />
 
-          <View style={styles.header}>
+          <DirectionalRow style={styles.header}>
             <View style={styles.avatar}>
               <Ionicons name="person" size={26} color="#F58220" />
             </View>
 
             <View style={styles.headerText}>
-              <Text style={[styles.driverName, isRTL && styles.textRTL]}>
+              <DirectionalText style={styles.driverName}>
                 {displayName}
-              </Text>
+              </DirectionalText>
 
-              <View style={styles.ratingRow}>
+              <DirectionalRow style={styles.ratingRow}>
                 <Ionicons name="star" size={14} color="#F58220" />
                 {ratingCount > 0 ? (
-                  <Text style={styles.ratingText}>
+                  <DirectionalText style={styles.ratingText}>
                     {ratingAverage.toFixed(1)} · {t("rides.reviewsCount", { count: ratingCount })}
-                  </Text>
+                  </DirectionalText>
                 ) : (
-                  <Text style={styles.ratingText}>{t("roadsideHelp.newDriverLabel")}</Text>
+                  <DirectionalText style={styles.ratingText}>
+                    {t("roadsideHelp.newDriverLabel")}
+                  </DirectionalText>
                 )}
-              </View>
+              </DirectionalRow>
             </View>
 
             <Pressable style={styles.closeButton} onPress={onClose} hitSlop={8}>
               <Ionicons name="close" size={20} color="#7C5F46" />
             </Pressable>
-          </View>
+          </DirectionalRow>
 
-          <Text style={[styles.sectionTitle, isRTL && styles.textRTL]}>
+          <DirectionalText style={styles.sectionTitle}>
             {t("rides.reviews")}
-          </Text>
+          </DirectionalText>
 
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
             {loading ? (
-              <View style={styles.centerRow}>
+              <DirectionalRow style={styles.centerRow}>
                 <ActivityIndicator color="#F58220" />
-                <Text style={styles.stateText}>{t("common.loading")}</Text>
-              </View>
+                <DirectionalText style={styles.stateText}>{t("common.loading")}</DirectionalText>
+              </DirectionalRow>
             ) : loadError ? (
-              <View style={styles.centerRow}>
+              <DirectionalRow style={styles.centerRow}>
                 <Ionicons name="alert-circle-outline" size={20} color="#B91C1C" />
-                <Text style={styles.stateText}>{t("rides.reviewsLoadError")}</Text>
-              </View>
+                <DirectionalText style={styles.stateText}>{t("rides.reviewsLoadError")}</DirectionalText>
+              </DirectionalRow>
             ) : !driverId ? (
-              <View style={styles.centerRow}>
+              <DirectionalRow style={styles.centerRow}>
                 <Ionicons name="person-outline" size={20} color="#7C5F46" />
-                <Text style={styles.stateText}>{t("rides.driverMissing")}</Text>
-              </View>
+                <DirectionalText style={styles.stateText}>{t("rides.driverMissing")}</DirectionalText>
+              </DirectionalRow>
             ) : reviews.length === 0 ? (
-              <View style={styles.centerRow}>
+              <DirectionalRow style={styles.centerRow}>
                 <Ionicons name="chatbox-outline" size={20} color="#7C5F46" />
-                <Text style={styles.stateText}>{t("rides.noReviewsYet")}</Text>
-              </View>
+                <DirectionalText style={styles.stateText}>{t("rides.noReviewsYet")}</DirectionalText>
+              </DirectionalRow>
             ) : (
               reviews.map((review, index) => (
                 <View key={index} style={styles.reviewItem}>
-                  <View style={styles.reviewHeader}>
-                    <Text style={styles.reviewerName} numberOfLines={1}>
+                  <DirectionalRow style={styles.reviewHeader}>
+                    <DirectionalText style={styles.reviewerName} numberOfLines={1}>
                       {review.passengerName}
-                    </Text>
+                    </DirectionalText>
 
                     <View style={styles.starsRow}>
                       {Array.from({ length: 5 }).map((_, starIndex) => (
@@ -187,23 +193,23 @@ export default function DriverProfileReviewsModal({
                         />
                       ))}
                     </View>
-                  </View>
+                  </DirectionalRow>
 
-                  <Text style={styles.reviewComment}>{review.comment}</Text>
+                  <DirectionalText style={styles.reviewComment}>{review.comment}</DirectionalText>
 
                   {review.createdAtSeconds > 0 ? (
-                    <Text style={styles.reviewDate}>
+                    <DirectionalText style={styles.reviewDate}>
                       {formatLocalizedDate(
                         new Date(review.createdAtSeconds * 1000),
                         language,
                       )}
-                    </Text>
+                    </DirectionalText>
                   ) : null}
                 </View>
               ))
             )}
           </ScrollView>
-        </View>
+        </DirectionalCard>
       </View>
     </Modal>
   );

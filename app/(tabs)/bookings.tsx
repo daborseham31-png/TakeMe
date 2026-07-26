@@ -20,7 +20,6 @@ import {
   Linking,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -99,6 +98,9 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
 import { translateCategoryLabel, translateProblemType, translateStatus, translateStoredDayName } from "../i18n/formatters";
+import { DirectionalCard, DirectionalScreen } from "../i18n/DirectionalPrimitives";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { accentBorderStart, ltrContentStyle, marginEnd } from "../i18n/rtl";
 
 type Tab = "passenger" | "driver";
 
@@ -268,6 +270,7 @@ const tagApplication = (a: NormalizedApplication): TaggedApplication => ({
 
 export default function BookingsScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams<{
     tab?: string | string[];
     bookingId?: string | string[];
@@ -923,6 +926,20 @@ const bookedRouteIds = useMemo(() => {
     [rowsForTab, getBucket],
   );
 
+  // Clear All's exact scope: the current role tab's FULL bucket, deliberately
+  // computed from combinedPassengerRows/combinedDriverRows (never
+  // filteredPassengerRows/filteredDriverRows) so an active search query can
+  // never shrink what gets confirmed/cleared — see this screen's Clear All
+  // requirements. Reuses the exact same getBucket classifier every other
+  // section above already uses, so this can never disagree with what's
+  // actually shown once the search box is cleared.
+  const combinedRowsForTab = tab === "passenger" ? combinedPassengerRows : combinedDriverRows;
+
+  const clearAllScopeRows = useMemo(
+    () => combinedRowsForTab.filter((row) => getBucket(row) === bucketTab),
+    [combinedRowsForTab, getBucket, bucketTab],
+  );
+
   // Two clearly separated sections within Unbooked Trips — never one mixed
   // list. getDriverTripStatus is the exact same function that already
   // decided this row belongs in "unbookedTrips" (see getDriverTripBucket),
@@ -1416,154 +1433,273 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     ]);
   };
 
-  // "Clear All" hides every card currently shown on this tab for the current
-  // user only — it never touches status/tripStatus/paymentStatus, never
-  // deletes the shared document, and never affects the other side's list.
-  const runClearAllBookings = async (rows: CombinedRow[], viewer: Tab) => {
+  // "Clear All" is a PURE per-user My Bookings view-hide action — never a
+  // cancellation. It only ever acts on the exact role tab + status tab the
+  // user currently has open (see clearAllScopeRows above), and only ever
+  // writes the exact same per-user deletedForPassenger/deletedForDriver flag
+  // every individual trash button already uses (hideGeneralBooking,
+  // confirmHideRideBooking's hideRideBookingForPassenger/ForDriver,
+  // hideApplicationFromList, confirmDeleteTrip's deleteTrip): no status/
+  // tripStatus write, no two-hour/five-hour cancel-lock check, no call to
+  // cancelRideBooking/cancelGeneralBooking/cancelApplication/
+  // cancelSchoolBooking/cancelSchoolTrip/cancelRideRequest anywhere in this
+  // function. The individual per-card "Cancel booking"/"Cancel trip" buttons
+  // remain the ONLY thing that ever actually cancels a booking — this
+  // function never calls them, in any bucket. School rows (_kind
+  // "schoolBooking"/"schoolTrip"/"schoolWaiting") are owned by
+  // useMySchoolRows — its own clearAllSchoolRows hides each one the exact
+  // same way, one real document at a time, never a groupId.
+  const runClearAllBookings = async (
+    rows: CombinedRow[],
+    viewer: Tab,
+    bucket: BookingBucket,
+  ) => {
     setClearingAll(true);
 
     const field = viewer === "passenger" ? "deletedForPassenger" : "deletedForDriver";
-
-    const rideIds = new Set(
-      rows.filter((r) => r._kind === "ride").map((r) => r.id),
+    const nonSchoolRows = rows.filter(
+      (r) =>
+        r._kind !== "schoolBooking" && r._kind !== "schoolTrip" && r._kind !== "schoolWaiting",
     );
-    const bookingIds = new Set(
-      rows.filter((r) => r._kind === "booking").map((r) => r.id),
-    );
-    const workAppIds = new Set(
-      rows
-        .filter((r) => r._kind === "application" && r.kind === "work")
-        .map((r) => r.id),
-    );
-    const errandAppIds = new Set(
-      rows
-        .filter((r) => r._kind === "application" && r.kind === "errand")
-        .map((r) => r.id),
-    );
-    const tripIdsByCollection: Record<DriverCollection, Set<string>> = {
-      driverRoutes: new Set(),
-      workJobs: new Set(),
-      errandJobs: new Set(),
-    };
-    rows.forEach((r) => {
-      if (r._kind === "trip") tripIdsByCollection[r.collectionName].add(r.id);
-    });
-    // Booked routes hide their original driverRoutes listing card too, same
-    // as the individual delete button does (see hideGeneralBooking above) —
-    // otherwise it would reappear once the booking is hidden.
-    const routeIdsToHide = new Set(
-      rows
-        .filter((r): r is TaggedBooking => r._kind === "booking")
-        .map((r) => r.routeId)
-        .filter((id): id is string => !!id),
-    );
-
-    // Optimistic local removal first so the UI updates immediately and
-    // never waits on a round trip (or a restart) to reflect the change.
-    if (viewer === "passenger") {
-      setPassengerRides((prev) => prev.filter((r) => !rideIds.has(r.id)));
-      setBookings((prev) => prev.filter((b) => !bookingIds.has(b.id)));
-      setMyWorkApps((prev) => prev.filter((a) => !workAppIds.has(a.id)));
-      setMyErrandApps((prev) => prev.filter((a) => !errandAppIds.has(a.id)));
-    } else {
-      setDriverRides((prev) => prev.filter((r) => !rideIds.has(r.id)));
-      setDriverRoadside((prev) => prev.filter((b) => !bookingIds.has(b.id)));
-      setAsProviderWork((prev) => prev.filter((a) => !workAppIds.has(a.id)));
-      setAsProviderErrand((prev) =>
-        prev.filter((a) => !errandAppIds.has(a.id)),
-      );
-      setRoutes((prev) =>
-        prev.filter(
-          (t) =>
-            !tripIdsByCollection.driverRoutes.has(t.id) &&
-            !routeIdsToHide.has(t.id),
-        ),
-      );
-      setWorkJobs((prev) =>
-        prev.filter((t) => !tripIdsByCollection.workJobs.has(t.id)),
-      );
-      setErrandJobs((prev) =>
-        prev.filter((t) => !tripIdsByCollection.errandJobs.has(t.id)),
-      );
-    }
 
     try {
-      const ops: { collectionName: string; id: string; field: string }[] = [];
+      const clearedRideIds = new Set<string>();
+      const clearedBookingIds = new Set<string>();
+      const clearedWorkAppIds = new Set<string>();
+      const clearedErrandAppIds = new Set<string>();
+      const clearedTripIdsByCollection: Record<DriverCollection, Set<string>> = {
+        driverRoutes: new Set(),
+        workJobs: new Set(),
+        errandJobs: new Set(),
+      };
 
-      rows.forEach((row) => {
-        if (row._kind === "ride" || row._kind === "booking") {
-          ops.push({ collectionName: "bookings", id: row.id, field });
-        } else if (row._kind === "application") {
+      // One "op" per card to hide, each carrying its own `mark()` callback —
+      // only called once its OWN chunk's batch.commit() actually succeeds,
+      // so a card whose write was denied is never optimistically removed.
+      // `cosmetic: true` marks the routeIdsToHide cascade below — it isn't a
+      // card the user asked to clear, so it's never counted toward the
+      // cleared/failed totals shown to the user.
+      type ClearOp = {
+        collectionName: string;
+        id: string;
+        field: string;
+        cosmetic: boolean;
+        mark: () => void;
+      };
+      const ops: ClearOp[] = [];
+
+      nonSchoolRows.forEach((row) => {
+        if (row._kind === "ride") {
           ops.push({
-            collectionName:
-              row.kind === "work" ? "workApplications" : "errandApplications",
+            collectionName: "bookings",
             id: row.id,
             field,
+            cosmetic: false,
+            mark: () => clearedRideIds.add(row.id),
+          });
+        } else if (row._kind === "booking") {
+          ops.push({
+            collectionName: "bookings",
+            id: row.id,
+            field,
+            cosmetic: false,
+            mark: () => clearedBookingIds.add(row.id),
+          });
+        } else if (row._kind === "application") {
+          const collectionName = row.kind === "work" ? "workApplications" : "errandApplications";
+          ops.push({
+            collectionName,
+            id: row.id,
+            field,
+            cosmetic: false,
+            mark: () => (row.kind === "work" ? clearedWorkAppIds.add(row.id) : clearedErrandAppIds.add(row.id)),
           });
         } else if (row._kind === "trip") {
           ops.push({
             collectionName: row.collectionName,
             id: row.id,
             field: "deletedForDriver",
+            cosmetic: false,
+            mark: () => clearedTripIdsByCollection[row.collectionName].add(row.id),
           });
         }
-        // School rows (_kind "schoolGroup"/"schoolTrip"/"schoolWaiting") are
-        // filtered out by handleClearAllBookings before this runs — they're
-        // owned by useMySchoolRows, never bulk-hidden from here (unchanged
-        // from before this screen merged them into the shared list).
       });
 
-      if (viewer === "driver") {
-        routeIdsToHide.forEach((routeId) => {
-          ops.push({
-            collectionName: "driverRoutes",
-            id: routeId,
-            field: "deletedForDriver",
-          });
+      // A driver hiding a routed booking card also hides that route's own
+      // driverRoutes listing, same as the individual delete button does
+      // (see hideGeneralBooking) — otherwise, once the booking card is
+      // gone, the route would incorrectly reappear as "waiting for
+      // booking" even though it's still genuinely booked. Purely cosmetic
+      // dedup, never one of the "cards" this action reports
+      // clearing/failing.
+      const routeIdsToHide = new Set(
+        nonSchoolRows
+          .filter((r): r is TaggedBooking => r._kind === "booking")
+          .map((r) => (viewer === "driver" ? r.routeId : ""))
+          .filter((id): id is string => !!id),
+      );
+      routeIdsToHide.forEach((routeId) => {
+        ops.push({
+          collectionName: "driverRoutes",
+          id: routeId,
+          field: "deletedForDriver",
+          cosmetic: true,
+          mark: () => clearedTripIdsByCollection.driverRoutes.add(routeId),
         });
+      });
+
+      // Grouped by collection — never one giant cross-collection batch — so
+      // a rules gap in ONE collection (or a transient failure) can never
+      // block another collection's hides, and every failure can be
+      // reported against the exact collection it happened in. A plain
+      // writeBatch per chunk, never a transaction: hiding a card is always
+      // an unconditional field set, with nothing to read first, so there's
+      // no read/write interleaving to get wrong.
+      const opsByCollection = new Map<string, ClearOp[]>();
+      ops.forEach((op) => {
+        const list = opsByCollection.get(op.collectionName) ?? [];
+        list.push(op);
+        opsByCollection.set(op.collectionName, list);
+      });
+
+      let clearedCount = 0;
+      let failedCount = 0;
+
+      // Dev-only diagnostic — which collections this press is about to hide,
+      // and how many cards each — never the cards' own field values.
+      console.log("CLEAR_ALL_SOURCE_COLLECTIONS", {
+        feature: "runClearAllBookings",
+        collections: [...opsByCollection.entries()].map(([name, list]) => ({
+          collection: name,
+          count: list.length,
+        })),
+      });
+
+      for (const [collectionName, collectionOps] of opsByCollection) {
+        // Firestore batched writes cap at 500 operations — chunk defensively.
+        for (let i = 0; i < collectionOps.length; i += 450) {
+          const chunk = collectionOps.slice(i, i + 450);
+          const batch = writeBatch(db);
+
+          chunk.forEach((op) => {
+            batch.update(doc(db, op.collectionName, op.id), {
+              [op.field]: true,
+              updatedAt: serverTimestamp(),
+            });
+          });
+
+          try {
+            await batch.commit();
+            chunk.forEach((op) => {
+              op.mark();
+              if (!op.cosmetic) clearedCount += 1;
+            });
+          } catch (error: any) {
+            // Dev-only diagnostic — collection + operation + error CODE
+            // only, never a booking's own child name, return code, or any
+            // other private field.
+            console.log("Clear All hide failed", {
+              feature: "runClearAllBookings",
+              collection: collectionName,
+              operation: "hide",
+              code: error?.code,
+            });
+            failedCount += chunk.filter((op) => !op.cosmetic).length;
+          }
+        }
       }
 
-      // Firestore batched writes cap at 500 operations — chunk defensively.
-      for (let i = 0; i < ops.length; i += 450) {
-        const batch = writeBatch(db);
+      // Only ids whose write actually committed are removed from local
+      // state — a card whose collection failed stays visible exactly as it
+      // was.
+      if (viewer === "passenger") {
+        setPassengerRides((prev) => prev.filter((r) => !clearedRideIds.has(r.id)));
+        setBookings((prev) => prev.filter((b) => !clearedBookingIds.has(b.id)));
+        setMyWorkApps((prev) => prev.filter((a) => !clearedWorkAppIds.has(a.id)));
+        setMyErrandApps((prev) => prev.filter((a) => !clearedErrandAppIds.has(a.id)));
+      } else {
+        setDriverRides((prev) => prev.filter((r) => !clearedRideIds.has(r.id)));
+        setDriverRoadside((prev) => prev.filter((b) => !clearedBookingIds.has(b.id)));
+        setAsProviderWork((prev) => prev.filter((a) => !clearedWorkAppIds.has(a.id)));
+        setAsProviderErrand((prev) => prev.filter((a) => !clearedErrandAppIds.has(a.id)));
+        setRoutes((prev) => prev.filter((t) => !clearedTripIdsByCollection.driverRoutes.has(t.id)));
+        setWorkJobs((prev) => prev.filter((t) => !clearedTripIdsByCollection.workJobs.has(t.id)));
+        setErrandJobs((prev) => prev.filter((t) => !clearedTripIdsByCollection.errandJobs.has(t.id)));
+      }
 
-        ops.slice(i, i + 450).forEach((op) => {
-          batch.update(doc(db, op.collectionName, op.id), {
-            [op.field]: true,
-            updatedAt: serverTimestamp(),
-          });
-        });
+      const schoolResult = await school.clearAllSchoolRows(bucket);
+      clearedCount += schoolResult.cleared;
+      failedCount += schoolResult.failed;
 
-        await batch.commit();
+      if (failedCount > 0) {
+        Alert.alert(
+          t("booking.clearAllSomeCouldNotBeCleared"),
+          t("booking.clearAllSummary", { cleared: clearedCount, failed: failedCount }),
+        );
+      } else {
+        Alert.alert(t("roadsideHelp.clearAllTitle"), t("booking.clearAllCardsRemoved", { count: clearedCount }));
       }
     } catch (error: any) {
+      // Only an unexpected exception outside the per-chunk/per-row handling
+      // above (which never throws) reaches here.
       Alert.alert(t("common.error"), error?.message || t("roadsideHelp.couldNotClearAll"));
     } finally {
       setClearingAll(false);
     }
   };
 
+  // Confirms + kicks off Clear All for the CURRENT role tab + status tab
+  // only (clearAllScopeRows — the unsearched, bucket-scoped full list, never
+  // filteredPassengerRows/filteredDriverRows), so an active search query can
+  // never shrink either the confirmation count or what actually gets
+  // cleared. In Progress never cancels/hides anything — an actively started
+  // trip must be completed/ended first, so this only ever shows an
+  // explanatory (or "nothing to clear") message for that tab.
   const handleClearAllBookings = () => {
-    // School (new-style) rows are owned by useMySchoolRows — its own
-    // cancel/hide functions are the only thing that ever touches them, same
-    // as before this screen merged them into the shared list. Clear All
-    // only ever bulk-hides the ride/booking/application/trip kinds it
-    // already knows how to write to (see runClearAllBookings below).
-    const rows = (tab === "passenger" ? filteredPassengerRows : filteredDriverRows).filter(
-      (r) =>
-        r._kind !== "schoolGroup" && r._kind !== "schoolTrip" && r._kind !== "schoolWaiting",
-    );
-    if (rows.length === 0 || clearingAll) return;
+    if (clearingAll) return;
 
+    const totalCount = clearAllScopeRows.length;
+
+    // Dev-only diagnostic — role/tab/row-count/handler name only, never a
+    // card's own name, child code, route, or any other private field. Proof
+    // that exactly this one handler (never a stale/duplicate one) is what
+    // the visible Clear All button actually calls.
+    console.log("CLEAR_ALL_BUTTON_PRESSED", {
+      feature: "handleClearAllBookings",
+      role: tab,
+      statusTab: bucketTab,
+      sourceRowCount: totalCount,
+      handler: "runClearAllBookings",
+    });
+
+    if (bucketTab === "inProgress") {
+      Alert.alert(
+        t("roadsideHelp.clearAllTitle"),
+        totalCount === 0
+          ? t("booking.clearAllNothingToClear")
+          : t("booking.clearAllActiveTripsBlocked"),
+      );
+      return;
+    }
+
+    if (totalCount === 0) {
+      Alert.alert(t("roadsideHelp.clearAllTitle"), t("booking.clearAllNothingToClear"));
+      return;
+    }
+
+    // One wording for every clearable bucket — Clear All never cancels
+    // anything regardless of which tab it's pressed from, so the message
+    // never differs by bucket the way it used to when Upcoming still meant
+    // "cancel".
     Alert.alert(
-      t("roadsideHelp.clearAllTitle"),
-      t("booking.clearAllBookingsConfirm"),
+      t("booking.clearAllAreYouSureTitle"),
+      t("booking.clearAllRemoveConfirm", { count: totalCount }),
       [
         { text: t("common.cancel"), style: "cancel" },
         {
           text: t("roadsideHelp.clearAllButton"),
           style: "destructive",
-          onPress: () => runClearAllBookings(rows, tab),
+          onPress: () => runClearAllBookings(clearAllScopeRows, tab, bucketTab),
         },
       ],
     );
@@ -2176,7 +2312,7 @@ useEffect(() => {
             onPress={() => callPhone(r.driverPhone)}
           >
             <Ionicons name="call-outline" size={15} color="#F58220" />
-            <Text style={styles.phoneText}>
+            <Text style={[styles.phoneText, ltrContentStyle]}>
               {formatPhoneForDisplay(r.driverPhone)}
             </Text>
           </Pressable>
@@ -2222,7 +2358,7 @@ useEffect(() => {
         key={`ride-${r.id}`}
         style={[
           styles.card,
-          { borderLeftColor: meta.color },
+          accentBorderStart(4, meta.color, isRTL),
           r.status === "completed" && styles.cardDone,
         ]}
       >
@@ -2331,7 +2467,7 @@ useEffect(() => {
             ))}
 
             {r.reviewComment ? (
-              <Text style={styles.ratingComment}>“{r.reviewComment}”</Text>
+              <Text style={[styles.ratingComment, marginEnd(6, isRTL)]}>“{r.reviewComment}”</Text>
             ) : null}
           </View>
         ) : null}
@@ -2532,7 +2668,7 @@ useEffect(() => {
     return (
       <View
         key={b.id}
-        style={[styles.card, { borderLeftColor: meta.color }, finished && styles.cardDone]}
+        style={[styles.card, accentBorderStart(4, meta.color, isRTL), finished && styles.cardDone]}
       >
         <View style={styles.cardTop}>
           <View
@@ -2741,7 +2877,7 @@ useEffect(() => {
     return (
       <View
         key={`${trip.collectionName}-${trip.id}`}
-        style={[styles.card, { borderLeftColor: meta.color }, done && styles.cardDone]}
+        style={[styles.card, accentBorderStart(4, meta.color, isRTL), done && styles.cardDone]}
       >
         <View style={styles.cardTop}>
           <View
@@ -2888,7 +3024,7 @@ useEffect(() => {
     return (
       <View
         key={`roadside-${b.id}`}
-        style={[styles.card, { borderLeftColor: meta.color }, !isAccepted && styles.cardDone]}
+        style={[styles.card, accentBorderStart(4, meta.color, isRTL), !isAccepted && styles.cardDone]}
       >
         <View style={styles.cardTop}>
           <View
@@ -3002,7 +3138,7 @@ useEffect(() => {
             ))}
 
             {b.reviewComment ? (
-              <Text style={styles.ratingComment}>“{b.reviewComment}”</Text>
+              <Text style={[styles.ratingComment, marginEnd(6, isRTL)]}>“{b.reviewComment}”</Text>
             ) : null}
           </View>
         ) : null}
@@ -3108,7 +3244,7 @@ useEffect(() => {
       }
 
       if (
-        row._kind === "schoolGroup" ||
+        row._kind === "schoolBooking" ||
         row._kind === "schoolTrip" ||
         row._kind === "schoolWaiting"
       ) {
@@ -3186,7 +3322,7 @@ useEffect(() => {
     return (
       <View
         key={`${a.kind}-app-${a.id}`}
-        style={[styles.card, { borderLeftColor: meta.color }, (done || dead) && styles.cardDone]}
+        style={[styles.card, accentBorderStart(4, meta.color, isRTL), (done || dead) && styles.cardDone]}
       >
         <View style={styles.cardTop}>
           <View
@@ -3483,7 +3619,7 @@ useEffect(() => {
   const isEmpty = rowsForTab.length === 0;
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView
         ref={mainScrollRef}
         contentContainerStyle={styles.scroll}
@@ -3502,7 +3638,11 @@ useEffect(() => {
               hitSlop={8}
             >
               <Text style={styles.clearAllText}>
-                {clearingAll ? t("roadsideHelp.clearingButton") : t("roadsideHelp.clearAllButton")}
+                {clearingAll
+                  ? t("roadsideHelp.clearingButton")
+                  : bucketTab === "completed"
+                    ? t("booking.clearAllCompletedBookingsTitle")
+                    : t("booking.clearAllBookingsTitle")}
               </Text>
             </Pressable>
           ) : null}
@@ -3785,7 +3925,7 @@ useEffect(() => {
         <View style={styles.modalBackdrop}>
           <Pressable style={{ flex: 1 }} onPress={() => setRebook(null)} />
 
-          <View style={styles.modalSheet}>
+          <DirectionalCard style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>{t("booking.bookAgainTitle")}</Text>
             <Text style={styles.modalSub}>
@@ -3860,7 +4000,7 @@ useEffect(() => {
                 <Text style={styles.modalSearchText}>{t("booking.searchDrivers")}</Text>
               </Pressable>
             </View>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
 
@@ -3891,7 +4031,7 @@ useEffect(() => {
             }}
           />
 
-          <View style={styles.ratingCard}>
+          <DirectionalCard style={styles.ratingCard}>
             <View style={styles.ratingIconCircle}>
               <Ionicons name="checkmark-circle" size={34} color="#F58220" />
             </View>
@@ -3955,10 +4095,10 @@ useEffect(() => {
                 <Text style={styles.ratingSubmitText}>{t("booking.submitRatingButton")}</Text>
               )}
             </Pressable>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 
@@ -4154,8 +4294,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E7DCD1",
-    borderLeftWidth: 4,
-    borderLeftColor: "#E7DCD1",
     borderRadius: 20,
     padding: 16,
     shadowColor: "#000",
@@ -4578,7 +4716,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     fontStyle: "italic",
-    marginLeft: 6,
     flexShrink: 1,
   },
   ratingBackdrop: {

@@ -6,7 +6,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,7 +14,9 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalScreen } from "../../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../../i18n/LanguageProvider";
+import { paddingEnd } from "../../../i18n/rtl";
 import IsraelLocationAutocomplete from "../../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../israelLocations";
 import {
@@ -177,7 +178,7 @@ export default function WorkApplyScreen() {
 
   if (sent) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.successContainer}>
           <Ionicons name="checkmark-circle-outline" size={96} color="#F58220" />
 
@@ -194,12 +195,12 @@ export default function WorkApplyScreen() {
             <Text style={styles.successButtonText}>{t("rides.goToMyBookings")}</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <DirectionalScreen style={styles.safe}>
       <KeyboardAvoidingView
         style={styles.keyboard}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -245,21 +246,21 @@ export default function WorkApplyScreen() {
 
             <View style={styles.detailsGrid}>
               {job.locationEn ? (
-                <View style={styles.detail}>
+                <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                   <Ionicons name="location-outline" size={15} color="#7A665C" />
                   <Text style={styles.detailText}>{job.locationEn}</Text>
                 </View>
               ) : null}
 
               {job.date ? (
-                <View style={styles.detail}>
+                <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                   <Ionicons name="calendar-outline" size={15} color="#7A665C" />
                   <Text style={styles.detailText}>{job.date}</Text>
                 </View>
               ) : null}
 
               {job.workHoursFrom || job.workHoursTo ? (
-                <View style={styles.detail}>
+                <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                   <Ionicons name="time-outline" size={15} color="#7A665C" />
                   <Text style={styles.detailText}>
                     {job.workHoursFrom} - {job.workHoursTo}
@@ -268,7 +269,7 @@ export default function WorkApplyScreen() {
               ) : null}
 
               {job.workersNeeded ? (
-                <View style={styles.detail}>
+                <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                   <Ionicons name="people-outline" size={15} color="#7A665C" />
                   <Text style={styles.detailText}>
                     {t("workErrand.workersNeededCount", { count: job.workersNeeded })}
@@ -277,7 +278,7 @@ export default function WorkApplyScreen() {
               ) : null}
 
               {typeof job.remainingSeats === "number" ? (
-                <View style={styles.detail}>
+                <View style={[styles.detail, paddingEnd(6, isRTL)]}>
                   <Ionicons
                     name="checkmark-done-outline"
                     size={15}
@@ -370,7 +371,7 @@ export default function WorkApplyScreen() {
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 
@@ -455,7 +456,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingRight: 6,
   },
   detailText: {
     fontSize: 13,

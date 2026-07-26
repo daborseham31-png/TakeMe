@@ -61,6 +61,11 @@ type Notification = {
   // to the right child instead of losing that identity.
   childEntryId?: string | null;
   childName?: string | null;
+  // The durable schoolChildren/{childId} profile id — see
+  // matchRideRequestsForNewTrip's own comment (schoolTripsLib.ts) on why
+  // this must reach trip-confirm.tsx for the resulting booking to carry a
+  // stable childId.
+  childId?: string | null;
 
   // "school_trip_replacement" only (driver-cancellation replacement search)
   // — see functions/index.js's onSchoolTripCancelled.
@@ -245,6 +250,7 @@ export default function NotificationsScreen() {
           rideRequestId: n.requestId || "",
           childEntryId: n.childEntryId || "",
           childName: n.childName || "",
+          childId: n.childId || "",
         },
       } as any);
       return;

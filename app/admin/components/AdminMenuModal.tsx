@@ -9,10 +9,17 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React from "react";
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Modal, Pressable, StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { signOutAndRedirectToLogin } from "../../authLib";
+import {
+  DirectionalCard,
+  DirectionalRow,
+  DirectionalText,
+} from "../../i18n/DirectionalPrimitives";
+import { useLanguage } from "../../i18n/LanguageProvider";
+import { chevronForwardIconName } from "../../i18n/rtl";
 import { adminColors, adminRadius, adminSpacing } from "../adminTheme";
 
 type MenuItem = {
@@ -36,6 +43,12 @@ const MENU_ITEMS: MenuItem[] = [
     icon: "notifications-outline",
     path: "/admin/notifications",
   },
+  {
+    key: "schoolKioskLinks",
+    labelKey: "admin.schoolKioskLinks",
+    icon: "school-outline",
+    path: "/admin/school-kiosk-links",
+  },
   { key: "settings", labelKey: "admin.settings", icon: "settings-outline", path: "/admin/settings" },
 ];
 
@@ -47,6 +60,7 @@ type Props = {
 
 export default function AdminMenuModal({ visible, onClose, activeKey }: Props) {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
 
   const handleNavigate = (path: string) => {
     onClose();
@@ -73,35 +87,35 @@ export default function AdminMenuModal({ visible, onClose, activeKey }: Props) {
       <View style={styles.backdrop}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
-        <View style={styles.sheet}>
+        <DirectionalCard style={styles.sheet}>
           <View style={styles.handle} />
-          <Text style={styles.title}>{t("admin.menuTitle")}</Text>
+          <DirectionalText style={styles.title}>{t("admin.menuTitle")}</DirectionalText>
 
           {MENU_ITEMS.map((item) => (
-            <Pressable
-              key={item.key}
-              style={[styles.row, activeKey === item.key && styles.rowActive]}
-              onPress={() => handleNavigate(item.path)}
-            >
-              <Ionicons
-                name={item.icon}
-                size={20}
-                color={activeKey === item.key ? adminColors.primary : adminColors.textMuted}
-              />
-              <Text
-                style={[styles.rowText, activeKey === item.key && styles.rowTextActive]}
-              >
-                {t(item.labelKey)}
-              </Text>
-              <Ionicons name="chevron-forward" size={16} color={adminColors.placeholder} />
+            <Pressable key={item.key} onPress={() => handleNavigate(item.path)}>
+              <DirectionalRow style={[styles.row, activeKey === item.key && styles.rowActive]}>
+                <Ionicons
+                  name={item.icon}
+                  size={20}
+                  color={activeKey === item.key ? adminColors.primary : adminColors.textMuted}
+                />
+                <DirectionalText
+                  style={[styles.rowText, activeKey === item.key && styles.rowTextActive]}
+                >
+                  {t(item.labelKey)}
+                </DirectionalText>
+                <Ionicons name={chevronForwardIconName(isRTL)} size={16} color={adminColors.placeholder} />
+              </DirectionalRow>
             </Pressable>
           ))}
 
-          <Pressable style={styles.logoutRow} onPress={handleLogout}>
-            <Ionicons name="log-out-outline" size={20} color={adminColors.danger} />
-            <Text style={styles.logoutText}>{t("admin.logOut")}</Text>
+          <Pressable onPress={handleLogout}>
+            <DirectionalRow style={styles.logoutRow}>
+              <Ionicons name="log-out-outline" size={20} color={adminColors.danger} />
+              <DirectionalText style={styles.logoutText}>{t("admin.logOut")}</DirectionalText>
+            </DirectionalRow>
           </Pressable>
-        </View>
+        </DirectionalCard>
       </View>
     </Modal>
   );

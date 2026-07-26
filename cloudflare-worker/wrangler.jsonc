@@ -4,9 +4,59 @@
   "main": "src/index.ts",
   "compatibility_date": "2024-11-01",
   "observability": {
-    "enabled": true
-  }
+    "enabled": true,
+  },
+
+  // School Kiosk static frontend (Phase 3 — see public/school-kiosk/). Served
+  // directly by Cloudflare's static-asset layer for any path that matches a
+  // real file here (GET /school-kiosk(/), /school-kiosk/style.css,
+  // /school-kiosk/app.js) — the Worker's own fetch() in src/index.ts is only
+  // ever invoked for paths that AREN'T a static file (every existing API
+  // route: /health, /analyze-id, /analyze-license, /school-children/*,
+  // /school-kiosk/lookup), so none of those change behavior. CSP/security
+  // headers for the kiosk HTML are declared in public/_headers (Pages-style,
+  // also honored for Workers static assets) rather than in Worker code, so
+  // they apply without needing `run_worker_first`.
+  "assets": {
+    "directory": "./public",
+  },
+
+  // SCHOOL_KIOSK_RATE_LIMIT — the durable half of the /school-kiosk/lookup
+  // rate limiter (see src/rateLimit.ts's isKioskLookupRateLimited). The
+  // Worker treats this binding as OPTIONAL at the type level (src/env.ts)
+  // and falls back to the in-memory-only limiter if it's ever absent, so
+  // leaving the placeholder id below un-replaced does not stop the Worker
+  // from deploying or running — it only means this specific limiter stays
+  // per-isolate instead of durable until the real id is filled in.
+  //
+  // "REPLACE_WITH_KV_NAMESPACE_ID" is a PLACEHOLDER, not a real namespace —
+  // it is never invented/guessed here. To actually activate this binding:
+  //   1. Run (from cloudflare-worker/):
+  //        npx wrangler kv namespace create SCHOOL_KIOSK_RATE_LIMIT
+  //      Wrangler prints a block like:
+  //        { "binding": "SCHOOL_KIOSK_RATE_LIMIT", "id": "abcd1234..." }
+  //   2. Paste that printed "id" value in place of
+  //      "REPLACE_WITH_KV_NAMESPACE_ID" below (the "binding" name is already
+  //      correct and must stay exactly "SCHOOL_KIOSK_RATE_LIMIT" — it must
+  //      match env.ts's Env.SCHOOL_KIOSK_RATE_LIMIT field name exactly).
+  //   3. Run `npx wrangler deploy` to publish the Worker with the binding
+  //      actually wired up.
+  "kv_namespaces": [
+    {
+      "binding": "SCHOOL_KIOSK_RATE_LIMIT",
+      "id": "add7e03aa7514f3783b22d326669f994",
+    },
+  ],
+
   // GEMINI_API_KEY is NOT set here. It is stored as an encrypted secret
   // via `wrangler secret put GEMINI_API_KEY` and read at runtime as
   // env.GEMINI_API_KEY. Never add it to this file.
+  //
+  // FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY are
+  // NOT set here either — all three are encrypted secrets
+  // (`wrangler secret put <NAME>`), read at runtime as env.<NAME> by
+  // src/firestoreRest.ts / src/firebaseAuth.ts. FIREBASE_PRIVATE_KEY in
+  // particular must never appear in this file, in Git, in the Expo app, or
+  // in any client-visible config — see the project's final report for the
+  // exact `wrangler secret put` commands.
 }

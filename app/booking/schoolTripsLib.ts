@@ -120,10 +120,11 @@ export type DriverSchoolTripMode =
 // One passenger "seat" = one child, since each child may finish school (and
 // therefore need a return ride) at a different time — see AGENTS.md's
 // per-child return system. localId is a client-generated, stable-within-one
-// booking-session id (not a Firestore id); childId only exists if this
-// project ever grows a real child-profile system — it doesn't today, so
-// every entry is a lightweight "Child 1"/"Child 2"-style temporary entry
-// unless the parent types a real name.
+// booking-session id (not a Firestore id); childId, when present, is the
+// durable schoolChildren/{childId} profile this entry was picked from (see
+// app/booking/school/schoolChildrenLib.ts) — optional and absent for a
+// still-supported plain temporary "Child 1"/"Child 2"-style entry the parent
+// typed a name for instead of picking a saved profile.
 export type SchoolPassengerEntry = {
   localId: string;
   childId?: string;
@@ -292,6 +293,22 @@ export interface RideRequest {
   notifiedTripIds: string[];
   lastNotifiedAtSeconds: number;
 
+  // Set once the parent actually confirms+pays for a real return booking
+  // for this request (see bookReturnForChild's post-booking write-back) —
+  // the request's own back-reference to SchoolBooking.sourceRideRequestId,
+  // used as My Bookings' fallback linkage direction (see
+  // useMySchoolRows.tsx's findLinkedBooking) if the forward one is ever
+  // missing. `status` moves to "booked" in the SAME write.
+  matchedBookingId: string | null;
+
+  // Per-user My Bookings view-hide flag (see hideRideRequest below) — the
+  // "Clear All"/individual-hide equivalent of schoolBookings/schoolTrips'
+  // own deletedForPassenger/deletedForDriver. Never changes `status`, so the
+  // matching system (matchRideRequestsForNewTrip) keeps treating this
+  // request exactly as before; it only stops rendering as a card in this
+  // parent's own My Bookings.
+  hiddenForParent: boolean;
+
   createdAtSeconds: number;
   updatedAtSeconds: number;
 }
@@ -317,9 +334,22 @@ export const MAX_VERIFICATION_ATTEMPTS = 5;
 export const VERIFICATION_LOCKOUT_MINUTES = 5;
 
 // A single child on an outbound (usually multi-seat) booking — see
-// SchoolBooking.childEntries. Deliberately just localId + an optional
-// display name (no full child-profile system in this project today).
-export type SchoolBookingChildEntry = { localId: string; childName?: string };
+// SchoolBooking.childEntries. localId + an optional display name, plus an
+// optional durable childId (see app/booking/school/schoolChildrenLib.ts) when
+// this entry was picked from a saved School Child profile rather than typed
+// as a temporary name — both forms remain valid indefinitely (backward
+// compatible with every booking created before School Child profiles
+// existed).
+export type SchoolBookingChildEntry = {
+  localId: string;
+  childId?: string;
+  childName?: string;
+  // Only ever set transiently while a RETURN confirmation flows through
+  // trip-confirm.tsx → ride-payment.tsx → bookReturnForChild (see that
+  // function) — never actually persisted onto an outbound booking's own
+  // stored childEntries[] (bookOutboundForChildren never sets it).
+  sourceRideRequestId?: string;
+};
 
 export interface SchoolBooking {
   id: string;
@@ -370,6 +400,22 @@ export interface SchoolBooking {
   childEntryId?: string;
   childName?: string;
   childEntries?: SchoolBookingChildEntry[];
+  // The durable schoolChildren/{childId} profile this RETURN booking's one
+  // child was picked from (see app/booking/school/schoolChildrenLib.ts) —
+  // absent for a booking made with a plain temporary childName (backward
+  // compatible). Outbound bookings carry their own per-child id inside
+  // childEntries[].childId instead, since one outbound booking can cover
+  // several children.
+  childId?: string;
+  // The waiting rideRequests/{id} this RETURN booking was created to fulfil
+  // — absent for an outbound booking, and for any return booked without a
+  // prior waiting request (a plain from-scratch search), or any booking
+  // predating this field. This is the PRIMARY signal My Bookings uses to
+  // recognize "this booking IS that waiting card, now confirmed" instead of
+  // rendering both as separate cards — see useMySchoolRows.tsx's
+  // findLinkedBooking. Never used for anything security-sensitive; it is
+  // purely a display-dedup linkage.
+  sourceRideRequestId?: string;
 
   paymentMethod: "cash" | "bit";
   paymentStatus: "cash_pending" | "mock_paid";
@@ -720,6 +766,10 @@ export const normalizeRideRequest = (id: string, data: any): RideRequest => ({
   notifiedTripIds: Array.isArray(data.notifiedTripIds) ? data.notifiedTripIds : [],
   lastNotifiedAtSeconds: data.lastNotifiedAt?.seconds || 0,
 
+  matchedBookingId: data.matchedBookingId || null,
+
+  hiddenForParent: data.hiddenForParent === true,
+
   createdAtSeconds: data.createdAt?.seconds || 0,
   updatedAtSeconds: data.updatedAt?.seconds || 0,
 });
@@ -762,6 +812,8 @@ export const normalizeSchoolBooking = (id: string, data: any): SchoolBooking => 
   childEntryId: data.childEntryId || undefined,
   childName: data.childName || undefined,
   childEntries: Array.isArray(data.childEntries) ? data.childEntries : undefined,
+  childId: data.childId || undefined,
+  sourceRideRequestId: data.sourceRideRequestId || undefined,
 
   paymentMethod: data.paymentMethod === "bit" ? "bit" : "cash",
   paymentStatus: data.paymentStatus === "mock_paid" ? "mock_paid" : "cash_pending",
@@ -812,6 +864,35 @@ export const normalizeSchoolBooking = (id: string, data: any): SchoolBooking => 
   createdAtSeconds: data.createdAt?.seconds || 0,
   updatedAtSeconds: data.updatedAt?.seconds || 0,
 });
+
+// ---------------------------------------------------------------------------
+// Matching an outbound child entry to its own return booking — the ONE
+// place this comparison happens, reused by My Bookings (useMySchoolRows.tsx's
+// "no return ride needed" line) and anywhere else that needs to answer
+// "does this specific child already have a return booking in this group?".
+//
+// childId (the durable schoolChildren/{childId} profile id — see
+// app/booking/school/schoolChildrenLib.ts) is the PREFERRED key: it's
+// stable across dates/bookings/driver replacements, unlike localId (a
+// per-search, client-generated id that is never the same value twice).
+// Only when EITHER side lacks a childId (an old booking made before School
+// Child profiles existed, or a plain temporary/manual entry with no saved
+// profile) does this fall back to localId/childEntryId — the same
+// comparison this code always used, kept as-is for full backward
+// compatibility. A childId is NEVER matched against a bare localId, and
+// vice versa — the two id spaces are never conflated.
+// ---------------------------------------------------------------------------
+
+export function childEntryMatchesReturnBooking(
+  child: { localId: string; childId?: string },
+  returnBooking: { childEntryId?: string; childId?: string },
+): boolean {
+  if (child.childId && returnBooking.childId) {
+    return child.childId === returnBooking.childId;
+  }
+
+  return !!returnBooking.childEntryId && returnBooking.childEntryId === child.localId;
+}
 
 // ---------------------------------------------------------------------------
 // Creation — outbound only, or outbound + return as one atomic batch write
@@ -1423,6 +1504,17 @@ export type SchoolBookingChildInfo = {
   childEntryId?: string;
   childName?: string;
   childEntries?: SchoolBookingChildEntry[];
+  // The durable schoolChildren/{childId} profile for a single-child RETURN
+  // booking (see SchoolBooking.childId above). Never set alongside
+  // childEntries — an outbound multi-child booking carries each child's own
+  // id inside childEntries[].childId instead.
+  childId?: string;
+  // The waiting rideRequests/{id} this RETURN booking was created to fulfil
+  // (see SchoolBooking.sourceRideRequestId below) — never set for an
+  // outbound booking or a return booked without ever having a waiting
+  // request (a plain from-scratch search). Only bookReturnForChild ever
+  // threads this through.
+  sourceRideRequestId?: string;
 };
 
 const bookSingleSchoolTrip = async (
@@ -1569,6 +1661,8 @@ const bookSingleSchoolTrip = async (
       childEntryId: childInfo?.childEntryId,
       childName: childInfo?.childName,
       childEntries: childInfo?.childEntries,
+      childId: childInfo?.childId,
+      sourceRideRequestId: childInfo?.sourceRideRequestId,
 
       paymentMethod,
       paymentStatus: paymentMethod === "bit" ? "mock_paid" : "cash_pending",
@@ -1687,14 +1781,39 @@ export const bookOutboundForChildren = async (
 
 export const bookReturnForChild = async (
   tripId: string,
-  child: { localId: string; childName?: string },
+  child: { localId: string; childName?: string; childId?: string; sourceRideRequestId?: string },
   paymentMethod: SchoolBookingPaymentMethod,
   bookingGroupId: string,
 ): Promise<string> => {
   const { bookingId } = await bookSchoolTripSingle(tripId, 1, paymentMethod, bookingGroupId, {
     childEntryId: child.localId,
     childName: child.childName,
+    childId: child.childId,
+    sourceRideRequestId: child.sourceRideRequestId,
   });
+
+  // Best-effort linkage write-back — this is what lets My Bookings
+  // recognize this new booking as the SAME logical card as the waiting
+  // request it came from (see useMySchoolRows.tsx's findLinkedBooking),
+  // instead of showing both a "searching" card and a new "booked" card. A
+  // failure here never fails the booking itself (the booking is already
+  // committed above) — the display-level fallback (childId + exact date)
+  // still recognizes the pair even if this write is lost.
+  if (child.sourceRideRequestId) {
+    try {
+      await updateDoc(doc(db, RIDE_REQUESTS_COLLECTION, child.sourceRideRequestId), {
+        status: "booked" as RideRequestStatus,
+        matchedBookingId: bookingId,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.log("bookReturnForChild: could not link rideRequest to booking", {
+        feature: "bookReturnForChild",
+        code: (error as any)?.code,
+      });
+    }
+  }
+
   return bookingId;
 };
 
@@ -2412,6 +2531,7 @@ export const acceptReplacementOffer = async (
       childEntryId: oldBooking.childEntryId,
       childName: oldBooking.childName,
       childEntries: oldBooking.childEntries,
+      childId: oldBooking.childId,
 
       paymentMethod,
       paymentStatus: paymentMethod === "bit" ? "mock_paid" : "cash_pending",
@@ -2721,6 +2841,20 @@ export const matchRideRequestsForNewTrip = async (trip: SchoolTrip): Promise<voi
           requestId: request.id,
           childEntryId: request.childEntryId,
           childName: request.childName,
+          // THE ROOT CAUSE this line fixes: request.childId was never
+          // carried onto this notification, so tapping it (see
+          // notifications.tsx's "school_trip_match" handler →
+          // trip-confirm.tsx → ride-payment.tsx → bookReturnForChild)
+          // produced a schoolBookings document with childEntryId/schoolId/
+          // date/bookingDirection all correct but childId entirely MISSING
+          // (bookSingleSchoolTrip's deepRemoveUndefined strips an undefined
+          // childId before the write). A booking missing childId is
+          // invisible to anything that looks a child up by childId — most
+          // importantly the School Kiosk (schoolKiosk.ts queries
+          // schoolBookings by childId), which is why a real, driver-visible
+          // "driver_on_way" booking could still show "no_return_today" on
+          // the kiosk for the exact same child/date.
+          childId: request.childId,
           category: "school",
           status: "matched",
           targetTab: "passenger",
@@ -2737,6 +2871,19 @@ export const matchRideRequestsForNewTrip = async (trip: SchoolTrip): Promise<voi
 export const cancelRideRequest = async (requestId: string) => {
   await updateDoc(doc(db, RIDE_REQUESTS_COLLECTION, requestId), {
     status: "cancelled" as RideRequestStatus,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+// Pure per-user My Bookings view-hide — see RideRequest.hiddenForParent
+// above. Never touches `status`, so a waiting/matched request keeps being
+// matched/notified normally; only "Clear All" (useMySchoolRows.tsx's
+// clearAllSchoolRows) ever calls this, since a waiting request has no other
+// individual hide affordance today (only Cancel, which this deliberately
+// never calls).
+export const hideRideRequest = async (requestId: string) => {
+  await updateDoc(doc(db, RIDE_REQUESTS_COLLECTION, requestId), {
+    hiddenForParent: true,
     updatedAt: serverTimestamp(),
   });
 };

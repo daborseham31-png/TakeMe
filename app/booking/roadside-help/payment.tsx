@@ -24,7 +24,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,7 +33,10 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { translateProblemTypesList } from "../../i18n/formatters";
+import { useLanguage } from "../../i18n/LanguageProvider";
+import { backIconName } from "../../i18n/rtl";
 import BitBadge from "../BitBadge";
 import { openBitPayment } from "../bitPayment";
 import { payRoadsideHelp, RoadsidePaymentMethod } from "./roadsideLib";
@@ -67,6 +69,7 @@ const normalize = (id: string, data: any): BookingDoc => ({
 
 export default function RoadsideHelpPaymentScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const params = useLocalSearchParams();
 
   const bookingIdParam = String(params.bookingId || "");
@@ -186,10 +189,10 @@ export default function RoadsideHelpPaymentScreen() {
     booking?.status === "completed" && booking?.paymentStatus === "pending";
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#7C5F46" />
+          <Ionicons name={backIconName(isRTL)} size={22} color="#7C5F46" />
           <Text style={styles.backText}>{t("common.back")}</Text>
         </Pressable>
 
@@ -356,7 +359,7 @@ export default function RoadsideHelpPaymentScreen() {
           </>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

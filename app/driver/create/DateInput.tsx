@@ -6,12 +6,18 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import InfiniteTimeWheelPicker from "../../components/InfiniteTimeWheelPicker";
+import {
+  DirectionalCard,
+  DirectionalRow,
+  DirectionalText,
+  DirectionalTextInput,
+  PhysicalDirectionalBlockText,
+} from "../../i18n/DirectionalPrimitives";
 import {
   formatDateToYMD,
   getDayFromDateText,
@@ -53,9 +59,9 @@ export default function DateInput({
 
   return (
     <>
-      <Text style={styles.label}>{label}</Text>
+      <PhysicalDirectionalBlockText style={styles.label}>{label}</PhysicalDirectionalBlockText>
 
-      <View style={styles.inputRow}>
+      <DirectionalRow style={styles.inputRow}>
         <Pressable
           style={styles.calendarButton}
           onPress={() => setShowPicker(true)}
@@ -63,7 +69,8 @@ export default function DateInput({
           <Ionicons name="calendar-outline" size={24} color="#8B7B6B" />
         </Pressable>
 
-        <TextInput
+        <DirectionalTextInput
+          ltr
           style={styles.rowInput}
           placeholder={`${t("common.select")} ${label}`}
           placeholderTextColor="#8B7B6B"
@@ -72,12 +79,12 @@ export default function DateInput({
           value={value}
           onChangeText={onChange}
         />
-      </View>
+      </DirectionalRow>
 
       {cleanDate && dayName && (
-        <Text style={styles.autoDayText}>
+        <PhysicalDirectionalBlockText style={styles.autoDayText}>
           {t("booking.day")}: {t(`booking.days.${dayName}`, { defaultValue: dayName })}
-        </Text>
+        </PhysicalDirectionalBlockText>
       )}
 
       {showPicker && (
@@ -190,14 +197,16 @@ export function TimeInput({
 
   return (
     <>
-      <Text style={styles.label}>{label}</Text>
+      <PhysicalDirectionalBlockText style={styles.label}>{label}</PhysicalDirectionalBlockText>
 
-      <Pressable style={styles.inputRow} onPress={() => setShowPicker(true)}>
-        <Ionicons name="time-outline" size={18} color="#8B7B6B" />
+      <Pressable onPress={() => setShowPicker(true)}>
+        <DirectionalRow style={styles.inputRow}>
+          <Ionicons name="time-outline" size={18} color="#8B7B6B" />
 
-        <Text style={[styles.rowInput, styles.ltrText, !value && { color: "#8B7B6B" }]}>
-          {value || `${t("common.select")} ${label}`}
-        </Text>
+          <Text style={[styles.rowInput, styles.ltrText, !value && { color: "#8B7B6B" }]}>
+            {value || `${t("common.select")} ${label}`}
+          </Text>
+        </DirectionalRow>
       </Pressable>
 
       <Modal
@@ -209,7 +218,7 @@ export function TimeInput({
         <View style={timeStyles.overlay}>
           <Pressable style={timeStyles.backdrop} onPress={handleCancel} />
 
-          <View style={timeStyles.sheet}>
+          <DirectionalCard style={timeStyles.sheet}>
             <View style={timeStyles.headerBox}>
               <View style={timeStyles.handle} />
               <Text style={timeStyles.title}>{label}</Text>
@@ -226,16 +235,20 @@ export function TimeInput({
               isMinuteDisabled={isMinuteDisabled}
             />
 
-            <View style={timeStyles.buttonsRow}>
+            <DirectionalRow style={timeStyles.buttonsRow}>
               <Pressable onPress={handleCancel} style={timeStyles.cancelButton}>
-                <Text style={timeStyles.cancelButtonText}>{t("common.cancel")}</Text>
+                <DirectionalText style={timeStyles.cancelButtonText}>
+                  {t("common.cancel")}
+                </DirectionalText>
               </Pressable>
 
               <Pressable onPress={handleSave} style={timeStyles.saveButton}>
-                <Text style={timeStyles.saveButtonText}>{t("common.save")}</Text>
+                <DirectionalText style={timeStyles.saveButtonText}>
+                  {t("common.save")}
+                </DirectionalText>
               </Pressable>
-            </View>
-          </View>
+            </DirectionalRow>
+          </DirectionalCard>
         </View>
       </Modal>
     </>

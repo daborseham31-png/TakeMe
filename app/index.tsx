@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,8 +14,14 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth } from "../firebase";
+import {
+  DirectionalRow,
+  DirectionalScreen,
+  PhysicalDirectionalBlockText,
+} from "./i18n/DirectionalPrimitives";
 import { useLanguage } from "./i18n/LanguageProvider";
 import LanguageSelectorModal from "./i18n/LanguageSelectorModal";
+import { positionEnd } from "./i18n/rtl";
 import { getAccountRestriction, isUserAdmin } from "./admin/adminAuthLib";
 
 export default function AppStartScreen() {
@@ -30,6 +35,14 @@ export default function AppStartScreen() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  // Emails/passwords are always LTR content once something is actually
+  // typed — only the empty-field PLACEHOLDER should follow the app's own
+  // language direction (an Arabic placeholder must read right-to-left; the
+  // entered value itself never should, unlike a natural-language field such
+  // as IsraelLocationAutocomplete's content-language detection).
+  const emailFieldIsRTL = email.length === 0 && isRTL;
+  const passwordFieldIsRTL = password.length === 0 && isRTL;
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 2500);
@@ -95,18 +108,18 @@ export default function AppStartScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.splash}>
+      <DirectionalScreen style={styles.splash}>
         <Text style={styles.logo}>{t("common.appName")}</Text>
         <Text style={styles.tagline}>{t("auth.tagline")}</Text>
         <ActivityIndicator size="large" color="#ffffff" style={styles.loader} />
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <Pressable
-        style={styles.languagePill}
+        style={[styles.languagePill, positionEnd(20, isRTL)]}
         onPress={() => setLanguageModalVisible(true)}
         hitSlop={8}
       >
@@ -118,9 +131,9 @@ export default function AppStartScreen() {
         <Text style={styles.title}>{t("auth.loginTitle")}</Text>
         <Text style={styles.subtitle}>{t("auth.welcomeBack")}</Text>
 
-        <Text style={[styles.label, isRTL && styles.textRTL]}>
+        <PhysicalDirectionalBlockText style={styles.label}>
           {t("auth.loginAs")}
-        </Text>
+        </PhysicalDirectionalBlockText>
 
         <View style={styles.roleRow}>
           <Pressable
@@ -156,28 +169,37 @@ export default function AppStartScreen() {
           </Pressable>
         </View>
 
-        <Text style={[styles.label, isRTL && styles.textRTL]}>
+        <PhysicalDirectionalBlockText style={styles.label}>
           {t("auth.email")}
-        </Text>
+        </PhysicalDirectionalBlockText>
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              textAlign: emailFieldIsRTL ? "right" : "left",
+              writingDirection: emailFieldIsRTL ? "rtl" : "ltr",
+            },
+          ]}
           placeholder={t("auth.emailPlaceholder")}
           placeholderTextColor="#8b7b6b"
           keyboardType="email-address"
           autoCapitalize="none"
-          // Email addresses must stay readable regardless of app language —
-          // never mirrored to RTL.
-          textAlign="left"
           value={email}
           onChangeText={setEmail}
         />
 
-        <Text style={[styles.label, isRTL && styles.textRTL]}>
+        <PhysicalDirectionalBlockText style={styles.label}>
           {t("auth.password")}
-        </Text>
-        <View style={styles.passwordRow}>
+        </PhysicalDirectionalBlockText>
+        <DirectionalRow style={styles.passwordRow}>
           <TextInput
-            style={styles.passwordInput}
+            style={[
+              styles.passwordInput,
+              {
+                textAlign: passwordFieldIsRTL ? "right" : "left",
+                writingDirection: passwordFieldIsRTL ? "rtl" : "ltr",
+              },
+            ]}
             placeholder={t("auth.passwordPlaceholder")}
             placeholderTextColor="#8b7b6b"
             secureTextEntry={!showPw}
@@ -189,10 +211,12 @@ export default function AppStartScreen() {
               {showPw ? t("auth.hide") : t("auth.show")}
             </Text>
           </Pressable>
-        </View>
+        </DirectionalRow>
 
         <Pressable onPress={() => router.push("/login/forgot-password" as any)}>
-          <Text style={styles.forgot}>{t("auth.forgotPassword")}</Text>
+          <PhysicalDirectionalBlockText style={styles.forgot}>
+            {t("auth.forgotPassword")}
+          </PhysicalDirectionalBlockText>
         </Pressable>
 
         <Pressable style={styles.loginButton} onPress={handleLogin}>
@@ -211,7 +235,7 @@ export default function AppStartScreen() {
         visible={languageModalVisible}
         onClose={() => setLanguageModalVisible(false)}
       />
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 
@@ -244,7 +268,6 @@ const styles = StyleSheet.create({
   languagePill: {
     position: "absolute",
     top: 55,
-    right: 20,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,

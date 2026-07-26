@@ -12,7 +12,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -23,6 +22,9 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
+import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { marginEnd } from "../i18n/rtl";
 import {
   ChatUser,
   clearAllConversations,
@@ -63,6 +65,7 @@ const formatTime = (seconds: number) => {
 
 export default function MessagesScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -218,7 +221,7 @@ export default function MessagesScreen() {
   const listContent = useMemo(() => conversations, [conversations]);
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.headerRow}>
           <View style={styles.header}>
@@ -322,7 +325,7 @@ export default function MessagesScreen() {
                       </Text>
                     </View>
                     <View style={styles.rowBottom}>
-                      <Text style={styles.rowLast} numberOfLines={1}>
+                      <Text style={[styles.rowLast, marginEnd(8, isRTL)]} numberOfLines={1}>
                         {c.lastMessage || t("messages.sayHiDefault")}
                       </Text>
                       {c.unread > 0 ? (
@@ -348,7 +351,7 @@ export default function MessagesScreen() {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

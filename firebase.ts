@@ -15,6 +15,12 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+// NOTE: no `functions` export here. This project's Firebase plan (Spark)
+// cannot deploy Cloud Functions — callable or otherwise — so the app never
+// calls Firebase Functions directly. The School Child return-code endpoints
+// that would have used a callable instead run on the existing Cloudflare
+// Worker (see app/booking/school/schoolChildrenLib.ts, which calls it over
+// plain HTTPS with a Firebase ID token, not the firebase/functions SDK).
 
 // Reused wherever a Firebase Auth action link needs to point back at a real
 // page of this app's own web build (e.g. the password-reset continue URL) —

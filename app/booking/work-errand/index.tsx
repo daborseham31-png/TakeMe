@@ -3,7 +3,6 @@ import { router } from "expo-router";
 import React from "react";
 import {
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,8 +10,13 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
+import { useLanguage } from "../../i18n/LanguageProvider";
+import { backIconName } from "../../i18n/rtl";
+
 export default function WorkErrandScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
 
   const openWork = () => {
     router.push("/booking/work-errand/work" as any);
@@ -23,10 +27,10 @@ export default function WorkErrandScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <DirectionalScreen style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable style={styles.topBack} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#7A665C" />
+          <Ionicons name={backIconName(isRTL)} size={24} color="#7A665C" />
         </Pressable>
 
         <Text style={styles.mainTitle}>{t("rideCategory.title")}</Text>
@@ -55,7 +59,7 @@ export default function WorkErrandScreen() {
           </Pressable>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

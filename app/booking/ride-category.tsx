@@ -3,13 +3,16 @@ import { router } from "expo-router";
 import React from "react";
 import {
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
+
+import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
+import { useLanguage } from "../i18n/LanguageProvider";
+import { marginStart } from "../i18n/rtl";
 
 type Category = {
   key: string;
@@ -52,6 +55,7 @@ const categories: Category[] = [
 
 export default function RideCategoryScreen() {
   const { t } = useTranslation();
+  const { isRTL } = useLanguage();
   const handleSelect = (key: string) => {
     const routes: Record<string, string> = {
 school: "/booking/school",
@@ -64,7 +68,7 @@ workErrands: "/booking/work-errand",
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.title}>{t("rideCategory.title")}</Text>
 
@@ -78,7 +82,11 @@ workErrands: "/booking/work-errand",
             return (
               <Pressable
                 key={cat.key}
-                style={[styles.card, isLastOdd && styles.lastCard]}
+                style={[
+                  styles.card,
+                  isLastOdd && styles.lastCard,
+                  isLastOdd && marginStart("26%", isRTL),
+                ]}
                 onPress={() => handleSelect(cat.key)}
               >
                 <View
@@ -97,7 +105,7 @@ workErrands: "/booking/work-errand",
           })}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 
@@ -143,7 +151,6 @@ const styles = StyleSheet.create({
   },
   lastCard: {
     width: "48%",
-    marginLeft: "26%",
   },
   iconBox: {
     width: 58,

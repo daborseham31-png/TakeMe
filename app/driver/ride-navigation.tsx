@@ -18,11 +18,9 @@ import {
   Linking,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
@@ -49,7 +47,14 @@ import {
 import { notify } from "../booking/work-errand/workErrandLib";
 import i18n from "../i18n";
 import { normalizeToWesternDigits } from "../i18n/digits";
+import {
+  DirectionalCard,
+  DirectionalScreen,
+  DirectionalText,
+  DirectionalTextInput,
+} from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { ltrContentStyle } from "../i18n/rtl";
 import { getUserLanguage } from "../i18n/userLanguage";
 
 type TripStatus =
@@ -878,17 +883,17 @@ export default function RideNavigationScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#F58220" />
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   if (!booking) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <DirectionalScreen style={styles.safe}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={44} color="#8B7B6B" />
           <Text style={styles.emptyTitle}>{t("rides.bookingNotFound")}</Text>
@@ -896,7 +901,7 @@ export default function RideNavigationScreen() {
             <Text style={styles.backLinkText}>{t("common.goBack")}</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
@@ -920,7 +925,7 @@ export default function RideNavigationScreen() {
       : null;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <DirectionalScreen style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
@@ -1016,7 +1021,7 @@ export default function RideNavigationScreen() {
                   }
                 >
                   <Ionicons name="call-outline" size={16} color="#F58220" />
-                  <Text style={[styles.infoText, styles.phone]}>
+                  <Text style={[styles.infoText, styles.phone, ltrContentStyle]}>
                     {(booking as any).passengerPhone}
                   </Text>
                 </Pressable>
@@ -1253,13 +1258,16 @@ export default function RideNavigationScreen() {
         onRequestClose={closeVerifyModal}
       >
         <View style={styles.verifyOverlay}>
-          <View style={styles.verifySheet}>
-            <Text style={styles.verifySheetTitle}>{t("booking.verifyAndStartTrip")}</Text>
-            <Text style={styles.verifySheetSubtitle}>
+          <DirectionalCard style={styles.verifySheet}>
+            <DirectionalText style={styles.verifySheetTitle}>
+              {t("booking.verifyAndStartTrip")}
+            </DirectionalText>
+            <DirectionalText style={styles.verifySheetSubtitle}>
               {verifyModalBooking?.childName || verifyModalBooking?.passengerName}
-            </Text>
+            </DirectionalText>
 
-            <TextInput
+            <DirectionalTextInput
+              ltr
               style={styles.verifyInput}
               value={verifyCodeInput}
               // Never rely on keyboardType alone — an RTL/Arabic keyboard can
@@ -1286,17 +1294,19 @@ export default function RideNavigationScreen() {
               {verifying ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.actionText}>{t("booking.verifyAndStartTrip")}</Text>
+                <DirectionalText style={styles.actionText}>
+                  {t("booking.verifyAndStartTrip")}
+                </DirectionalText>
               )}
             </Pressable>
 
             <Pressable style={styles.verifyCancelButton} onPress={closeVerifyModal}>
-              <Text style={styles.backText}>{t("common.cancel")}</Text>
+              <DirectionalText style={styles.backText}>{t("common.cancel")}</DirectionalText>
             </Pressable>
-          </View>
+          </DirectionalCard>
         </View>
       </Modal>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

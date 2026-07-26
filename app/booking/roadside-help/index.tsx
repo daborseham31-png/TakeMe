@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,8 +15,13 @@ import {
 import MapView, { Marker, Region } from "react-native-maps";
 import { useTranslation } from "react-i18next";
 
+import {
+  DirectionalScreen,
+  PhysicalDirectionalBlockText,
+} from "../../i18n/DirectionalPrimitives";
 import { translateProblemType } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
+import { positionEnd } from "../../i18n/rtl";
 import { createRoadsideRequest } from "./roadsideLib";
 
 // Default map region (Nazareth area) used until the user moves the pin.
@@ -225,7 +229,7 @@ export default function RoadsideHelpScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
@@ -235,7 +239,9 @@ export default function RoadsideHelpScreen() {
           <Text style={styles.headerEmoji}>🔧</Text>
           <Text style={styles.title}>{t("rideCategory.categories.help.title")}</Text>
         </View>
-        <Text style={styles.subtitle}>{t("roadsideHelp.subtitle")}</Text>
+        <PhysicalDirectionalBlockText style={styles.subtitle}>
+          {t("roadsideHelp.subtitle")}
+        </PhysicalDirectionalBlockText>
 
         {/* Your location + map */}
         <View style={styles.card}>
@@ -249,11 +255,11 @@ export default function RoadsideHelpScreen() {
             <Text style={styles.addressText}>{addressLabel}</Text>
           </View>
 
-          <Text style={styles.hintText}>
+          <PhysicalDirectionalBlockText style={styles.hintText}>
             {locating
               ? t("roadsideHelp.detectingLocation")
               : t("roadsideHelp.dragPinAdjustHint")}
-          </Text>
+          </PhysicalDirectionalBlockText>
 
           <View style={styles.mapWrapper}>
             <MapView
@@ -269,7 +275,7 @@ export default function RoadsideHelpScreen() {
               />
             </MapView>
 
-            <Pressable style={styles.recenterButton} onPress={goToMyLocation}>
+            <Pressable style={[styles.recenterButton, positionEnd(12, isRTL)]} onPress={goToMyLocation}>
               <Ionicons name="locate" size={20} color="#F58220" />
             </Pressable>
           </View>
@@ -282,9 +288,9 @@ export default function RoadsideHelpScreen() {
             <Text style={styles.sectionTitle}>{t("roadsideHelp.whatsTheProblem")}</Text>
           </View>
 
-          <Text style={styles.problemHint}>
+          <PhysicalDirectionalBlockText style={styles.problemHint}>
             {t("roadsideHelp.selectAtLeastOneHint")}
-          </Text>
+          </PhysicalDirectionalBlockText>
 
           <View style={styles.grid}>
             {PROBLEMS.map((problem) => {
@@ -317,11 +323,17 @@ export default function RoadsideHelpScreen() {
 
         {/* Description */}
         <View style={styles.card}>
-          <Text style={styles.label}>
+          <PhysicalDirectionalBlockText style={styles.label}>
             {t("roadsideHelp.describeProblemLabel")}{isOther ? " *" : ""}
-          </Text>
+          </PhysicalDirectionalBlockText>
           <TextInput
-            style={styles.textArea}
+            style={[
+              styles.textArea,
+              {
+                textAlign: isRTL ? "right" : "left",
+                writingDirection: isRTL ? "rtl" : "ltr",
+              },
+            ]}
             placeholder={
               isOther ? t("roadsideHelp.describeHelpNeededPlaceholder") : t("roadsideHelp.describeProblemPlaceholder")
             }
@@ -338,7 +350,9 @@ export default function RoadsideHelpScreen() {
             }}
           />
           {descriptionError ? (
-            <Text style={styles.fieldError}>{descriptionError}</Text>
+            <PhysicalDirectionalBlockText style={styles.fieldError}>
+              {descriptionError}
+            </PhysicalDirectionalBlockText>
           ) : null}
         </View>
 
@@ -363,7 +377,7 @@ export default function RoadsideHelpScreen() {
           )}
         </Pressable>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 
@@ -450,7 +464,6 @@ const styles = StyleSheet.create({
   recenterButton: {
     position: "absolute",
     bottom: 12,
-    right: 12,
     width: 40,
     height: 40,
     borderRadius: 20,

@@ -321,6 +321,17 @@ service cloud.firestore {
           request.resource.data.tripStatus in
             ["booked", "driver_on_way", "arrived_pickup", "in_progress", "completed"] &&
           (request.resource.data.status == resource.data.status || request.resource.data.status == "completed")
+        ) ||
+        (
+          // The owning driver hides this trip listing from their own My
+          // Bookings view only (hideSchoolTrip/"Clear All" — see
+          // schoolTripsLib.ts) — a PURE view-hide, never a cancellation:
+          // every other field, including `status`, is required unchanged.
+          resource.data.driverId == request.auth.uid &&
+          request.resource.data.driverId == resource.data.driverId &&
+          request.resource.data.status == resource.data.status &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(["deletedForDriver", "updatedAt"]) &&
+          request.resource.data.deletedForDriver == true
         )
       );
 
@@ -457,6 +468,25 @@ service cloud.firestore {
             "bookingStatus", "replacedByBookingId", "replacementTripId",
             "replacementConfirmedAt", "updatedAt"
           ])
+        ) ||
+        (
+          // 7) The passenger OR the driver hides this booking card from
+          //    their own My Bookings view only (hideSchoolBooking/
+          //    "Clear All" — see schoolTripsLib.ts) — a PURE view-hide,
+          //    never a cancellation: `status`/`tripStatus` are required
+          //    unchanged, and each side may only ever set their OWN flag
+          //    (deletedForPassenger vs deletedForDriver), never the other
+          //    side's copy.
+          (
+            resource.data.passengerId == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(["deletedForPassenger", "updatedAt"]) &&
+            request.resource.data.deletedForPassenger == true
+          ) ||
+          (
+            resource.data.driverId == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(["deletedForDriver", "updatedAt"]) &&
+            request.resource.data.deletedForDriver == true
+          )
         )
       );
 
@@ -557,6 +587,121 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ---------------------------------------------------------------
+    // schoolChildren/{childId} + schoolChildCodes/{codeHash} — Phase 1 of
+    // the School Return Kiosk project (see AGENTS.md's kiosk audit). A
+    // durable per-child profile owned by exactly one parent, carrying that
+    // child's own permanent School Return lookup code. Deliberately
+    // stricter than the wide-open collections above and even than
+    // schoolTrips/schoolBookings: NOTHING here is ever readable by anyone
+    // other than the owning parent — not the driver, not another signed-in
+    // user, and (until a later phase adds a dedicated server-only lookup
+    // endpoint) never an unauthenticated School Kiosk request either. See
+    // app/booking/school/schoolChildrenLib.ts.
+    //
+    // HARDENING: a 6-digit return code is a space of only 1,000,000 values —
+    // small enough that an authenticated attacker could precompute the
+    // SHA-256 hash of every possible code offline and simply check which
+    // schoolChildCodes docs exist. A client-readable ledger (even one
+    // holding only hashes) would hand them exactly that oracle.
+    // Permanent-code generation and the entire schoolChildCodes ledger are
+    // therefore server-only: createSchoolChildProfile /
+    // resetSchoolChildReturnCode run on the Cloudflare Worker
+    // (cloudflare-worker/src/schoolChildren.ts — NOT a Firebase Cloud
+    // Function; this project's Firebase plan is Spark, which can't deploy
+    // those), authenticating to Firestore via the REST API with a Google
+    // Cloud service account (cloudflare-worker/src/firestoreRest.ts), which
+    // bypasses these rules entirely, same as the Admin SDK would. No
+    // client, however authenticated, may read, create, update, or delete a
+    // schoolChildCodes document, and a client may no longer directly create
+    // a schoolChildren document either (see below).
+    // ---------------------------------------------------------------
+
+    match /schoolChildren/{childId} {
+      // Owner-only read — no driver, no other passenger, no unauthenticated
+      // kiosk request. A future kiosk lookup endpoint reads this via the
+      // same service-account REST access (bypasses these rules entirely),
+      // never via a client-granted read — see this collection's own header
+      // comment.
+      allow read: if isSignedIn() && resource.data.parentId == request.auth.uid;
+
+      // Creation is server-only now (createSchoolChildProfile generates and
+      // reserves the return code — see this match block's header comment).
+      // The Worker's service-account access bypasses this rule regardless;
+      // this `false` only blocks a client from ever creating the document
+      // directly (which would have no way to safely mint/reserve a return
+      // code anyway).
+      allow create: if false;
+
+      // Two, and only two, legitimate CLIENT update shapes — a client can
+      // never touch returnCode/returnCodeHash (that only ever happens
+      // inside resetSchoolChildReturnCode, server-side on the Worker, which
+      // is not subject to this rule):
+      //   1) Edit childName and/or schoolId, plus schoolId's optional
+      //      stable-data snapshot (schoolName/schoolCityId/schoolCityName/
+      //      schoolAddress — see schoolChildrenLib.ts's UpdateSchoolChildInput).
+      //      Those four are plain descriptive strings, not identity/security
+      //      fields, so only their type is checked, never non-emptiness. The
+      //      Edit Child form (my-children.tsx) sends childName ALONE
+      //      whenever the parent never touched the City/School fields this
+      //      session — never forcing a reselect of an unchanged school — so
+      //      this shape's own field checks (childName/schoolId is
+      //      string/non-empty) always read against request.resource.data,
+      //      the full RESULTING document after the merge, which still holds
+      //      the existing valid schoolId even when this update's diff never
+      //      touched it.
+      //   2) Toggle active (deactivate/restore) — see "prefer active:
+      //      false over deleting" in schoolChildrenLib.ts; never a hard
+      //      delete, since a historical booking may already reference this
+      //      childId.
+      // parentId and createdAt are immutable under both shapes.
+      allow update: if isSignedIn() &&
+        resource.data.parentId == request.auth.uid &&
+        request.resource.data.parentId == resource.data.parentId &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        (
+          (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly([
+                "childName", "schoolId", "schoolName", "schoolCityId",
+                "schoolCityName", "schoolAddress", "updatedAt"
+              ]) &&
+            request.resource.data.childName is string &&
+            request.resource.data.childName.size() > 0 &&
+            request.resource.data.childName.size() <= 80 &&
+            request.resource.data.schoolId is string &&
+            request.resource.data.schoolId.size() > 0 &&
+            (!("schoolName" in request.resource.data) || request.resource.data.schoolName is string) &&
+            (!("schoolCityId" in request.resource.data) || request.resource.data.schoolCityId is string) &&
+            (!("schoolCityName" in request.resource.data) || request.resource.data.schoolCityName is string) &&
+            (!("schoolAddress" in request.resource.data) || request.resource.data.schoolAddress is string)
+          ) ||
+          (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["active", "updatedAt"]) &&
+            request.resource.data.active is bool
+          )
+        );
+
+      // Never a hard delete (see shape 2 above) — deactivate via active:
+      // false instead.
+      allow delete: if false;
+    }
+
+    // Uniqueness ledger — server-only, full stop. Never readable or
+    // writable by ANY client request, signed in or not (see this match
+    // block's header comment for why even a read would be dangerous for a
+    // 6-digit code space). Only the Cloudflare Worker's
+    // createSchoolChildProfile / resetSchoolChildReturnCode routes, via
+    // their service-account Firestore REST access, ever touch this
+    // collection.
+    match /schoolChildCodes/{codeHash} {
+      allow read: if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
     match /rideRequests/{requestId} {
       // Any signed-in user may read — NOT just the requesting parent.
       // matchRideRequestsForNewTrip (schoolTripsLib.ts) runs client-side, on
@@ -597,6 +742,34 @@ service cloud.firestore {
           request.resource.data.parentId == resource.data.parentId &&
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(["status", "matchedTripId", "matchedTripIds", "notifiedTripIds", "lastNotifiedAt", "updatedAt"])
+        ) ||
+        // The owning parent hides this request from their own My Bookings
+        // view only (hideRideRequest/"Clear All" — see schoolTripsLib.ts's
+        // RideRequest.hiddenForParent) — a PURE view-hide, never a
+        // cancellation: status is explicitly required to stay unchanged, so
+        // the matching system keeps treating this request exactly as before.
+        (
+          resource.data.parentId == request.auth.uid &&
+          request.resource.data.parentId == resource.data.parentId &&
+          request.resource.data.status == resource.data.status &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(["hiddenForParent", "updatedAt"]) &&
+          request.resource.data.hiddenForParent is bool
+        ) ||
+        // The owning parent actually confirms + pays for a real return
+        // booking that fulfils this request (bookReturnForChild's
+        // post-booking write-back — see schoolTripsLib.ts) — a real request
+        // may move to "booked" from either "waiting" (booked directly,
+        // never having been machine-matched) or "matched". Only the
+        // matching-tracking fields may additionally change in the same
+        // write; parentId/school/destination/seats stay frozen.
+        (
+          resource.data.parentId == request.auth.uid &&
+          request.resource.data.parentId == resource.data.parentId &&
+          resource.data.status in ["waiting", "matched"] &&
+          request.resource.data.status == "booked" &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "matchedBookingId", "matchedTripId", "updatedAt"]) &&
+          request.resource.data.matchedBookingId is string
         )
       );
 

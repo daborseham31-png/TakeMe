@@ -26,7 +26,6 @@ import {
   Image,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,6 +33,7 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalCard, DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import {
   AlternativeTrip,
@@ -55,6 +55,7 @@ type DriverInfo = { ratingAverage: number; ratingCount: number; photoUrl: string
 
 type ParsedChildEntry = {
   localId: string;
+  childId?: string;
   childName?: string;
   returnRequestedTime?: string;
 };
@@ -129,6 +130,7 @@ export default function SchoolTripResultsScreen() {
         .filter((entry) => entry && typeof entry.localId === "string")
         .map((entry) => ({
           localId: entry.localId,
+          childId: entry.childId || undefined,
           childName: entry.childName || undefined,
           returnRequestedTime: entry.returnRequestedTime || undefined,
         }));
@@ -393,6 +395,7 @@ export default function SchoolTripResultsScreen() {
         // Single-child (or legacy, entry-less) return search — the one
         // child this request is for is the only entry parsed, if any.
         childEntryId: parsedChildEntries[0]?.localId || "solo",
+        childId: parsedChildEntries[0]?.childId,
         childName: parsedChildEntries[0]?.childName,
         schoolId: String(params.schoolId || ""),
         schoolName: String(params.schoolName || ""),
@@ -454,6 +457,7 @@ export default function SchoolTripResultsScreen() {
     try {
       await createRideRequest({
         childEntryId: cs.entry.localId,
+        childId: cs.entry.childId,
         childName: cs.entry.childName,
         schoolId: String(params.schoolId || ""),
         schoolName: String(params.schoolName || ""),
@@ -503,7 +507,7 @@ export default function SchoolTripResultsScreen() {
         // eslint-disable-next-line no-await-in-loop
         await bookReturnForChild(
           cs.selectedTripId as string,
-          { localId: cs.entry.localId, childName: cs.entry.childName },
+          { localId: cs.entry.localId, childName: cs.entry.childName, childId: cs.entry.childId },
           paymentMethod,
           bookingGroupId,
         );
@@ -751,7 +755,7 @@ export default function SchoolTripResultsScreen() {
           <View style={styles.modalOverlay}>
             <Pressable style={styles.modalBackdrop} onPress={() => toggleChildAlternatives(cs.entry.localId, false)} />
 
-            <View style={styles.modalSheet}>
+            <DirectionalCard style={styles.modalSheet}>
               <View style={styles.modalHandle} />
               <Text style={styles.modalTitle}>{t("schoolTrip.alternativeTripsFound")}</Text>
               <Text style={styles.modalSubtitle}>{t("schoolTrip.noExactTripMessage")}</Text>
@@ -781,7 +785,7 @@ export default function SchoolTripResultsScreen() {
               >
                 <Text style={styles.modalCloseText}>{t("common.cancel")}</Text>
               </Pressable>
-            </View>
+            </DirectionalCard>
           </View>
         </Modal>
       </View>
@@ -792,7 +796,7 @@ export default function SchoolTripResultsScreen() {
   const firstSelectedTrip = childStates.find((cs) => cs.selectedTripId)?.selectedTripId || null;
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
@@ -914,7 +918,7 @@ export default function SchoolTripResultsScreen() {
           <View style={styles.modalOverlay}>
             <Pressable style={styles.modalBackdrop} onPress={() => setShowAlternatives(false)} />
 
-            <View style={styles.modalSheet}>
+            <DirectionalCard style={styles.modalSheet}>
               <View style={styles.modalHandle} />
               <Text style={styles.modalTitle}>{t("schoolTrip.alternativeTripsFound")}</Text>
               <Text style={styles.modalSubtitle}>{t("schoolTrip.noExactTripMessage")}</Text>
@@ -939,11 +943,11 @@ export default function SchoolTripResultsScreen() {
               <Pressable style={styles.modalCloseButton} onPress={() => setShowAlternatives(false)}>
                 <Text style={styles.modalCloseText}>{t("common.cancel")}</Text>
               </Pressable>
-            </View>
+            </DirectionalCard>
           </View>
         </Modal>
       ) : null}
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

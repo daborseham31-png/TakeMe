@@ -7,7 +7,6 @@ import {
   Alert,
   Image,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,7 +17,9 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
+import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
+import { ltrContentStyle } from "../i18n/rtl";
 import {
   analyzeLicenseImage,
   compressImageToBase64,
@@ -197,16 +198,16 @@ export default function VerifyLicenseScreen() {
 
   if (checkingAuth) {
     return (
-      <SafeAreaView style={styles.page}>
+      <DirectionalScreen style={styles.page}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#F58220" />
         </View>
-      </SafeAreaView>
+      </DirectionalScreen>
     );
   }
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
@@ -281,14 +282,14 @@ export default function VerifyLicenseScreen() {
                 <View style={styles.readOnlyBox}>
                   <Text style={styles.readOnlyLabel}>{t("driverCreate.licenseNumberLabel")}</Text>
                   <TextInput
-                    style={styles.readOnlyInput}
+                    style={[styles.readOnlyInput, ltrContentStyle]}
                     value={licenseResult.licenseNumber || ""}
                     editable={false}
                   />
 
                   <Text style={styles.readOnlyLabel}>{t("driverCreate.expiryDateLabel")}</Text>
                   <TextInput
-                    style={styles.readOnlyInput}
+                    style={[styles.readOnlyInput, ltrContentStyle]}
                     value={licenseResult.expiryDate || ""}
                     editable={false}
                   />
@@ -349,7 +350,7 @@ export default function VerifyLicenseScreen() {
           </Pressable>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

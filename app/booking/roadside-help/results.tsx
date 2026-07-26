@@ -3,7 +3,6 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
 import {
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { translateProblemTypesList } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 
@@ -106,7 +106,7 @@ export default function RoadsideHelpResultsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
@@ -214,7 +214,7 @@ export default function RoadsideHelpResultsScreen() {
           })}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

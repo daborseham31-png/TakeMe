@@ -7,8 +7,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import {
+  DirectionalHeader,
+  DirectionalRow,
+  DirectionalScreen,
+} from "../../i18n/DirectionalPrimitives";
+import { useLanguage } from "../../i18n/LanguageProvider";
+import { backIconName } from "../../i18n/rtl";
 import { adminColors } from "../adminTheme";
 import AdminMenuModal from "./AdminMenuModal";
 
@@ -27,18 +34,19 @@ export default function AdminScreen({
   headerRight,
   children,
 }: Props) {
+  const { isRTL } = useLanguage();
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <SafeAreaView style={styles.page}>
-      <View style={styles.header}>
+    <DirectionalScreen style={styles.page}>
+      <DirectionalHeader style={styles.header}>
         {showBack ? (
           <Pressable
             style={styles.iconButton}
             onPress={() => router.back()}
             hitSlop={8}
           >
-            <Ionicons name="arrow-back" size={22} color={adminColors.textMuted} />
+            <Ionicons name={backIconName(isRTL)} size={22} color={adminColors.textMuted} />
           </Pressable>
         ) : (
           <View style={styles.iconButton} />
@@ -48,7 +56,7 @@ export default function AdminScreen({
           {title}
         </Text>
 
-        <View style={styles.headerRightRow}>
+        <DirectionalRow style={styles.headerRightRow}>
           {headerRight}
           <Pressable
             style={styles.iconButton}
@@ -57,8 +65,8 @@ export default function AdminScreen({
           >
             <Ionicons name="menu" size={24} color={adminColors.textMuted} />
           </Pressable>
-        </View>
-      </View>
+        </DirectionalRow>
+      </DirectionalHeader>
 
       {children}
 
@@ -67,7 +75,7 @@ export default function AdminScreen({
         onClose={() => setMenuOpen(false)}
         activeKey={activeKey}
       />
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

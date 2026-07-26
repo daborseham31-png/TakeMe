@@ -14,7 +14,6 @@ import {
   Alert,
   Linking,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,8 +23,10 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
+import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { translateProblemTypesList } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
+import { ltrContentStyle } from "../../i18n/rtl";
 import { normalizeLanguagesFromAccount } from "../../driver/create/driverHelpers";
 import DriverReviewsSection from "../DriverReviewsSection";
 import { getOfferDriverId } from "../driverReviewsLib";
@@ -301,7 +302,7 @@ export default function RoadsideWaitingScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <DirectionalScreen style={styles.page}>
       <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={22} color="#7C5F46" />
@@ -445,7 +446,7 @@ export default function RoadsideWaitingScreen() {
                       onPress={() => callDriver(offer.driverPhone)}
                     >
                       <Ionicons name="call-outline" size={16} color="#F58220" />
-                      <Text style={styles.phoneText}>{offer.driverPhone}</Text>
+                      <Text style={[styles.phoneText, ltrContentStyle]}>{offer.driverPhone}</Text>
                     </Pressable>
                   ) : null}
 
@@ -481,7 +482,7 @@ export default function RoadsideWaitingScreen() {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </DirectionalScreen>
   );
 }
 

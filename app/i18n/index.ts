@@ -94,13 +94,21 @@ export async function initI18n(language: SupportedLanguage): Promise<void> {
   });
 }
 
+// Returns whether the write actually completed — used only for the
+// RTL_RELOAD_REQUESTED diagnostic in LanguageProvider.tsx so a real device
+// log can distinguish "direction change requested after a confirmed save"
+// from "requested even though persistence silently failed" (still safe
+// either way for the CURRENT session — see the catch below — but worth
+// seeing on a real device while diagnosing a report that RTL isn't sticking).
 export async function persistLanguage(
   language: SupportedLanguage,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+    return true;
   } catch {
     // Best-effort — the change still applies for the current session.
+    return false;
   }
 }
 

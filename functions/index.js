@@ -1,16 +1,26 @@
 // ---------------------------------------------------------------------------
 // TakeMe Cloud Functions — school trip return-ride matching (AGENTS.md #8),
 // stale waiting-request expiry (AGENTS.md #12), driver-cancellation
-// replacement search, and (see sendPushForNotification at the bottom of
-// this file) push notification delivery.
+// replacement search, and push notification delivery (see
+// sendPushForNotification below).
 //
-// This is the ONLY server-side (trusted) code in the project today — the
-// mobile app has no other firebase-admin dependency and never runs this
-// file; it only reads the `notifications` / `rideRequests` documents this
-// code writes, and (for push) the `expoPushTokens` array
-// app/pushNotifications.ts stores on each user's own `users/{uid}` doc. See
-// the deployment steps in the final project summary for how to install,
-// configure, and deploy this.
+// This is the ONLY server-side (trusted) code that runs as Firebase Cloud
+// Functions in this project. Every function in this file is a background
+// trigger (Firestore onCreate/onUpdate, or a schedule) the mobile app never
+// invokes directly — it only reads what these write.
+//
+// NOTE — School Child return-code creation/reset (createSchoolChildProfile /
+// resetSchoolChildReturnCode) do NOT live here. They were originally built
+// as Callable Functions in this file, but this project's Firebase plan
+// (Spark) cannot deploy Cloud Functions at all (callable or otherwise
+// requires Blaze), so that undeployable implementation was removed and
+// reimplemented as two protected HTTP routes on the existing Cloudflare
+// Worker instead — see cloudflare-worker/src/schoolChildren.ts (business
+// logic), firestoreRest.ts (server-side Firestore access via the REST API +
+// a service account, since the Workers runtime can't run the Admin SDK's
+// gRPC transport), and firebaseAuth.ts (Firebase ID token verification
+// without the Admin SDK). app/booking/school/schoolChildrenLib.ts calls
+// those Worker routes directly over HTTPS, not this file.
 // ---------------------------------------------------------------------------
 
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
@@ -187,6 +197,16 @@ exports.onSchoolTripCreated = onDocumentCreated("schoolTrips/{tripId}", async (e
         bookingId: tripId,
         applicationId: tripId,
         requestId: requestDoc.id,
+        // Same fix as the client-side mirror of this exact rule
+        // (matchRideRequestsForNewTrip in app/booking/schoolTripsLib.ts) —
+        // without these, tapping this notification opens trip-confirm.tsx
+        // with no per-child identity at all, and the resulting
+        // bookReturnForChild booking ends up with childId (and even
+        // childEntryId/childName) missing — invisible to anything that
+        // looks a child up by childId, most importantly the School Kiosk.
+        childEntryId: request.childEntryId || null,
+        childName: request.childName || null,
+        childId: request.childId || null,
         category: "school",
         status: "matched",
         targetTab: "passenger",

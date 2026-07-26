@@ -10590,64 +10590,74 @@ export const findSchoolById = (id: string): SchoolLocation | null =>
 // selected trip area. See SchoolAutocomplete.tsx's `areaLocationId` prop.
 // ---------------------------------------------------------------------------
 
-export const MAX_SCHOOL_RESULTS = 25;
+// A tiny number of real Ministry-of-Education entries have a `name` that is
+// IDENTICAL to their own `city` (a small village whose one school is simply
+// registered under the village's own name, with no "School"/"Elementary"/
+// etc. qualifier — see this file's header comment: every entry here is a
+// real registered institution, this file never invents one). Shown bare,
+// that reads exactly like a locality suggestion, not a school — so any such
+// entry is excluded UNLESS its name also contains a recognizable
+// educational-institution term (reusing SCHOOL_TERM_DICTIONARY below — the
+// same Hebrew institution-type vocabulary this file already recognizes for
+// localization, not a new/separate list). This never filters out a real
+// school with its own distinct name (e.g. "St. Joseph School" in Nazareth)
+// — only the rare case where the ENTIRE name is nothing but the locality's
+// own name.
+function isBareLocalityName(school: SchoolLocation): boolean {
+  const normalizedName = normalizeLocationText(school.name, "hebrew");
+  const normalizedCity = normalizeLocationText(school.city, "hebrew");
+  if (!normalizedName || normalizedName !== normalizedCity) return false;
 
-// `language` determines which text a typed query is matched against — the
-// real Hebrew name for Hebrew UIs, or the localized display name (see
-// getLocalizedSchoolName below) for every other language, so a parent using
-// the app in Arabic/English/Russian can actually type a term like "ابتدائية"
-// / "Elementary" / "Начальная" and find matching schools, not just Hebrew.
-export function searchSchools(
-  query: string,
-  areaLocationId: string | null,
-  language: SupportedLanguage = "he",
-): SchoolLocation[] {
+  return !SCHOOL_TERM_DICTIONARY.some(([hebrewTerm]) => school.name.includes(hebrewTerm));
+}
+
+// The ONE school data source for a picked city/area — every real school
+// registered to that areaLocationId, in one shot, no typing required (see
+// SchoolAutocomplete.tsx, which loads this the moment its picker opens).
+// Never paginated/capped: the caller renders this in a virtualized,
+// scrollable list, so a big city's full roster is never a problem. Sorted
+// alphabetically by each school's own STORED name (school.name — always
+// the real Hebrew Ministry-of-Education name) — never the localized/
+// best-effort display variant (see getLocalizedSchoolName below), and
+// never renamed/altered here. Excludes bare-locality-name entries (see
+// isBareLocalityName above) so a plain village name never shows up as if
+// it were a school.
+export function getSchoolsForCity(areaLocationId: string | null): SchoolLocation[] {
   if (!areaLocationId) return [];
 
-  const pool = SCHOOLS.filter(
-    (school) => school.areaLocationId === areaLocationId,
-  );
+  return SCHOOLS.filter(
+    (school) => school.areaLocationId === areaLocationId && !isBareLocalityName(school),
+  ).sort((a, b) => a.name.localeCompare(b.name, "he"));
+}
 
-  const trimmed = String(query || "").trim();
-  const matchLanguage = language === "he" ? "hebrew" : undefined;
+// Optional, purely local narrowing of an already-loaded city list (see
+// getSchoolsForCity above) — never a network call, never changes which city
+// is selected, never re-orders beyond the alphabetical order that list is
+// already in. Matches against both the school's real stored name AND its
+// localized display name, so a parent typing in Arabic/English/Russian can
+// still narrow the list by a recognizable term — but this is ONLY ever used
+// to decide which rows are shown; the text actually RENDERED for each
+// result is always the unmodified stored name (see SchoolAutocomplete.tsx).
+export function filterSchoolsLocally(
+  schools: SchoolLocation[],
+  filterText: string,
+  language: SupportedLanguage,
+): SchoolLocation[] {
+  const trimmed = String(filterText || "").trim();
+  if (!trimmed) return schools;
 
-  const displayText = (school: SchoolLocation) =>
-    language === "he" ? school.name : getLocalizedSchoolName(school, language);
+  const needleHebrew = normalizeLocationText(trimmed, "hebrew");
+  const needleLocalized = normalizeLocationText(trimmed);
 
-  // No text typed yet: show every school already known for this area (still
-  // capped) so the picker feels populated the moment an area is chosen,
-  // rather than requiring the parent/driver to already know a school's name.
-  if (!trimmed) {
-    return pool.slice(0, MAX_SCHOOL_RESULTS);
-  }
+  return schools.filter((school) => {
+    const rawName = normalizeLocationText(school.name, "hebrew");
+    if (needleHebrew && rawName.includes(needleHebrew)) return true;
 
-  const needle = normalizeLocationText(trimmed, matchLanguage);
-  if (!needle) return pool.slice(0, MAX_SCHOOL_RESULTS);
+    if (language === "he") return false;
 
-  const starts: SchoolLocation[] = [];
-  const contains: SchoolLocation[] = [];
-
-  for (const school of pool) {
-    const haystack = normalizeLocationText(displayText(school), matchLanguage);
-    if (!haystack) continue;
-
-    if (haystack.startsWith(needle)) {
-      starts.push(school);
-    } else if (haystack.includes(needle)) {
-      contains.push(school);
-    }
-  }
-
-  const byName = (a: SchoolLocation, b: SchoolLocation) =>
-    displayText(a).localeCompare(
-      displayText(b),
-      language === "he" ? "he" : language,
-    );
-
-  return [...starts.sort(byName), ...contains.sort(byName)].slice(
-    0,
-    MAX_SCHOOL_RESULTS,
-  );
+    const localizedName = normalizeLocationText(getLocalizedSchoolName(school, language));
+    return !!needleLocalized && localizedName.includes(needleLocalized);
+  });
 }
 
 // ---------------------------------------------------------------------------
