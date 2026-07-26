@@ -54,6 +54,7 @@ import {
   normalizeDriverTrip,
   RATING_NOTIFICATION_TYPES,
   sortMyBookings,
+  translateCancellationError,
 } from "../booking/bookingsLib";
 import {
   arriveRide,
@@ -1036,12 +1037,28 @@ const bookedRouteIds = useMemo(() => {
     };
   }, [pendingScrollAppId, tab, combinedDriverRows, combinedPassengerRows]);
 
-  const runApp = async (id: string, fn: () => Promise<void>) => {
+  // `resolveErrorMessage`, when given, takes over turning a caught error into
+  // the Alert's message — used by the cancellation call sites below so a
+  // CancellationError's stable code (never a raw Firestore/SDK error) is
+  // translated via translateCancellationError, instead of falling through to
+  // this function's own default `error?.message` (which is only safe for the
+  // OTHER operations here — accept/reject/start/finish/pay/... — that still
+  // throw a plain, already-translated Error).
+  const runApp = async (
+    id: string,
+    fn: () => Promise<void>,
+    resolveErrorMessage?: (error: unknown) => string,
+  ) => {
     try {
       setBusyId(id);
       await fn();
     } catch (error: any) {
-      Alert.alert(t("common.error"), error?.message || t("booking.somethingWentWrong"));
+      Alert.alert(
+        t("common.error"),
+        resolveErrorMessage
+          ? resolveErrorMessage(error)
+          : error?.message || t("booking.somethingWentWrong"),
+      );
     } finally {
       setBusyId(null);
     }
@@ -1356,20 +1373,28 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     a: NormalizedApplication,
     by: "passenger" | "driver",
   ) => {
-    const blocked = cancelBlockedReason(a);
+    const blocked = cancelBlockedReason(a, by);
 
     if (blocked) {
       Alert.alert(t("booking.cannotCancelTitle"), blocked);
       return;
     }
 
-    Alert.alert(t("booking.cancelBookingTitle"), t("booking.cancelBookingConfirm"), [
+    // Same driver/passenger wording split every other category's cancel
+    // confirm already uses (see handleCancelRideBooking/
+    // handleCancelGeneralBooking above) — the driver's version says
+    // cancelling may affect the other side, the passenger's says only their
+    // own booking is affected.
+    const title = by === "driver" ? t("schoolTrip.cancelTripButton") : t("booking.cancelBookingTitle");
+    const message = by === "driver" ? t("schoolTrip.cancelTripConfirm") : t("booking.cancelBookingConfirm");
+
+    Alert.alert(title, message, [
       { text: t("common.no"), style: "cancel" },
       {
         text: t("common.yesCancel"),
         style: "destructive",
         onPress: () =>
-          runApp(a.id, () => cancelApplication(a.kind, a.id, a, by)),
+          runApp(a.id, () => cancelApplication(a.kind, a.id, a, by), translateCancellationError),
       },
     ]);
   };
@@ -1807,7 +1832,7 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         text: title,
         style: "destructive",
         onPress: () =>
-          runApp(r.id, () => cancelRideBooking(r.id, r, viewer)),
+          runApp(r.id, () => cancelRideBooking(r.id, r, viewer), translateCancellationError),
       },
     ]);
   };
@@ -1830,7 +1855,7 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         text: title,
         style: "destructive",
         onPress: () =>
-          runApp(b.id, () => cancelGeneralBooking(b.id, b, viewer)),
+          runApp(b.id, () => cancelGeneralBooking(b.id, b, viewer), translateCancellationError),
       },
     ]);
   };
@@ -3317,7 +3342,11 @@ useEffect(() => {
     const otherName = viewer === "passenger" ? a.providerName : a.customerName;
 
     const future = startState(a.date) === "future";
-    const cancelBlocked = cancelBlockedReason(a);
+    // Role-specific: the driver/provider gets the 5-hour window, the
+    // passenger/customer the 2-hour window (see workErrandLib.ts's
+    // cancelBlockedReason) — `viewer` already tells us which side this
+    // particular card render is for.
+    const cancelBlocked = cancelBlockedReason(a, viewer);
 
     return (
       <View
@@ -3468,14 +3497,24 @@ useEffect(() => {
               </Pressable>
             ) : null}
 
-            {!cancelBlocked &&
-            (a.status === "accepted" || isAwaitingPayment(a.status)) ? (
-              <Pressable
-                style={styles.cancelLink}
-                onPress={() => handleAppCancel(a, "passenger")}
-              >
-                <Text style={styles.cancelLinkText}>{t("booking.cancelBookingLink")}</Text>
-              </Pressable>
+            {a.status === "accepted" || isAwaitingPayment(a.status) ? (
+              <>
+                <Pressable
+                  style={[
+                    styles.cancelBookingButton,
+                    !!cancelBlocked && styles.cancelBookingButtonDisabled,
+                  ]}
+                  onPress={() => handleAppCancel(a, "passenger")}
+                  disabled={!!cancelBlocked}
+                >
+                  <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+                  <Text style={styles.cancelBookingButtonText}>
+                    {t("booking.cancelBookingTitle")}
+                  </Text>
+                </Pressable>
+
+                {cancelBlocked ? <Text style={styles.appHint}>{cancelBlocked}</Text> : null}
+              </>
             ) : null}
           </>
         ) : (
@@ -3601,14 +3640,24 @@ useEffect(() => {
               </View>
             ) : null}
 
-            {!cancelBlocked &&
-            (a.status === "accepted" || isAwaitingPayment(a.status)) ? (
-              <Pressable
-                style={styles.cancelLink}
-                onPress={() => handleAppCancel(a, "driver")}
-              >
-                <Text style={styles.cancelLinkText}>{t("booking.cancelBookingLink")}</Text>
-              </Pressable>
+            {a.status === "accepted" || isAwaitingPayment(a.status) ? (
+              <>
+                <Pressable
+                  style={[
+                    styles.cancelBookingButton,
+                    !!cancelBlocked && styles.cancelBookingButtonDisabled,
+                  ]}
+                  onPress={() => handleAppCancel(a, "driver")}
+                  disabled={!!cancelBlocked}
+                >
+                  <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+                  <Text style={styles.cancelBookingButtonText}>
+                    {t("schoolTrip.cancelTripButton")}
+                  </Text>
+                </Pressable>
+
+                {cancelBlocked ? <Text style={styles.appHint}>{cancelBlocked}</Text> : null}
+              </>
             ) : null}
           </>
         )}

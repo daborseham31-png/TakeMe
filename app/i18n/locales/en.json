@@ -1076,7 +1076,8 @@
     "noUnbookedTrips": "No unbooked trips.",
     "expiredNoBookingsLabel": "Expired — No bookings",
     "cancelledTripsSection": "Cancelled",
-    "cannotCancelTripWithinFiveHours": "You cannot cancel this trip less than 5 hours before departure."
+    "cannotCancelTripWithinFiveHours": "You cannot cancel this trip less than 5 hours before departure.",
+    "cannotCancelInvalidDeparture": "This trip's date or time is unavailable, so it can't be cancelled here right now."
   },
   "school": {
     "headerTitle": "School Ride",

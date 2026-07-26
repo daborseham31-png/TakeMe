@@ -40,6 +40,12 @@ import {
   PASSENGER_CANCEL_LOCK_HOURS,
   TripTrackingStatus,
 } from "./bookingsLib";
+import {
+  CancellationError,
+  CancellationStatusInput,
+  eligibilityReasonToErrorCode,
+  getCancellationEligibility,
+} from "./cancellationEligibility";
 import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
 export const RIDE_CATEGORY = "personal_ride";
@@ -274,37 +280,89 @@ export const getRideCancelBlockedReason = (
   return getTimeBasedCancelBlockedReason(ride, hours, now);
 };
 
+// `ride` is used ONLY to locate the doc's category/shape at the call site —
+// every field actually validated (ownership, status, date/time) is re-read
+// fresh from Firestore inside the transaction below, never trusted from this
+// possibly-stale caller-held card. Throws a CancellationError with a stable
+// code (never a raw Firestore/SDK error) — see bookingsLib.ts's
+// translateCancellationError for the UI-facing message mapping.
 export const cancelRideBooking = async (
   bookingId: string,
   ride: RideBooking,
   cancelledBy: "passenger" | "driver",
-) => {
-  const blocked = getRideCancelBlockedReason(ride, cancelledBy);
-  if (blocked) throw new Error(blocked);
+): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new CancellationError("NOT_AUTHORIZED");
 
-  await updateDoc(doc(db, "bookings", bookingId), {
-    status: "cancelled" as RideStatus,
-    updatedAt: serverTimestamp(),
+  const bookingRef = doc(db, "bookings", bookingId);
+
+  let notifyReceiverId = "";
+  let notifyPassengerName = "";
+  let notifyDriverName = "";
+  let didCancel = false;
+
+  // PHASE 1 (the transaction's only read) then PHASE 2 (its only write) —
+  // never a read after a write in the same transaction.
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(bookingRef);
+    if (!snap.exists()) throw new CancellationError("DOCUMENT_NOT_FOUND");
+
+    const current = normalizeRideBooking(snap.id, snap.data());
+
+    const expectedUid = cancelledBy === "driver" ? current.driverId : current.passengerId;
+    if (!expectedUid || expectedUid !== user.uid) {
+      throw new CancellationError("NOT_AUTHORIZED");
+    }
+
+    // Already cancelled — safe no-op (never a second cancellation
+    // notification, never re-evaluated against the time window).
+    if (current.status === "cancelled") return;
+
+    const statusInput: CancellationStatusInput =
+      current.status === "completed"
+        ? "completed"
+        : current.status === "booked"
+          ? "booked"
+          : "started";
+
+    const eligibility = getCancellationEligibility({
+      role: cancelledBy,
+      date: current.date,
+      time: current.time,
+      status: statusInput,
+    });
+
+    if (!eligibility.canCancel) {
+      throw new CancellationError(eligibilityReasonToErrorCode(eligibility.reason, cancelledBy));
+    }
+
+    transaction.update(bookingRef, {
+      status: "cancelled" as RideStatus,
+      updatedAt: serverTimestamp(),
+    });
+
+    notifyReceiverId = cancelledBy === "passenger" ? current.driverId : current.passengerId;
+    notifyPassengerName = current.passengerName;
+    notifyDriverName = current.driverName;
+    didCancel = true;
   });
 
-  const receiverId = cancelledBy === "passenger" ? ride.driverId : ride.passengerId;
+  if (!didCancel || !notifyReceiverId) return;
 
-  if (receiverId) {
-    await notify({
-      receiverId,
-      type: "cancelled",
-      title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
-      message:
-        cancelledBy === "passenger"
-          ? `${ride.passengerName} cancelled their ride booking`
-          : `${ride.driverName} cancelled your ride booking`,
-      applicationId: bookingId,
-      bookingId,
-      category: RIDE_CATEGORY,
-      status: "cancelled",
-      targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
-    });
-  }
+  await notify({
+    receiverId: notifyReceiverId,
+    type: "cancelled",
+    title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
+    message:
+      cancelledBy === "passenger"
+        ? `${notifyPassengerName} cancelled their ride booking`
+        : `${notifyDriverName} cancelled your ride booking`,
+    applicationId: bookingId,
+    bookingId,
+    category: RIDE_CATEGORY,
+    status: "cancelled",
+    targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
+  });
 };
 
 // ---------------------------------------------------------------------------

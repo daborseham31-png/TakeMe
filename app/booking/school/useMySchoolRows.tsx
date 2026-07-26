@@ -77,8 +77,10 @@ import {
   getCategoryMeta,
   getDriverTripBucket,
   getDriverTripStatus,
+  CancellationError,
   getPassengerTripBucket,
   getStartTripBlockedReason,
+  translateCancellationError,
 } from "../bookingsLib";
 import { DirectionalCard } from "../../i18n/DirectionalPrimitives";
 import { formatLocalizedDateFromYMD, translateCategoryLabel } from "../../i18n/formatters";
@@ -330,7 +332,16 @@ export default function useMySchoolRows({
           try {
             await cancelSchoolBooking(booking.id);
           } catch (error: any) {
-            Alert.alert(t("common.error"), error?.message || t("errors.generic"));
+            // Never surface a raw SDK error to the user — log the safe
+            // technical detail and always show a translated generic
+            // cancellation error instead.
+            if (__DEV__) {
+              console.log(
+                "cancelSchoolBooking failed:",
+                error?.code || error?.message || "unknown",
+              );
+            }
+            Alert.alert(t("common.error"), t("errors.generic"));
           } finally {
             setBusyId(null);
           }
@@ -372,7 +383,18 @@ export default function useMySchoolRows({
             try {
               await cancelSchoolTrip(trip.id);
             } catch (error: any) {
-              Alert.alert(t("common.error"), error?.message || t("errors.generic"));
+              // cancelSchoolTrip now re-validates ownership fresh and throws
+              // a CancellationError (stable code, e.g. "NOT_AUTHORIZED") for
+              // that case — never show that raw code; translate it properly.
+              // Every other throw here is still a plain, already-translated
+              // Error (the time-window blocked reason), so error?.message
+              // stays the right fallback exactly as before.
+              Alert.alert(
+                t("common.error"),
+                error instanceof CancellationError
+                  ? translateCancellationError(error)
+                  : error?.message || t("errors.generic"),
+              );
             } finally {
               setBusyId(null);
             }
@@ -399,7 +421,12 @@ export default function useMySchoolRows({
       await cancelSchoolTrip(cancelTripTarget.id, cancelReasonInput.trim());
       closeCancelTripModal();
     } catch (error: any) {
-      Alert.alert(t("common.error"), error?.message || t("errors.generic"));
+      Alert.alert(
+        t("common.error"),
+        error instanceof CancellationError
+          ? translateCancellationError(error)
+          : error?.message || t("errors.generic"),
+      );
     } finally {
       setCancelSubmitting(false);
     }

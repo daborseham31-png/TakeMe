@@ -28,6 +28,16 @@ import {
 
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";
+import {
+  CancellationError,
+  CancellationErrorCode,
+  CancellationRole,
+  CancellationStatusInput,
+  DRIVER_CANCEL_LOCK_HOURS,
+  eligibilityReasonToErrorCode,
+  getCancellationEligibility,
+  PASSENGER_CANCEL_LOCK_HOURS,
+} from "./cancellationEligibility";
 import { notify } from "./work-errand/workErrandLib";
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -218,41 +228,94 @@ export const getStartTripBlockedReason = (booking: any): string | null => {
 // Callers still layer their own status check on top of this (this function
 // only ever looks at date/time, never status).
 //
-// Two standard windows, matching the passenger/driver wording split used
-// everywhere a booking has both sides ("Cancel Booking" vs "Cancel Trip"):
-//   - PASSENGER_CANCEL_LOCK_HOURS (2h) — the passenger cancelling their own
-//     seat/booking (RideBooking, general bookings, school bookings, work/
-//     errand applications).
-//   - DRIVER_CANCEL_LOCK_HOURS (5h) — the driver cancelling a trip THEY
-//     posted (personal/school-legacy driverRoutes listings, schoolTrips) —
-//     a stricter window since cancelling here can affect passengers already
-//     booked onto it, not just the driver's own plan.
+// Internally delegates to getCancellationEligibility (cancellationEligibility.ts)
+// — the one shared pure helper reused by School/Personal/Work/Errands alike —
+// re-exported below so every existing import site (`from "./bookingsLib"`)
+// keeps working unchanged.
 // ---------------------------------------------------------------------------
 
-export const PASSENGER_CANCEL_LOCK_HOURS = 2;
-export const DRIVER_CANCEL_LOCK_HOURS = 5;
+export {
+  PASSENGER_CANCEL_LOCK_HOURS,
+  DRIVER_CANCEL_LOCK_HOURS,
+  getCancellationEligibility,
+} from "./cancellationEligibility";
+export type {
+  CancellationRole,
+  CancellationEligibility,
+  CancellationEligibilityReason,
+  CancellationStatusInput,
+} from "./cancellationEligibility";
+// Note: the two `export` statements above are RE-exports for existing/new
+// consumers of bookingsLib.ts — they don't bind these names locally, so
+// they're also imported normally above for use within this file.
 
 export const getTimeBasedCancelBlockedReason = (
   booking: any,
   hoursBeforeDeparture: number = PASSENGER_CANCEL_LOCK_HOURS,
   now: Date = new Date(),
 ): string | null => {
-  const date = getBookingDateYMD(booking);
-  const time = getBookingTime(booking);
-  if (!date) return null;
+  // hoursBeforeDeparture >= DRIVER_CANCEL_LOCK_HOURS is how every existing
+  // caller (getRideCancelBlockedReason, getGeneralBookingCancelBlockedReason)
+  // already signals "the driver is cancelling" — kept as-is so neither call
+  // site needs to change.
+  const role: CancellationRole =
+    hoursBeforeDeparture >= DRIVER_CANCEL_LOCK_HOURS ? "driver" : "passenger";
 
-  const start = new Date(`${date}T${time || "00:00"}:00`);
-  if (Number.isNaN(start.getTime())) return null;
+  const eligibility = getCancellationEligibility({
+    role,
+    date: getBookingDateYMD(booking),
+    time: getBookingTime(booking),
+    status: "booked",
+    now,
+  });
 
-  const lockAt = new Date(
-    start.getTime() - hoursBeforeDeparture * 60 * 60 * 1000,
-  );
+  if (eligibility.canCancel) return null;
 
-  if (now.getTime() < lockAt.getTime()) return null;
+  if (eligibility.reason === "invalid_departure") {
+    return i18n.t("booking.cannotCancelInvalidDeparture");
+  }
 
-  return hoursBeforeDeparture >= DRIVER_CANCEL_LOCK_HOURS
+  return role === "driver"
     ? i18n.t("booking.cannotCancelTripWithinFiveHours")
     : i18n.t("schoolTrip.cannotCancelWithinTwoHours");
+};
+
+export { CancellationError } from "./cancellationEligibility";
+export type { CancellationErrorCode } from "./cancellationEligibility";
+
+// ---------------------------------------------------------------------------
+// UI-boundary error translation — every cancellation function
+// (cancelRideBooking, cancelGeneralBooking, cancelApplication,
+// cancelAcceptedWorkRequest, cancelSchoolBooking, cancelSchoolTrip) now
+// re-validates against a freshly-read document and throws a CancellationError
+// with one of the stable codes in CancellationErrorCode, never a raw
+// Firestore/SDK error. This is the ONE place that code gets mapped to a
+// translated, user-facing message — callers must use this instead of
+// `error?.message`, which for a non-CancellationError (a real Firestore SDK
+// failure — offline, permission-denied, ...) is English/technical and must
+// never reach the UI.
+// ---------------------------------------------------------------------------
+
+const CANCELLATION_ERROR_MESSAGE_KEYS: Record<CancellationErrorCode, string> = {
+  DRIVER_CANCELLATION_WINDOW_CLOSED: "booking.cannotCancelTripWithinFiveHours",
+  PASSENGER_CANCELLATION_WINDOW_CLOSED: "schoolTrip.cannotCancelWithinTwoHours",
+  TRIP_ALREADY_STARTED: "workErrand.cannotCancelAnymore",
+  TRIP_ALREADY_COMPLETED: "workErrand.cannotCancelAnymore",
+  ALREADY_CANCELLED: "workErrand.cannotCancelAnymore",
+  NOT_AUTHORIZED: "workErrand.mustBeLoggedIn",
+  DOCUMENT_NOT_FOUND: "rides.bookingNotFound",
+  INVALID_DEPARTURE: "booking.cannotCancelInvalidDeparture",
+};
+
+export const translateCancellationError = (error: unknown): string => {
+  if (error instanceof CancellationError) {
+    return i18n.t(CANCELLATION_ERROR_MESSAGE_KEYS[error.code]);
+  }
+
+  // Never a raw Firebase/SDK message — an unrecognized failure (offline,
+  // permission-denied, ...) always falls back to the generic translated
+  // error, same as every other catch block in the app.
+  return i18n.t("errors.generic");
 };
 
 // ---------------------------------------------------------------------------
@@ -1057,36 +1120,80 @@ export const getGeneralBookingCancelBlockedReason = (
   return getTimeBasedCancelBlockedReason(booking, hours, now);
 };
 
+// `booking` is used ONLY to locate the doc (bookingId already does that on
+// its own, really — kept for call-site compatibility) and for the
+// post-transaction notify() copy when nothing fresher is available.
+// Ownership, status, date/time, and the weekly-seat-restore math are ALL
+// re-derived from a freshly-read transaction.get() below, never trusted from
+// this possibly-stale caller-held card.
 export const cancelGeneralBooking = async (
   bookingId: string,
   booking: BookingItem,
   cancelledBy: "passenger" | "driver",
-) => {
-  const blocked = getGeneralBookingCancelBlockedReason(booking, cancelledBy);
-  if (blocked) throw new Error(blocked);
+): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new CancellationError("NOT_AUTHORIZED");
 
   const bookingRef = doc(db, "bookings", bookingId);
 
+  let notifyReceiverId = "";
+  let notifyPassengerName = "";
+  let notifyDriverName = "";
+  let didCancel = false;
+
   await runTransaction(db, async (transaction) => {
+    // -----------------------------------------------------------------
+    // PHASE 1 — every read. The route doc's ref depends on the booking's
+    // OWN routeId (read fresh here, never the caller's `booking.routeId`),
+    // so it can only be built after the booking read, but must still
+    // happen before any write below.
+    // -----------------------------------------------------------------
     const bookingSnap = await transaction.get(bookingRef);
-    if (!bookingSnap.exists()) return;
+    if (!bookingSnap.exists()) throw new CancellationError("DOCUMENT_NOT_FOUND");
 
-    const data = bookingSnap.data();
-    if (data.status === "completed" || data.status === "cancelled") return;
+    const current = normalizeBooking(bookingSnap.id, bookingSnap.data());
 
-    // Read the route BEFORE any write in this transaction — Firestore
-    // requires every transaction.get() to run before the first
-    // transaction.update()/set()/delete(); this used to read routeRef AFTER
-    // writing bookingRef below, which throws "Firestore transactions
-    // require all reads to be executed before all writes" for any booking
-    // with a routeId.
-    const routeRef = booking.routeId ? doc(db, "driverRoutes", booking.routeId) : null;
+    const expectedUid = cancelledBy === "driver" ? current.driverId : current.passengerId;
+    if (!expectedUid || expectedUid !== user.uid) {
+      throw new CancellationError("NOT_AUTHORIZED");
+    }
+
+    // Already cancelled — safe no-op, never a second seat restore/notify.
+    if (current.status === "cancelled") return;
+
+    const statusInput: CancellationStatusInput =
+      current.status === "completed"
+        ? "completed"
+        : current.tripStatus && current.tripStatus !== "booked"
+          ? "started"
+          : "booked";
+
+    const eligibility = getCancellationEligibility({
+      role: cancelledBy,
+      date: current.date,
+      time: current.time,
+      status: statusInput,
+    });
+
+    if (!eligibility.canCancel) {
+      throw new CancellationError(eligibilityReasonToErrorCode(eligibility.reason, cancelledBy));
+    }
+
+    const routeRef = current.routeId ? doc(db, "driverRoutes", current.routeId) : null;
     const routeSnap = routeRef ? await transaction.get(routeRef) : null;
 
+    // -----------------------------------------------------------------
+    // PHASE 2 — every write. No transaction.get() below this point.
+    // -----------------------------------------------------------------
     transaction.update(bookingRef, {
       status: "cancelled",
       updatedAt: serverTimestamp(),
     });
+
+    notifyReceiverId = cancelledBy === "passenger" ? current.driverId : current.passengerId;
+    notifyPassengerName = current.passengerName;
+    notifyDriverName = current.driverName;
+    didCancel = true;
 
     if (!routeRef || !routeSnap || !routeSnap.exists()) return;
 
@@ -1094,9 +1201,9 @@ export const cancelGeneralBooking = async (
     const hasWeeklyTrips =
       Array.isArray(routeData.weeklyTrips) && routeData.weeklyTrips.length > 0;
 
-    if (hasWeeklyTrips && booking.date) {
+    if (hasWeeklyTrips && current.date) {
       const weeklyTrips = [...routeData.weeklyTrips];
-      const index = weeklyTrips.findIndex((trip: any) => trip.date === booking.date);
+      const index = weeklyTrips.findIndex((trip: any) => trip.date === current.date);
       if (index === -1) return;
 
       const currentRemaining =
@@ -1107,7 +1214,7 @@ export const cancelGeneralBooking = async (
 
       weeklyTrips[index] = {
         ...weeklyTrips[index],
-        remainingSeats: Math.min(currentRemaining + (booking.seats || 1), totalSeats),
+        remainingSeats: Math.min(currentRemaining + (current.seats || 1), totalSeats),
       };
 
       transaction.update(routeRef, { weeklyTrips, updatedAt: serverTimestamp() });
@@ -1126,24 +1233,24 @@ export const cancelGeneralBooking = async (
     }
   });
 
-  const receiverId = cancelledBy === "passenger" ? booking.driverId : booking.passengerId;
+  // Only notify for a REAL transition — a no-op re-cancel (already-cancelled
+  // early return above) must never send a second cancellation notification.
+  if (!didCancel || !notifyReceiverId) return;
 
-  if (receiverId) {
-    await notify({
-      receiverId,
-      type: "cancelled",
-      title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
-      message:
-        cancelledBy === "passenger"
-          ? `${booking.passengerName || "The passenger"} cancelled their booking`
-          : `${booking.driverName || "The driver"} cancelled your booking`,
-      applicationId: bookingId,
-      bookingId,
-      category: booking.category,
-      status: "cancelled",
-      targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
-    });
-  }
+  await notify({
+    receiverId: notifyReceiverId,
+    type: "cancelled",
+    title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
+    message:
+      cancelledBy === "passenger"
+        ? `${notifyPassengerName || "The passenger"} cancelled their booking`
+        : `${notifyDriverName || "The driver"} cancelled your booking`,
+    applicationId: bookingId,
+    bookingId,
+    category: booking.category,
+    status: "cancelled",
+    targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
+  });
 };
 
 export type DriverTripItem = {

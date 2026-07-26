@@ -35,7 +35,8 @@
       appTitle: "School Return Ride",
       languageSwitchLabel: "Choose language",
       configErrorTitle: "Kiosk Not Configured",
-      configErrorMessage: "This kiosk is not set up yet. Please contact school staff.",
+      configErrorMessage:
+        "This kiosk is not set up yet. Please contact school staff.",
       enterCodeInstruction: "Enter your 6-digit student identification code",
       digitBoxesLabel: "Identification code entry",
       codeProgressTemplate: "{count} of 6 digits entered",
@@ -54,25 +55,31 @@
       plateLabel: "Plate number",
       meetingPointLabel: "Meeting point",
       verificationCodeLabel: "Verification code",
-      verificationCodeInstruction: "Tell this verification code to the driver when entering the vehicle.",
+      verificationCodeInstruction:
+        "Tell this verification code to the driver when entering the vehicle.",
       state_no_return_today: "No return ride is scheduled for today",
       state_searching_driver: "We are still searching for a driver",
-      state_awaiting_confirmation: "A possible ride was found and is awaiting confirmation",
+      state_awaiting_confirmation:
+        "A possible ride was found and is awaiting confirmation",
       state_confirmed: "Return ride confirmed",
       state_driver_on_way: "Your driver is on the way",
       state_arrived_pickup: "Your driver has arrived",
       state_in_progress: "The return ride has started",
       state_completed: "Your return ride has been completed",
       state_cancelled: "The return ride was cancelled",
-      error_not_found: "We could not find today's return ride. Check the code and try again.",
-      error_rate_limited: "Too many attempts. Please wait and ask a school staff member for help.",
-      error_network: "The service is temporarily unavailable. Please try again."
+      error_not_found:
+        "We could not find today's return ride. Check the code and try again.",
+      error_rate_limited:
+        "Too many attempts. Please wait and ask a school staff member for help.",
+      error_network:
+        "The service is temporarily unavailable. Please try again.",
     },
     ar: {
       appTitle: "رحلة العودة المدرسية",
       languageSwitchLabel: "اختر اللغة",
       configErrorTitle: "لم يتم إعداد هذا الجهاز",
-      configErrorMessage: "لم يتم إعداد هذا الجهاز بعد. يرجى التواصل مع طاقم المدرسة.",
+      configErrorMessage:
+        "لم يتم إعداد هذا الجهاز بعد. يرجى التواصل مع طاقم المدرسة.",
       enterCodeInstruction: "أدخل رمز التعريف الخاص بك المكوّن من 6 أرقام",
       digitBoxesLabel: "إدخال رمز التعريف",
       codeProgressTemplate: "تم إدخال {count} من 6 أرقام",
@@ -91,19 +98,23 @@
       plateLabel: "رقم اللوحة",
       meetingPointLabel: "نقطة اللقاء",
       verificationCodeLabel: "رمز التحقق",
-      verificationCodeInstruction: "أخبر السائق برمز التحقق هذا عند الركوب في السيارة.",
+      verificationCodeInstruction:
+        "أخبر السائق برمز التحقق هذا عند الركوب في السيارة.",
       state_no_return_today: "لا توجد رحلة عودة مجدولة لهذا اليوم",
       state_searching_driver: "ما زلنا نبحث عن سائق",
-      state_awaiting_confirmation: "تم العثور على رحلة محتملة وهي بانتظار التأكيد",
+      state_awaiting_confirmation:
+        "تم العثور على رحلة محتملة وهي بانتظار التأكيد",
       state_confirmed: "تم تأكيد رحلة العودة",
       state_driver_on_way: "السائق في الطريق إليك",
       state_arrived_pickup: "لقد وصل السائق",
       state_in_progress: "بدأت رحلة العودة",
       state_completed: "تم إكمال رحلة العودة",
       state_cancelled: "تم إلغاء رحلة العودة",
-      error_not_found: "لم نتمكن من العثور على رحلة العودة لهذا اليوم. تحقق من الرمز وحاول مرة أخرى.",
-      error_rate_limited: "عدد كبير جدًا من المحاولات. يرجى الانتظار وطلب المساعدة من طاقم المدرسة.",
-      error_network: "الخدمة غير متوفرة مؤقتًا. يرجى المحاولة مرة أخرى."
+      error_not_found:
+        "لم نتمكن من العثور على رحلة العودة لهذا اليوم. تحقق من الرمز وحاول مرة أخرى.",
+      error_rate_limited:
+        "عدد كبير جدًا من المحاولات. يرجى الانتظار وطلب المساعدة من طاقم المدرسة.",
+      error_network: "الخدمة غير متوفرة مؤقتًا. يرجى المحاولة مرة أخرى.",
     },
     he: {
       appTitle: "נסיעת החזרה מבית הספר",
@@ -128,7 +139,8 @@
       plateLabel: "מספר לוחית רישוי",
       meetingPointLabel: "נקודת מפגש",
       verificationCodeLabel: "קוד אימות",
-      verificationCodeInstruction: "מסור לנהג את קוד האימות הזה בעת הכניסה לרכב.",
+      verificationCodeInstruction:
+        "מסור לנהג את קוד האימות הזה בעת הכניסה לרכב.",
       state_no_return_today: "לא נקבעה נסיעת חזרה להיום",
       state_searching_driver: "אנחנו עדיין מחפשים נהג",
       state_awaiting_confirmation: "נמצאה נסיעה אפשרית והיא ממתינה לאישור",
@@ -138,15 +150,18 @@
       state_in_progress: "נסיעת החזרה החלה",
       state_completed: "נסיעת החזרה הושלמה",
       state_cancelled: "נסיעת החזרה בוטלה",
-      error_not_found: "לא הצלחנו למצוא נסיעת חזרה להיום. בדוק את הקוד ונסה שוב.",
-      error_rate_limited: "יותר מדי ניסיונות. אנא המתן ובקש עזרה מצוות בית הספר.",
-      error_network: "השירות אינו זמין כרגע. אנא נסה שוב."
+      error_not_found:
+        "לא הצלחנו למצוא נסיעת חזרה להיום. בדוק את הקוד ונסה שוב.",
+      error_rate_limited:
+        "יותר מדי ניסיונות. אנא המתן ובקש עזרה מצוות בית הספר.",
+      error_network: "השירות אינו זמין כרגע. אנא נסה שוב.",
     },
     ru: {
       appTitle: "Поездка домой из школы",
       languageSwitchLabel: "Выберите язык",
       configErrorTitle: "Киоск не настроен",
-      configErrorMessage: "Этот киоск ещё не настроен. Пожалуйста, обратитесь к сотруднику школы.",
+      configErrorMessage:
+        "Этот киоск ещё не настроен. Пожалуйста, обратитесь к сотруднику школы.",
       enterCodeInstruction: "Введите свой 6-значный идентификационный код",
       digitBoxesLabel: "Ввод идентификационного кода",
       codeProgressTemplate: "Введено {count} из 6 цифр",
@@ -165,20 +180,24 @@
       plateLabel: "Номер машины",
       meetingPointLabel: "Место встречи",
       verificationCodeLabel: "Код подтверждения",
-      verificationCodeInstruction: "Сообщите водителю этот код подтверждения при посадке в машину.",
+      verificationCodeInstruction:
+        "Сообщите водителю этот код подтверждения при посадке в машину.",
       state_no_return_today: "На сегодня поездка домой не запланирована",
       state_searching_driver: "Мы всё ещё ищем водителя",
-      state_awaiting_confirmation: "Найдена возможная поездка, ожидает подтверждения",
+      state_awaiting_confirmation:
+        "Найдена возможная поездка, ожидает подтверждения",
       state_confirmed: "Поездка домой подтверждена",
       state_driver_on_way: "Водитель уже едет",
       state_arrived_pickup: "Водитель прибыл",
       state_in_progress: "Поездка домой началась",
       state_completed: "Поездка домой завершена",
       state_cancelled: "Поездка домой отменена",
-      error_not_found: "Не удалось найти поездку домой на сегодня. Проверьте код и попробуйте снова.",
-      error_rate_limited: "Слишком много попыток. Подождите и обратитесь за помощью к сотруднику школы.",
-      error_network: "Сервис временно недоступен. Попробуйте снова."
-    }
+      error_not_found:
+        "Не удалось найти поездку домой на сегодня. Проверьте код и попробуйте снова.",
+      error_rate_limited:
+        "Слишком много попыток. Подождите и обратитесь за помощью к сотруднику школы.",
+      error_network: "Сервис временно недоступен. Попробуйте снова.",
+    },
   };
 
   var SUPPORTED_LANGS = ["ar", "he", "en", "ru"];
@@ -187,7 +206,7 @@
   var LOOKUP_URL = "/school-kiosk/lookup";
   var CODE_LENGTH = 6;
   var MASK_DELAY_MS = 700;
-  var COUNTDOWN_SECONDS = 30;
+  var COUNTDOWN_SECONDS = 60;
   var FETCH_TIMEOUT_MS = 15000;
   // "Hidden long enough" before a focus-regain forces a reset — a brief tab
   // switch/notification glance is fine; anything longer and a shared kiosk
@@ -248,9 +267,10 @@
   }
 
   function detectDefaultLanguage() {
-    var candidates = navigator.languages && navigator.languages.length
-      ? navigator.languages
-      : [navigator.language || ""];
+    var candidates =
+      navigator.languages && navigator.languages.length
+        ? navigator.languages
+        : [navigator.language || ""];
 
     for (var i = 0; i < candidates.length; i += 1) {
       var code2 = String(candidates[i]).toLowerCase().split("-")[0];
@@ -289,7 +309,7 @@
     console.log("SCHOOL_KIOSK_SCHOOL_ID_CHECK", {
       present: present,
       valid: valid,
-      length: raw.length
+      length: raw.length,
     });
 
     return valid ? raw : null;
@@ -300,7 +320,10 @@
     currentLang = lang;
 
     document.documentElement.setAttribute("lang", lang);
-    document.documentElement.setAttribute("dir", RTL_LANGS[lang] ? "rtl" : "ltr");
+    document.documentElement.setAttribute(
+      "dir",
+      RTL_LANGS[lang] ? "rtl" : "ltr",
+    );
 
     var i18nEls = document.querySelectorAll("[data-i18n]");
     for (var i = 0; i < i18nEls.length; i += 1) {
@@ -311,13 +334,19 @@
     var ariaEls = document.querySelectorAll("[data-i18n-aria-label]");
     for (var j = 0; j < ariaEls.length; j += 1) {
       var ariaEl = ariaEls[j];
-      ariaEl.setAttribute("aria-label", t(ariaEl.getAttribute("data-i18n-aria-label")));
+      ariaEl.setAttribute(
+        "aria-label",
+        t(ariaEl.getAttribute("data-i18n-aria-label")),
+      );
     }
 
     var langOptions = document.querySelectorAll(".lang-menu__option");
     for (var k = 0; k < langOptions.length; k += 1) {
       var opt = langOptions[k];
-      opt.setAttribute("aria-checked", opt.getAttribute("data-lang") === lang ? "true" : "false");
+      opt.setAttribute(
+        "aria-checked",
+        opt.getAttribute("data-lang") === lang ? "true" : "false",
+      );
     }
 
     announceProgress();
@@ -396,7 +425,10 @@
   }
 
   function announceProgress() {
-    codeProgressAnnouncer.textContent = t("codeProgressTemplate").replace("{count}", String(code.length));
+    codeProgressAnnouncer.textContent = t("codeProgressTemplate").replace(
+      "{count}",
+      String(code.length),
+    );
   }
 
   function updateSubmitEnabled() {
@@ -458,15 +490,51 @@
   // are always shown as inert plain text, never executed.
   // -----------------------------------------------------------------------
   var STATE_META = {
-    no_return_today: { headingKey: "state_no_return_today", pillClass: "danger", icon: "○" },
-    searching_driver: { headingKey: "state_searching_driver", pillClass: "ongoing", icon: "…" },
-    awaiting_confirmation: { headingKey: "state_awaiting_confirmation", pillClass: "ongoing", icon: "?" },
-    confirmed: { headingKey: "state_confirmed", pillClass: "success", icon: "✓" },
-    driver_on_way: { headingKey: "state_driver_on_way", pillClass: "ongoing", icon: "→" },
-    arrived_pickup: { headingKey: "state_arrived_pickup", pillClass: "ongoing", icon: "●" },
-    in_progress: { headingKey: "state_in_progress", pillClass: "ongoing", icon: "▶" },
-    completed: { headingKey: "state_completed", pillClass: "success", icon: "✓" },
-    cancelled: { headingKey: "state_cancelled", pillClass: "danger", icon: "✕" }
+    no_return_today: {
+      headingKey: "state_no_return_today",
+      pillClass: "danger",
+      icon: "○",
+    },
+    searching_driver: {
+      headingKey: "state_searching_driver",
+      pillClass: "ongoing",
+      icon: "…",
+    },
+    awaiting_confirmation: {
+      headingKey: "state_awaiting_confirmation",
+      pillClass: "ongoing",
+      icon: "?",
+    },
+    confirmed: {
+      headingKey: "state_confirmed",
+      pillClass: "success",
+      icon: "✓",
+    },
+    driver_on_way: {
+      headingKey: "state_driver_on_way",
+      pillClass: "ongoing",
+      icon: "→",
+    },
+    arrived_pickup: {
+      headingKey: "state_arrived_pickup",
+      pillClass: "ongoing",
+      icon: "●",
+    },
+    in_progress: {
+      headingKey: "state_in_progress",
+      pillClass: "ongoing",
+      icon: "▶",
+    },
+    completed: {
+      headingKey: "state_completed",
+      pillClass: "success",
+      icon: "✓",
+    },
+    cancelled: {
+      headingKey: "state_cancelled",
+      pillClass: "danger",
+      icon: "✕",
+    },
   };
 
   function addRow(container, labelKey, value) {
@@ -541,8 +609,10 @@
         var vehicleParts = [];
         if (ride.vehicle.make) vehicleParts.push(ride.vehicle.make);
         if (ride.vehicle.color) vehicleParts.push(ride.vehicle.color);
-        if (vehicleParts.length > 0) addRow(rows, "vehicleLabel", vehicleParts.join(" · "));
-        if (ride.vehicle.plateNumber) addRow(rows, "plateLabel", ride.vehicle.plateNumber);
+        if (vehicleParts.length > 0)
+          addRow(rows, "vehicleLabel", vehicleParts.join(" · "));
+        if (ride.vehicle.plateNumber)
+          addRow(rows, "plateLabel", ride.vehicle.plateNumber);
       }
 
       if (ride.meetingPoint) {
@@ -573,7 +643,10 @@
       resultCard.appendChild(box);
     }
 
-    refreshBtn.hidden = !(data.state === "searching_driver" || data.state === "awaiting_confirmation");
+    refreshBtn.hidden = !(
+      data.state === "searching_driver" ||
+      data.state === "awaiting_confirmation"
+    );
 
     showScreen("result");
   }
@@ -597,7 +670,7 @@
   function updateCountdownText() {
     countdownTextEl.textContent = t("countdownTemplate").replace(
       "{seconds}",
-      String(Math.max(countdownRemaining, 0))
+      String(Math.max(countdownRemaining, 0)),
     );
   }
 
@@ -663,7 +736,7 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ returnCode: returnCodeValue, schoolId: schoolId }),
-      signal: controller.signal
+      signal: controller.signal,
     })
       .then(function (response) {
         if (response.status === 429) {
@@ -767,7 +840,8 @@
       toggleLangMenu();
     });
 
-    var langOptionBtns = langMenuDropdown.querySelectorAll(".lang-menu__option");
+    var langOptionBtns =
+      langMenuDropdown.querySelectorAll(".lang-menu__option");
     for (var j = 0; j < langOptionBtns.length; j += 1) {
       langOptionBtns[j].addEventListener("click", function (event) {
         applyLanguage(event.currentTarget.getAttribute("data-lang"));

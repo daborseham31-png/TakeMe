@@ -412,7 +412,14 @@ export default function DirectionSearchForm() {
       };
 
       const direction = mode === "return" ? "from_school" : "to_school";
-      const requestedTime = mode === "return" ? finishTime : morningTime;
+      // The actual time to search/notify against for a return leg is the
+      // (first) child's OWN return time — set per-row since the per-child
+      // return system replaced the single shared return-time field. Reading
+      // the unused `finishTime` constant here instead (as this used to,
+      // before that change) sends a stale default time no child actually
+      // selected, which can miss an otherwise-matching driver trip entirely.
+      const requestedTime =
+        mode === "return" ? children[0]?.returnTime || finishTime : morningTime;
 
       // One entry per seat/child (AGENTS.md #3) — every child is now always
       // a real saved-profile selection (childId always present, validated
@@ -436,7 +443,11 @@ export default function DirectionSearchForm() {
         );
 
         returnParams = {
-          returnRequestedTime: finishTime,
+          // Same fix as the standalone "return" mode's requestedTime above —
+          // the round trip's return leg must search against the first
+          // child's own selected return time, not the unused finishTime
+          // constant.
+          returnRequestedTime: children[0]?.returnTime || finishTime,
           returnToArea: returnToAddress,
           returnToLat: returnToCoords ? String(returnToCoords.latitude) : "",
           returnToLng: returnToCoords ? String(returnToCoords.longitude) : "",

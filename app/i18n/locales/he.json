@@ -1080,7 +1080,8 @@
     "noUnbookedTrips": "אין נסיעות ללא הזמנות.",
     "expiredNoBookingsLabel": "פג תוקף — ללא הזמנות",
     "cancelledTripsSection": "בוטלו",
-    "cannotCancelTripWithinFiveHours": "אי אפשר לבטל את הנסיעה פחות מ-5 שעות לפני היציאה."
+    "cannotCancelTripWithinFiveHours": "אי אפשר לבטל את הנסיעה פחות מ-5 שעות לפני היציאה.",
+    "cannotCancelInvalidDeparture": "התאריך או השעה של הנסיעה הזו אינם זמינים, ולכן לא ניתן לבטל אותה כאן כרגע."
   },
   "school": {
     "headerTitle": "נסיעת בית ספר",
