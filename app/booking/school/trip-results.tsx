@@ -416,7 +416,11 @@ export default function SchoolTripResultsScreen() {
       Alert.alert(t("schoolTrip.waitingRequestCreatedTitle"), t("schoolTrip.waitingRequestCreatedMessage"));
       setShowAlternatives(false);
     } catch (error: any) {
-      Alert.alert(t("common.error"), error?.message || t("errors.generic"));
+      // Never surface a raw SDK error (untranslated, and often a bare
+      // Firestore code) directly to the user — log it safely instead and
+      // always show a translated, generic message.
+      console.log("Notify-me request failed:", error?.code || error?.message || "unknown");
+      Alert.alert(t("common.error"), t("errors.generic"));
     } finally {
       setCreatingRequest(false);
     }
@@ -483,7 +487,13 @@ export default function SchoolTripResultsScreen() {
       setChildStates((prev) =>
         prev.map((c) => (c.entry.localId === cs.entry.localId ? { ...c, creatingRequest: false } : c)),
       );
-      Alert.alert(t("common.error"), error?.message || t("errors.generic"));
+      // Same rule as handleNotifyMe above — never a raw SDK error, always a
+      // translated generic message, with the real cause logged safely.
+      console.log(
+        `Notify-me request failed for child ${cs.entry.localId}:`,
+        error?.code || error?.message || "unknown",
+      );
+      Alert.alert(t("common.error"), t("errors.generic"));
     }
   };
 

@@ -221,6 +221,36 @@ service cloud.firestore {
     // Everything else the app already uses — authenticated read/write,
     // matching today's effective (rules-free) behavior. See the note at
     // the top of this file about tightening these per-collection later.
+    //
+    // bookings / driverRoutes / workJobs / errandJobs specifically were
+    // re-audited for the cancellation-enforcement follow-up (write call
+    // sites grepped across the whole app) and deliberately LEFT BROAD here
+    // — narrowing them is a real blocker, not an oversight:
+    //   - driverRoutes/workJobs/errandJobs must stay broadly READABLE: any
+    //     signed-in user browsing/searching for a ride or job (driverresults.tsx,
+    //     work-errand's browse screens) reads OTHER users' listings, never
+    //     just their own.
+    //   - Both collections also take legitimate WRITES from a passenger who
+    //     doesn't own the listing (confirmed: cancelGeneralBooking/
+    //     cancelApplication restore seat counts on a driverRoutes/workJobs
+    //     doc the CANCELLING PASSENGER doesn't own) — an ownership-only
+    //     (driverId/employerId-only) rule would break that seat-restore path.
+    //     Scoping this safely needs the exact field-transition shape of
+    //     EVERY write (creation in weeklyBookingLib.ts, RideForm.tsx,
+    //     driver/create/work.tsx, driver/create/errand.tsx; the full booking/
+    //     accept/start/finish lifecycle in ride-navigation.tsx and admin
+    //     overrides in admin/adminRidesLib.ts / adminBookingsLib.ts), none of
+    //     which has been audited here — left unchanged rather than guessed.
+    //   - bookings similarly takes writes from ride-navigation.tsx (trip
+    //     lifecycle), ride-payment.tsx, roadside-help/payment.tsx, and
+    //     admin/bookings/[id].tsx, none of which has been audited here.
+    // The 2-hour/5-hour cancellation window itself is NOT enforced here
+    // either way — Firestore Rules cannot reliably parse this app's
+    // "YYYY-MM-DD"/"HH:mm" string fields (inconsistent field names per
+    // category, no rules-language date arithmetic) — that check lives
+    // exclusively in the data layer (cancelRideBooking/cancelGeneralBooking/
+    // cancelApplication/cancelSchoolBooking/cancelSchoolTrip), which now all
+    // re-read the current document fresh before acting on it.
     // ---------------------------------------------------------------
     match /bookings/{bookingId} {
       allow read, write: if isSignedIn();
@@ -238,12 +268,49 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    // workApplications/errandApplications, unlike the four collections
+    // above, WERE fully auditable: createApplication (workErrandLib.ts) is
+    // the ONLY place either collection is created (grepped across the whole
+    // app — driver/create/work.tsx, driver/create/errand.tsx, and every
+    // work-errand screen only ever call into workErrandLib.ts's exported
+    // functions, never addDoc/updateDoc these collections directly), and
+    // every one of accept/reject/confirmPayment/start/arrive/finish/pay/
+    // rate/cancel only ever touches status/payment/rating/timestamp fields
+    // — never applicantId/employerId (work) or passengerId/driverId
+    // (errand), which are set once at creation and never reassigned. That
+    // makes a plain ownership check (never a full field-transition
+    // validation) safe: only the applicant/customer or the employer/driver
+    // on THIS SPECIFIC application may read or write it — never an
+    // unrelated third signed-in user, which is what the previous
+    // `if isSignedIn()` actually allowed.
     match /workApplications/{applicationId} {
-      allow read, write: if isSignedIn();
+      allow read: if isAdmin() || (isSignedIn() &&
+        (resource.data.applicantId == request.auth.uid ||
+          resource.data.employerId == request.auth.uid));
+
+      allow create: if isSignedIn() &&
+        request.resource.data.applicantId == request.auth.uid;
+
+      allow update: if isSignedIn() &&
+        (resource.data.applicantId == request.auth.uid ||
+          resource.data.employerId == request.auth.uid);
+
+      allow delete: if false;
     }
 
     match /errandApplications/{applicationId} {
-      allow read, write: if isSignedIn();
+      allow read: if isAdmin() || (isSignedIn() &&
+        (resource.data.passengerId == request.auth.uid ||
+          resource.data.driverId == request.auth.uid));
+
+      allow create: if isSignedIn() &&
+        request.resource.data.passengerId == request.auth.uid;
+
+      allow update: if isSignedIn() &&
+        (resource.data.passengerId == request.auth.uid ||
+          resource.data.driverId == request.auth.uid);
+
+      allow delete: if false;
     }
 
     match /roadsideRequests/{requestId} {

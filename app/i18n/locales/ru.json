@@ -1121,7 +1121,8 @@
     "noUnbookedTrips": "Нет поездок без бронирований.",
     "expiredNoBookingsLabel": "Истекла — нет бронирований",
     "cancelledTripsSection": "Отменённые",
-    "cannotCancelTripWithinFiveHours": "Нельзя отменить эту поездку менее чем за 5 часов до отправления."
+    "cannotCancelTripWithinFiveHours": "Нельзя отменить эту поездку менее чем за 5 часов до отправления.",
+    "cannotCancelInvalidDeparture": "Дата или время этой поездки недоступны, поэтому отменить её здесь сейчас нельзя."
   },
   "school": {
     "headerTitle": "Школьная поездка",

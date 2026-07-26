@@ -57,6 +57,18 @@ export default function DateInput({
     ? parseDateInput(cleanDate) || new Date()
     : new Date();
 
+  // parseDateInput always returns local midnight (00:00:00) for `value` —
+  // but a bare `new Date()` default here carries the CURRENT time-of-day.
+  // When today is selected, comparing pickerDate (00:00:00) against a
+  // minimumDate of "right now" (e.g. 14:32) reads as "before the minimum"
+  // even though it's the same calendar day, and some native date-picker
+  // implementations respond by silently rolling the shown/selected day
+  // forward to tomorrow. Zeroing the default minimumDate's time-of-day too
+  // keeps both values anchored to the same local midnight so today is never
+  // pushed to tomorrow just because it's already afternoon.
+  const defaultMinimumDate = new Date();
+  defaultMinimumDate.setHours(0, 0, 0, 0);
+
   return (
     <>
       <PhysicalDirectionalBlockText style={styles.label}>{label}</PhysicalDirectionalBlockText>
@@ -92,7 +104,7 @@ export default function DateInput({
           value={pickerDate}
           mode="date"
           display="default"
-          minimumDate={minimumDate || new Date()}
+          minimumDate={minimumDate || defaultMinimumDate}
           maximumDate={maximumDate}
           onChange={(_event: any, selectedDate?: Date) => {
             setShowPicker(false);

@@ -44,6 +44,11 @@ import {
   PASSENGER_CANCEL_LOCK_HOURS,
   TripTrackingStatus,
 } from "./bookingsLib";
+import {
+  CancellationError,
+  CancellationRole,
+  getCancellationEligibility,
+} from "./cancellationEligibility";
 import { normalizeTime, timeToMinutes } from "../driver/create/driverHelpers";
 import { calculateDistanceKm } from "./homeFeedLib";
 import { notify } from "./work-errand/workErrandLib";
@@ -1103,21 +1108,35 @@ export const getSchoolCancelBlockedReason = (
   departureTime: string,
   tripStatus: TripTrackingStatus,
   hoursBeforeDeparture: number = PASSENGER_CANCEL_LOCK_HOURS,
+  now: Date = new Date(),
 ): string | null => {
   if (tripStatus !== "booked") {
     return i18n.t("schoolTrip.cannotCancelDriverEnRoute");
   }
 
-  const start = new Date(`${date}T${departureTime || "00:00"}:00`);
-  if (Number.isNaN(start.getTime())) return null;
+  // hoursBeforeDeparture >= DRIVER_CANCEL_LOCK_HOURS is how every existing
+  // caller (cancelSchoolTrip passes DRIVER_CANCEL_LOCK_HOURS explicitly;
+  // cancelSchoolBooking/the UI default to the passenger window) already
+  // signals "the driver is cancelling" — kept as-is so neither call site
+  // needs to change.
+  const role: CancellationRole =
+    hoursBeforeDeparture >= DRIVER_CANCEL_LOCK_HOURS ? "driver" : "passenger";
 
-  const lockAt = new Date(
-    start.getTime() - hoursBeforeDeparture * 60 * 60 * 1000,
-  );
+  const eligibility = getCancellationEligibility({
+    role,
+    date,
+    time: departureTime,
+    status: "booked",
+    now,
+  });
 
-  if (Date.now() < lockAt.getTime()) return null;
+  if (eligibility.canCancel) return null;
 
-  return hoursBeforeDeparture >= DRIVER_CANCEL_LOCK_HOURS
+  if (eligibility.reason === "invalid_departure") {
+    return i18n.t("booking.cannotCancelInvalidDeparture");
+  }
+
+  return role === "driver"
     ? i18n.t("booking.cannotCancelTripWithinFiveHours")
     : i18n.t("schoolTrip.cannotCancelWithinTwoHours");
 };
@@ -1134,19 +1153,33 @@ export const getSchoolCancelBlockedReason = (
 // enumerates/updates bookings itself (that matching/notification logic runs
 // server-side, per the driver-cancellation-replacement feature).
 export const cancelSchoolTrip = async (tripId: string, reason?: string) => {
+  const user = auth.currentUser;
+  if (!user) throw new CancellationError("NOT_AUTHORIZED");
+
   const tripRef = doc(db, SCHOOL_TRIPS_COLLECTION, tripId);
   const tripSnap = await getDoc(tripRef);
 
-  if (tripSnap.exists()) {
-    const trip = normalizeSchoolTrip(tripSnap.id, tripSnap.data());
-    const blocked = getSchoolCancelBlockedReason(
-      trip.date,
-      trip.departureTime,
-      trip.tripStatus,
-      DRIVER_CANCEL_LOCK_HOURS,
-    );
-    if (blocked) throw new Error(blocked);
+  if (!tripSnap.exists()) throw new CancellationError("DOCUMENT_NOT_FOUND");
+
+  const trip = normalizeSchoolTrip(tripSnap.id, tripSnap.data());
+
+  // Ownership was previously never re-checked here at all — only the UI
+  // happened to show a driver only their own trips. Re-verified fresh
+  // against the just-read document, never trusted from the caller.
+  if (trip.driverId !== user.uid) {
+    throw new CancellationError("NOT_AUTHORIZED");
   }
+
+  // Already cancelled — safe no-op, never a second write/notification chain.
+  if (trip.status === "cancelled") return;
+
+  const blocked = getSchoolCancelBlockedReason(
+    trip.date,
+    trip.departureTime,
+    trip.tripStatus,
+    DRIVER_CANCEL_LOCK_HOURS,
+  );
+  if (blocked) throw new Error(blocked);
 
   await updateDoc(tripRef, {
     status: "cancelled" as SchoolTripStatus,
@@ -2075,6 +2108,15 @@ export const cancelSchoolBooking = async (bookingId: string) => {
   let direction: SchoolTripDirection = "to_school";
 
   await runTransaction(db, async (transaction) => {
+    // -----------------------------------------------------------------
+    // PHASE 1 — reads only. Firestore requires every transaction.get to
+    // run before any transaction.set/update/delete in the same
+    // transaction. The trip doc's ref depends on the booking's own
+    // tripId, so it can only be built after the booking read below, but
+    // it must still be READ here — before the booking's own write —
+    // rather than after it (which is what previously tripped "Firestore
+    // transactions require all reads to be executed before all writes").
+    // -----------------------------------------------------------------
     const bookingSnap = await transaction.get(bookingRef);
 
     if (!bookingSnap.exists()) {
@@ -2087,6 +2129,8 @@ export const cancelSchoolBooking = async (bookingId: string) => {
       throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
     }
 
+    // Already cancelled — return before any read/write below so a second
+    // cancel attempt (e.g. a double tap) can never restore seats twice.
     if (booking.status === "cancelled") {
       return;
     }
@@ -2098,6 +2142,13 @@ export const cancelSchoolBooking = async (bookingId: string) => {
     );
     if (blocked) throw new Error(blocked);
 
+    const tripRef = doc(db, SCHOOL_TRIPS_COLLECTION, booking.tripId);
+    const tripSnap = await transaction.get(tripRef);
+
+    // -----------------------------------------------------------------
+    // PHASE 2 — writes only. Every transaction.get has already resolved
+    // above; nothing past this point may call transaction.get again.
+    // -----------------------------------------------------------------
     tripId = booking.tripId;
     driverId = booking.driverId;
     passengerName = booking.passengerName;
@@ -2109,9 +2160,6 @@ export const cancelSchoolBooking = async (bookingId: string) => {
       verificationStatus: "expired" as VerificationStatus,
       updatedAt: serverTimestamp(),
     });
-
-    const tripRef = doc(db, SCHOOL_TRIPS_COLLECTION, booking.tripId);
-    const tripSnap = await transaction.get(tripRef);
 
     if (tripSnap.exists()) {
       const trip = normalizeSchoolTrip(tripSnap.id, tripSnap.data());
@@ -2684,15 +2732,24 @@ export const findDuplicateRideRequest = async (
 
   const snap = await getDocs(q);
 
+  // Duplicate key is parentId + childId + schoolId + direction + date +
+  // requestedTime (parentId/schoolId/date are already enforced by the query
+  // above; direction is always "from_school" for this collection). childId
+  // — not childEntryId — is what makes this stable ACROSS separate search
+  // sessions: childEntryId is a fresh, session-local id minted every time
+  // DirectionSearchForm mounts (see its makeLocalId), so matching on it
+  // could never catch a real duplicate from an earlier session. Only a
+  // legacy/childless request (no linked saved-child profile at all) falls
+  // back to childEntryId, and only ever matches another childless request.
   const match = snap.docs
     .map((d) => normalizeRideRequest(d.id, d.data()))
-    .find(
-      (existing) =>
-        existing.childEntryId === input.childEntryId &&
-        existing.requestedTime === input.requestedTime &&
-        existing.toArea === input.toArea &&
-        existing.seats === input.seats,
-    );
+    .find((existing) => {
+      const sameChild = input.childId
+        ? existing.childId === input.childId
+        : !existing.childId && existing.childEntryId === input.childEntryId;
+
+      return sameChild && existing.requestedTime === input.requestedTime;
+    });
 
   return match || null;
 };

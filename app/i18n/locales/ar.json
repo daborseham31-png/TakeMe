@@ -1128,7 +1128,8 @@
     "noUnbookedTrips": "لا توجد رحلات بدون حجوزات.",
     "expiredNoBookingsLabel": "منتهية — بدون حجوزات",
     "cancelledTripsSection": "ملغاة",
-    "cannotCancelTripWithinFiveHours": "لا يمكنك إلغاء هذه الرحلة قبل أقل من 5 ساعات من موعد الانطلاق."
+    "cannotCancelTripWithinFiveHours": "لا يمكنك إلغاء هذه الرحلة قبل أقل من 5 ساعات من موعد الانطلاق.",
+    "cannotCancelInvalidDeparture": "تاريخ أو وقت هذه الرحلة غير متاح، لذا لا يمكن إلغاؤها من هنا الآن."
   },
   "school": {
     "headerTitle": "رحلة مدرسية",

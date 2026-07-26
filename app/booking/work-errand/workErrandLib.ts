@@ -33,6 +33,16 @@ import { auth, db } from "../../../firebase";
 // Plain lib module (not a component) — uses the initialized global i18next
 // instance directly rather than the useTranslation() hook.
 import i18n from "../../i18n";
+// Imported from the dependency-free leaf module (not from "../bookingsLib")
+// — bookingsLib.ts itself imports `notify` from THIS file, so importing the
+// eligibility helper back from bookingsLib.ts here would be a circular
+// import between the two.
+import {
+  CancellationError,
+  CancellationStatusInput,
+  eligibilityReasonToErrorCode,
+  getCancellationEligibility,
+} from "../cancellationEligibility";
 
 export type WorkErrandKind = "work" | "errand";
 
@@ -905,146 +915,135 @@ const UNCANCELLABLE: FlowStatus[] = [
   "cancelled",
 ];
 
-// Returns a reason string when cancellation is NOT allowed, or null when it is.
+// Returns a reason string when cancellation is NOT allowed, or null when it
+// is. `cancelledBy` picks the window: the driver/provider gets the stricter
+// 5-hour lock (cancelling can leave a customer/employer without a match),
+// the passenger/customer keeps the 2-hour lock — same driver/passenger split
+// every other category uses (see cancellationEligibility.ts). Previously this
+// applied a flat 2-hour window to BOTH roles.
 export const cancelBlockedReason = (
   item: NormalizedApplication,
+  cancelledBy: "passenger" | "driver" = "passenger",
   now: Date = new Date(),
 ): string | null => {
   if (UNCANCELLABLE.includes(item.status)) {
     return i18n.t("workErrand.cannotCancelAnymore");
   }
 
-  const start = toDateTime(item.date, item.startTime);
-  if (!start) return null; // No valid start time → allow cancel.
+  const eligibility = getCancellationEligibility({
+    role: cancelledBy === "driver" ? "driver" : "passenger",
+    date: item.date,
+    time: item.startTime,
+    status: "booked",
+    now,
+  });
 
-  const twoHoursBefore = new Date(start.getTime() - 2 * 60 * 60 * 1000);
+  if (eligibility.canCancel) return null;
 
-  if (now.getTime() >= twoHoursBefore.getTime()) {
-    return i18n.t("workErrand.cannotCancelWithinTwoHours");
+  if (eligibility.reason === "invalid_departure") {
+    // No valid start time to compare against — previously silently allowed
+    // ("No valid start time → allow cancel"); now disabled rather than
+    // trusting an unverifiable departure (see getCancellationEligibility's
+    // own contract).
+    return i18n.t("booking.cannotCancelInvalidDeparture");
   }
 
-  return null;
+  return cancelledBy === "driver"
+    ? i18n.t("booking.cannotCancelTripWithinFiveHours")
+    : i18n.t("workErrand.cannotCancelWithinTwoHours");
 };
 
+// `data` is used ONLY to locate the doc (via COLLECTION[kind]/id, which
+// don't need it at all — kept for call-site compatibility). Ownership,
+// status, date/startTime, and the accepted-work seat-restore math are ALL
+// re-derived from a freshly-read transaction.get() below, never trusted from
+// this possibly-stale caller-held card. Throws a CancellationError with a
+// stable code (never a raw Firestore/SDK error) — see bookingsLib.ts's
+// translateCancellationError for the UI-facing message mapping.
+//
+// Folds in what used to be the separate cancelAcceptedWorkRequest helper —
+// both branches (plain cancel vs. accepted-work-with-seat-restore) now share
+// ONE transaction/one fresh read of the application doc, rather than two
+// separate re-implementations that could disagree on what "fresh" means.
 export const cancelApplication = async (
   kind: WorkErrandKind,
   id: string,
   data: NormalizedApplication,
   cancelledBy: "passenger" | "driver",
   reason?: string,
-) => {
-  const blocked = cancelBlockedReason(data);
-  if (blocked) throw new Error(blocked);
+): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new CancellationError("NOT_AUTHORIZED");
 
-  // Only an ACCEPTED work request ever took a place out of the job's
-  // capacity — a still-pending one never touched remainingSeats, so
-  // cancelling it needs no restore. Errand has no capacity concept at all.
-  if (kind === "work" && data.status === "accepted" && data.sourceId) {
-    await cancelAcceptedWorkRequest(id, data, cancelledBy, reason);
-  } else {
-    await updateDoc(doc(db, COLLECTION[kind], id), {
-      status: "cancelled" as FlowStatus,
-      cancelledAt: serverTimestamp(),
-      cancelledBy,
-      cancelReason: reason || null,
-      updatedAt: serverTimestamp(),
-    });
-  }
+  const appRef = doc(db, COLLECTION[kind], id);
 
-  // Note: recording a driver-cancellation violation for this application is
-  // done by the CALLER (app/(tabs)/bookings.tsx's handleAppCancel), not here
-  // — driverViolationsLib.ts itself imports notify() from this same file, so
-  // calling it from inside cancelApplication would create a circular import.
-
-  // Notify the other side.
-  const otherId = cancelledBy === "passenger" ? data.providerId : data.customerId;
-  await notify({
-    receiverId: otherId,
-    type: "cancelled",
-    title: "Booking cancelled",
-    message: `The ${cancelledBy} cancelled "${data.title}".`,
-    applicationId: id,
-    kind,
-    category: data.category,
-    status: "cancelled",
-  });
-};
-
-// ---------------------------------------------------------------------------
-// Work only — cancelling an already-accepted request must give the place
-// back to the job (remainingSeats +1, capped at totalSeats so it can never
-// overflow) and re-open the job if it had just become full. Wrapped in a
-// transaction for the same overbooking-safety reason as acceptWorkRequest.
-// ---------------------------------------------------------------------------
-
-const cancelAcceptedWorkRequest = async (
-  id: string,
-  data: NormalizedApplication,
-  cancelledBy: "passenger" | "driver",
-  reason?: string,
-) => {
-  const appRef = doc(db, "workApplications", id);
-  const jobRef = doc(db, "workJobs", data.sourceId);
+  let notifyOtherId = "";
+  let notifyTitle = "";
+  let notifyCategory = "";
+  let didCancel = false;
 
   await runTransaction(db, async (transaction) => {
+    // -----------------------------------------------------------------
+    // PHASE 1 — every read, including the conditional workJobs read below
+    // (still a plain transaction.get(), just sequenced after the first).
+    // -----------------------------------------------------------------
     const appSnap = await transaction.get(appRef);
+    if (!appSnap.exists()) throw new CancellationError("DOCUMENT_NOT_FOUND");
 
-    if (!appSnap.exists()) {
-      throw new Error(i18n.t("workErrand.requestNotFound"));
+    const rawAppData: any = appSnap.data();
+    const current = normalizeApplication(appSnap.id, rawAppData, kind);
+
+    const expectedUid = cancelledBy === "driver" ? current.providerId : current.customerId;
+    if (!expectedUid || expectedUid !== user.uid) {
+      throw new CancellationError("NOT_AUTHORIZED");
     }
 
-    const appData: any = appSnap.data();
+    const statusInput: CancellationStatusInput =
+      current.status === "cancelled"
+        ? "cancelled"
+        : current.status === "completed"
+          ? "completed"
+          : UNCANCELLABLE.includes(current.status)
+            ? // on_the_way / arrived / in_progress / rejected — already too
+              // far along (or a declined request) to ever be cancelled.
+              "started"
+            : "booked";
 
-    if (appData.status !== "accepted") {
-      // Already moved on (finished/cancelled/etc. by another action) —
-      // nothing to restore, just record the cancellation.
-      transaction.update(appRef, {
-        status: "cancelled" as FlowStatus,
-        cancelledAt: serverTimestamp(),
-        cancelledBy,
-        cancelReason: reason || null,
-        updatedAt: serverTimestamp(),
-      });
-      return;
+    // Already cancelled — safe no-op, never a second seat restore/notify.
+    if (statusInput === "cancelled") return;
+
+    if (statusInput !== "booked") {
+      throw new CancellationError(
+        eligibilityReasonToErrorCode(
+          statusInput === "completed" ? "completed" : "already_started",
+          cancelledBy === "driver" ? "driver" : "passenger",
+        ),
+      );
     }
 
-    const jobSnap = await transaction.get(jobRef);
+    const eligibility = getCancellationEligibility({
+      role: cancelledBy === "driver" ? "driver" : "passenger",
+      date: current.date,
+      time: current.startTime,
+      status: "booked",
+    });
 
-    if (jobSnap.exists()) {
-      const jobData: any = jobSnap.data();
-
-      const totalSeats = Number(
-        jobData.totalSeats ?? jobData.seats ?? jobData.workersNeeded ?? 1,
+    if (!eligibility.canCancel) {
+      throw new CancellationError(
+        eligibilityReasonToErrorCode(eligibility.reason, cancelledBy === "driver" ? "driver" : "passenger"),
       );
-
-      const currentRemaining =
-        typeof jobData.remainingSeats === "number" ? jobData.remainingSeats : 0;
-
-      const requestedSeats = Math.max(
-        1,
-        Number(appData.requestedSeats || appData.seats || 1),
-      );
-
-      // Never let remainingSeats climb above totalSeats.
-      const nextRemaining = Math.min(
-        currentRemaining + requestedSeats,
-        totalSeats,
-      );
-      const nextAcceptedCount = Math.max(
-        Number(jobData.acceptedWorkersCount || 0) - 1,
-        0,
-      );
-
-      transaction.update(jobRef, {
-        remainingSeats: nextRemaining,
-        acceptedWorkersCount: nextAcceptedCount,
-        status: "available",
-        available: true,
-        isFull: false,
-        updatedAt: serverTimestamp(),
-      });
     }
 
+    // Only an ACCEPTED work request ever took a place out of the job's
+    // capacity — a still-pending one never touched remainingSeats, so
+    // cancelling it needs no restore. Errand has no capacity concept at all.
+    const isAcceptedWork = kind === "work" && current.status === "accepted" && !!current.sourceId;
+    const jobRef = isAcceptedWork ? doc(db, "workJobs", current.sourceId) : null;
+    const jobSnap = jobRef ? await transaction.get(jobRef) : null;
+
+    // -----------------------------------------------------------------
+    // PHASE 2 — every write. No transaction.get() below this point.
+    // -----------------------------------------------------------------
     transaction.update(appRef, {
       status: "cancelled" as FlowStatus,
       cancelledAt: serverTimestamp(),
@@ -1052,6 +1051,51 @@ const cancelAcceptedWorkRequest = async (
       cancelReason: reason || null,
       updatedAt: serverTimestamp(),
     });
+
+    notifyOtherId = cancelledBy === "passenger" ? current.providerId : current.customerId;
+    notifyTitle = current.title;
+    notifyCategory = current.category;
+    didCancel = true;
+
+    if (!jobRef || !jobSnap || !jobSnap.exists()) return;
+
+    const jobData: any = jobSnap.data();
+
+    const totalSeats = Number(jobData.totalSeats ?? jobData.seats ?? jobData.workersNeeded ?? 1);
+    const currentRemaining =
+      typeof jobData.remainingSeats === "number" ? jobData.remainingSeats : 0;
+    // requestedSeats has no dedicated field in NormalizedApplication — read
+    // straight off this SAME fresh snapshot's raw data, matching the exact
+    // field precedence the previous implementation used.
+    const requestedSeats = Math.max(1, Number(rawAppData.requestedSeats || current.seats || 1));
+
+    // Never let remainingSeats climb above totalSeats.
+    const nextRemaining = Math.min(currentRemaining + requestedSeats, totalSeats);
+    const nextAcceptedCount = Math.max(Number(jobData.acceptedWorkersCount || 0) - 1, 0);
+
+    transaction.update(jobRef, {
+      remainingSeats: nextRemaining,
+      acceptedWorkersCount: nextAcceptedCount,
+      status: "available",
+      available: true,
+      isFull: false,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  // Only notify for a REAL transition — a no-op re-cancel (already-cancelled
+  // early return above) must never send a second cancellation notification.
+  if (!didCancel || !notifyOtherId) return;
+
+  await notify({
+    receiverId: notifyOtherId,
+    type: "cancelled",
+    title: "Booking cancelled",
+    message: `The ${cancelledBy} cancelled "${notifyTitle}".`,
+    applicationId: id,
+    kind,
+    category: notifyCategory,
+    status: "cancelled",
   });
 };
 
