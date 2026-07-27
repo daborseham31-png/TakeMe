@@ -15,3 +15,4 @@ yarn-error.log*
 
 expo-env.d.ts
 # @end expo-cli
+/takeme-admin-desktop/out/
