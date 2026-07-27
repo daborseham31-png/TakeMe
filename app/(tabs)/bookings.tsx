@@ -676,6 +676,16 @@ const subscribe = (
     };
   }, [uid]);
 
+  // Passenger's own live location sharing is now started/stopped from
+  // app/(tabs)/_layout.tsx, NOT here — this screen unmounts on every tab
+  // switch (Home/Messages/Profile), which used to kill sharing the moment
+  // the passenger left this tab even though the driver was still on the
+  // way. The tab layout stays mounted for as long as the passenger is
+  // signed in and inside (tabs), so that's the one place this can safely
+  // depend on "app is in the foreground" instead of "this screen happens
+  // to be open". See _layout.tsx's own comment for the exact start/stop
+  // rules (unchanged from before: booked/driver-on-the-way window only).
+
   const passengerApps = useMemo(
     () =>
       [...myWorkApps, ...myErrandApps].sort(
@@ -2015,6 +2025,16 @@ const openRoadsideRatingModal = (b: BookingItem) => {
   setRatingComment("");
 };
 
+// Despite the name, this is the rating path for EVERY generic BookingItem
+// rating on the `bookings` collection, not just School — WEEKLY Personal
+// Ride occurrences are created with category "personal" (see
+// createWeeklyBookings in weeklyBookingLib.ts) and are BookingItems too, so
+// they're rated through here via openSchoolRatingModal, never through
+// rideBookingLib.ts's submitRideRating (that's the ONE-TIME "personal_ride"
+// category path only — see renderBookingCard's own isPersonalCategory
+// comment). firestore.rules' isValidDriverReview/
+// isValidPassengerBookingRatingUpdate both explicitly allow category
+// "personal" for exactly this reason.
 const submitSchoolRating = async (
   booking: BookingItem,
   stars: number,

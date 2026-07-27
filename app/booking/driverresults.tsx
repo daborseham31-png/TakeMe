@@ -341,29 +341,6 @@ export default function DriverResultsScreen() {
   const genderPref = String(params.genderPref || "any");
   const seats = Number(params.seats || 1);
 
-  // "Pickup location for driver navigation" on the booking form — an
-  // optional, SEPARATE GPS point passed straight through to ride-payment
-  // (which is the only screen that actually writes the booking document —
-  // see handleBookDriver / confirmWeeklyDayPicker below). This is never used
-  // for driver matching above (matching only ever compares `from`/`to`
-  // text — see commonFiltered below), only for driver navigation later.
-  const pickupLatParam =
-    params.pickupLatitude !== undefined ? Number(params.pickupLatitude) : null;
-  const pickupLngParam =
-    params.pickupLongitude !== undefined ? Number(params.pickupLongitude) : null;
-  const pickupAddressParam = String(params.pickupAddress || "");
-  const pickupCoordsParams =
-    pickupLatParam !== null &&
-    pickupLngParam !== null &&
-    !Number.isNaN(pickupLatParam) &&
-    !Number.isNaN(pickupLngParam)
-      ? {
-          pickupLatitude: String(pickupLatParam),
-          pickupLongitude: String(pickupLngParam),
-          pickupAddress: pickupAddressParam,
-        }
-      : {};
-
   const requestedTime = String(params.time || "");
   const requestedDate = String(params.tripDate || "");
   const requestedDay = String(params.tripDay || "");
@@ -556,7 +533,6 @@ const handleBookDriver = async (driver: DriverRoute) => {
                 driver.destinationDetails || destinationDetails || "",
             }
           : {}),
-        ...pickupCoordsParams,
 
         date: selectedDate,
         day: selectedDay,
@@ -690,7 +666,6 @@ const confirmWeeklyDayPicker = () => {
       ...(category === "school"
         ? { schoolName: driver.schoolName || searchedSchoolName }
         : { destinationDetails: driver.destinationDetails || destinationDetails || "" }),
-      ...pickupCoordsParams,
 
       driverCar: driver.car || "",
       driverCarColor: driver.carColor || "",

@@ -11,9 +11,6 @@ import {
   View,
 } from "react-native";
 
-import CurrentLocationButton, {
-  CurrentLocationResult,
-} from "../booking/CurrentLocationButton";
 import IsraelLocationAutocomplete from "../booking/IsraelLocationAutocomplete";
 import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { IsraelLocation } from "../booking/israelLocations";
@@ -113,15 +110,6 @@ export default function PersonalRideScreen() {
   // payment/confirmation screen and saved on the booking.
   const [destinationDetails, setDestinationDetails] = useState("");
 
-  // Separate "pickup location for driver navigation" — an exact GPS point
-  // (+ readable address) used ONLY so the driver can navigate to the
-  // passenger. Never sent to driver matching, never written into `from`.
-  const [navAddress, setNavAddress] = useState("");
-  const [navCoords, setNavCoords] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
-
   const [tripDate, setTripDate] = useState(getTodayDate());
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
 
@@ -154,11 +142,6 @@ export default function PersonalRideScreen() {
     if (!nextValue) {
       setWeeklyRows([]);
     }
-  };
-
-  const handleUseCurrentLocation = (result: CurrentLocationResult) => {
-    setNavAddress(result.address);
-    setNavCoords({ latitude: result.latitude, longitude: result.longitude });
   };
 
   const decreaseSeats = () => {
@@ -213,15 +196,6 @@ export default function PersonalRideScreen() {
       // the driver, never used for matching.
       ...(destinationDetails.trim()
         ? { destinationDetails: destinationDetails.trim() }
-        : {}),
-      // Separate navigation-only pickup point (optional) — passed through
-      // untouched to ride-payment/the booking doc, never used for matching.
-      ...(navCoords
-        ? {
-            pickupLatitude: String(navCoords.latitude),
-            pickupLongitude: String(navCoords.longitude),
-            pickupAddress: navAddress,
-          }
         : {}),
     };
 
@@ -374,26 +348,6 @@ export default function PersonalRideScreen() {
               value={destinationDetails}
               onChangeText={setDestinationDetails}
             />
-          </View>
-
-          <View style={styles.navPickupBox}>
-            <PhysicalDirectionalBlockText style={styles.label}>
-              {t("booking.pickupLocationForDriverNav")}
-            </PhysicalDirectionalBlockText>
-            <PhysicalDirectionalBlockText style={styles.navPickupHint}>
-              {t("booking.pickupOptionalHint")}
-            </PhysicalDirectionalBlockText>
-
-            <CurrentLocationButton onLocated={handleUseCurrentLocation} />
-
-            {navAddress ? (
-              <View style={styles.navPickupResult}>
-                <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
-                <PhysicalDirectionalBlockText style={styles.navPickupSavedText}>
-                  {t("booking.locationSaved")}
-                </PhysicalDirectionalBlockText>
-              </View>
-            ) : null}
           </View>
 
           {!weeklyBooking && (
@@ -644,37 +598,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 8,
     color: "#111827",
-  },
-  navPickupBox: {
-    marginTop: 14,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: "#F0E5DC",
-  },
-  navPickupHint: {
-    fontSize: 12,
-    color: "#7C5F46",
-    marginTop: -4,
-    marginBottom: 4,
-  },
-  navPickupResult: {
-    marginTop: 10,
-    backgroundColor: "#F1FBF4",
-    borderWidth: 1,
-    borderColor: "#BBE7C6",
-    borderRadius: 10,
-    padding: 10,
-  },
-  navPickupResultText: {
-    color: "#111827",
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  navPickupSavedText: {
-    color: "#166534",
-    fontWeight: "900",
-    fontSize: 12,
-    marginTop: 2,
   },
   seatsRow: {
     flexDirection: "row",

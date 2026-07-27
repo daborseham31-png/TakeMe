@@ -24,6 +24,7 @@ import {
   collection,
   doc,
   getDoc,
+  increment,
   runTransaction,
   serverTimestamp,
   updateDoc,
@@ -417,6 +418,28 @@ export const createApplication = async (
 
   const ref = await addDoc(collection(db, COLLECTION[kind]), payload);
 
+  // Errand only: a plain running counter of real (non-rejected/cancelled)
+  // requests on the errandJobs listing itself — see rejectRequest's and
+  // cancelApplication's matching decrements below. This exists purely so
+  // the passenger-facing search screens (errand/errand.tsx, the Home feed —
+  // see isErrandHiddenFromSearch in homeFeedLib.ts) can tell "genuinely
+  // unbooked" apart from "has at least one request" WITHOUT reading the
+  // errandApplications collection cross-user (firestore.rules restricts
+  // that collection to each doc's own passenger/driver) — errandJobs is
+  // already broadly readable/writable by any signed-in user, so this
+  // counter is the safe place for that signal to live. Best-effort: a
+  // failure here must never block the actual request from being sent.
+  if (kind === "errand" && source.sourceId) {
+    try {
+      await updateDoc(doc(db, "errandJobs", source.sourceId), {
+        bookingCount: increment(1),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.log("createApplication: could not increment errand bookingCount", error);
+    }
+  }
+
   // Notify the provider that a new request arrived. Tapping this must land
   // the provider straight on the matching pending Accept/Reject card in My
   // Bookings → Driver tab (see getBookingTabFromNotification/onPressNotification
@@ -588,6 +611,19 @@ export const rejectRequest = async (
     rejectedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+
+  // Errand only: a rejected request no longer counts as "booked" — see the
+  // matching increment in createApplication above.
+  if (kind === "errand" && data.sourceId) {
+    try {
+      await updateDoc(doc(db, "errandJobs", data.sourceId), {
+        bookingCount: increment(-1),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.log("rejectRequest: could not decrement errand bookingCount", error);
+    }
+  }
 
   await notify({
     receiverId: data.customerId,
@@ -1056,6 +1092,17 @@ export const cancelApplication = async (
     notifyTitle = current.title;
     notifyCategory = current.category;
     didCancel = true;
+
+    // Errand only: a cancelled request no longer counts as "booked" — see
+    // the matching increment in createApplication above. increment(-1)
+    // needs no prior read, so this can run alongside the appRef write
+    // above without an extra transaction.get().
+    if (kind === "errand" && current.sourceId) {
+      transaction.update(doc(db, "errandJobs", current.sourceId), {
+        bookingCount: increment(-1),
+        updatedAt: serverTimestamp(),
+      });
+    }
 
     if (!jobRef || !jobSnap || !jobSnap.exists()) return;
 

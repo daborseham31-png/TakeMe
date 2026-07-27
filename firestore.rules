@@ -85,8 +85,20 @@ service cloud.firestore {
     // ---------------------------------------------------------------
     function isValidDriverReview(reviewId) {
       let data = request.resource.data;
-      return data.bookingId == reviewId &&
-        data.category in ["personal_ride", "school", "roadside", "work", "errands"] &&
+      // "personal" (as opposed to "personal_ride") IS a real, intentional
+      // category value here — NOT a typo to "fix" elsewhere. Weekly
+      // Personal Ride occurrences are created by createWeeklyBookings
+      // (weeklyBookingLib.ts) with category "personal" and rated through
+      // bookings.tsx's submitSchoolRating (the same generic BookingItem
+      // rating path School uses — see that function's own comment and
+      // bookings.tsx's renderBookingCard: "School and (weekly) personal
+      // bookings both drive through the ride navigation screen"). Only
+      // ONE-TIME Personal Ride bookings use "personal_ride" (rideBookingLib.ts's
+      // submitRideRating). Omitting "personal" here is exactly what made
+      // every weekly Personal Ride rating fail with "Missing or
+      // insufficient permissions" while one-time ratings kept working.
+      return data.category in ["personal_ride", "personal", "school", "roadside", "work", "errands"] &&
+        data.bookingId == reviewId &&
         data.passengerId == request.auth.uid &&
         data.driverId is string && data.driverId != "" &&
         data.driverId != request.auth.uid &&
@@ -106,6 +118,59 @@ service cloud.firestore {
         newData.ratingCount == oldCount + 1 &&
         delta >= 1 && delta <= 5 &&
         newData.ratingAverage >= 0 && newData.ratingAverage <= 5;
+    }
+
+    // Whether THIS bookings/{bookingId} write touches any of the fields a
+    // passenger's post-trip rating submission ever sets — see
+    // submitRideRating (rideBookingLib.ts) and submitSchoolRating
+    // (bookings.tsx), which write this exact field set as one step of the
+    // same transaction that creates the matching driverReviews/{bookingId}
+    // doc (see isValidDriverReview above). Used below to require every
+    // rating-SHAPED write to be a fully valid one, without touching the
+    // broad allowance every OTHER personal_ride/school write on this
+    // collection still relies on (trip lifecycle, cancellation, etc. — see
+    // the "Everything else" comment on match /bookings/{bookingId}).
+    function isRatingLikeBookingUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(["rating", "reviewComment", "ratingSubmitted", "ratedAt"]);
+    }
+
+    // Personal Ride (rideBookingLib.ts's submitRideRating), legacy School
+    // (bookings.tsx's submitSchoolRating), AND Roadside Help
+    // (roadside-help/roadsideLib.ts's submitRoadsideRating) all submit
+    // their post-trip rating as a plain update on THIS SAME
+    // bookings/{bookingId} doc (never a separate collection) — Work/Errand
+    // are the only ones that rate on a different collection instead
+    // (workApplications/errandApplications — see those match blocks
+    // below). Roadside Help ALSO still passes isValidRoadsideBookingUpdate
+    // above unchanged (its own rating branch there requires the same
+    // shape); this function is layered on in ADDITION, not instead of
+    // that, so it must accept the exact same write Roadside already
+    // performs. Only the booking's own passenger, only once, only after
+    // real completion, and only the rating fields themselves —
+    // driverId/passengerId/every other field on the booking stay exactly
+    // as they were.
+    //
+    // "personal" is WEEKLY Personal Ride's real category value (see
+    // isValidDriverReview's own comment above) — each day of a weekly
+    // booking is its own bookings/{bookingId} doc (a distinct auto-id from
+    // createWeeklyBookings, never the shared bookingGroupId), so this
+    // already naturally gates per OCCURRENCE, not per weekly series.
+    function isValidPassengerBookingRatingUpdate() {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      return oldData.category in ["personal_ride", "personal", "school", "roadside"] &&
+        oldData.passengerId == request.auth.uid &&
+        newData.passengerId == oldData.passengerId &&
+        newData.driverId == oldData.driverId &&
+        (oldData.status == "completed" || oldData.tripStatus == "completed") &&
+        oldData.get("ratingSubmitted", false) != true &&
+        newData.diff(oldData).affectedKeys().hasOnly([
+          "rating", "reviewComment", "ratingSubmitted", "needsPassengerRating",
+          "ratedAt", "updatedAt",
+        ]) &&
+        newData.ratingSubmitted == true &&
+        newData.rating is int && newData.rating >= 1 && newData.rating <= 5;
     }
 
     // Lets a driver's own client (recordDriverCancellationViolation) flip
@@ -445,8 +510,23 @@ service cloud.firestore {
       // today's broad behavior unchanged (see the comment above on why).
       // Admin overrides (adminBookingsLib.ts's cancelBooking, etc.) keep
       // working exactly as before, for every category including roadside.
+      //
+      // ADDITIONALLY (regardless of category): any write that touches a
+      // rating field (isRatingLikeBookingUpdate) must ALSO be a fully valid
+      // passenger rating update (isValidPassengerBookingRatingUpdate) — see
+      // that function's own comment. This is layered on with `&&`, not
+      // folded into the broad OR above, specifically so it can never be
+      // satisfied merely by "category != roadside": a passenger can submit
+      // their OWN rating on a completed Personal Ride/School booking, but
+      // can never use a rating-shaped write to change driverId/passengerId
+      // or any other field, rate a booking they don't own, rate one that
+      // isn't completed, or rate the same booking twice. Admin never needs
+      // to touch these fields (confirmed: adminBookingsLib.ts never writes
+      // rating/reviewComment/ratingSubmitted/ratedAt), so this applies to
+      // isAdmin() too, with no known write path affected.
       allow update: if isSignedIn() &&
-        (isAdmin() || resource.data.get("category", "") != "roadside" || isValidRoadsideBookingUpdate());
+        (isAdmin() || resource.data.get("category", "") != "roadside" || isValidRoadsideBookingUpdate()) &&
+        (!isRatingLikeBookingUpdate() || isValidPassengerBookingRatingUpdate());
 
       // Nothing in this app ever deletes a booking doc (cancellation is a
       // status update, never a delete) — denying it here is a pure
@@ -907,6 +987,42 @@ service cloud.firestore {
             resource.data.get("authorizedPassengerIds", []).size() + 1
         )
       );
+
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------------------
+    // passengerLocations/{targetId} — the passenger's own live GPS while
+    // waiting for their assigned driver, in the opposite direction of
+    // tripLocations above (see app/passengerLocationTask.ts). targetId is
+    // the same bookingId tripLocations uses for Personal Ride/legacy
+    // School, so both collections key off the same document identity for a
+    // given ride. Replaces the old manually-saved pickup-coordinate fields
+    // on the booking doc itself, which are read-only backward-compat now
+    // (see bookingsLib.ts's pickupCoords normalization) and never written
+    // by any current screen.
+    // -----------------------------------------------------------------
+    match /passengerLocations/{targetId} {
+      // Same not-yet-created reasoning as tripLocations above — both
+      // ride-navigation.tsx and the passenger's own starter effect
+      // (app/(tabs)/bookings.tsx) subscribe to / may create this path the
+      // moment their screen opens, before any fix has ever been written.
+      allow read: if isSignedIn() && (
+        resource == null ||
+        resource.data.passengerId == request.auth.uid ||
+        resource.data.get("driverId", null) == request.auth.uid
+      );
+
+      // Only the passenger themselves ever creates/updates this doc — the
+      // assigned driver only ever reads it, never writes it.
+      allow create: if isSignedIn() &&
+        request.resource.data.passengerId == request.auth.uid;
+
+      allow update: if isSignedIn() &&
+        resource.data.passengerId == request.auth.uid &&
+        request.resource.data.passengerId == resource.data.passengerId &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["driverId", "latitude", "longitude", "heading", "speed", "accuracy", "updatedAt"]);
 
       allow delete: if false;
     }

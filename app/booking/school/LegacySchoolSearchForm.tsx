@@ -24,9 +24,6 @@ import { useTranslation } from "react-i18next";
 
 import { useLanguage } from "../../i18n/LanguageProvider";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
-import CurrentLocationButton, {
-  CurrentLocationResult,
-} from "../CurrentLocationButton";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../israelLocations";
 import DateInput, { TimeInput } from "../../driver/create/DateInput";
@@ -81,12 +78,6 @@ export default function LegacySchoolSearchForm() {
     if (schoolLocationError) setSchoolLocationError("");
   };
 
-  const [navAddress, setNavAddress] = useState("");
-  const [navCoords, setNavCoords] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
-
   const [tripDate, setTripDate] = useState(getTodayDate());
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
 
@@ -118,11 +109,6 @@ export default function LegacySchoolSearchForm() {
     } else {
       setSelectedLanguages([...selectedLanguages, lang]);
     }
-  };
-
-  const handleUseCurrentLocation = (result: CurrentLocationResult) => {
-    setNavAddress(result.address);
-    setNavCoords({ latitude: result.latitude, longitude: result.longitude });
   };
 
   const toggleWeeklyBooking = () => {
@@ -170,13 +156,6 @@ export default function LegacySchoolSearchForm() {
       }),
       genderPref,
       languages: selectedLanguages.join(","),
-      ...(navCoords
-        ? {
-            pickupLatitude: String(navCoords.latitude),
-            pickupLongitude: String(navCoords.longitude),
-            pickupAddress: navAddress,
-          }
-        : {}),
     };
 
     if (weeklyBooking) {
@@ -297,26 +276,6 @@ export default function LegacySchoolSearchForm() {
               error={schoolLocationError}
             />
           </View>
-        </View>
-
-        <View style={styles.navPickupBox}>
-          <Text style={[styles.label, isRTL && styles.textRTL]}>
-            {t("booking.pickupSectionTitle")}
-          </Text>
-          <Text style={[styles.navPickupHint, isRTL && styles.textRTL]}>
-            {t("booking.pickupSectionHint")}
-          </Text>
-
-          <CurrentLocationButton onLocated={handleUseCurrentLocation} />
-
-          {navAddress ? (
-            <View style={styles.navPickupResult}>
-              <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
-              <Text style={styles.navPickupSavedText}>
-                {t("booking.locationSaved")}
-              </Text>
-            </View>
-          ) : null}
         </View>
 
         {!weeklyBooking ? (
@@ -514,37 +473,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 8,
     color: "#111827",
-  },
-  navPickupBox: {
-    marginTop: 14,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: "#F0E5DC",
-  },
-  navPickupHint: {
-    fontSize: 12,
-    color: "#7C5F46",
-    marginTop: -4,
-    marginBottom: 4,
-  },
-  navPickupResult: {
-    marginTop: 10,
-    backgroundColor: "#F1FBF4",
-    borderWidth: 1,
-    borderColor: "#BBE7C6",
-    borderRadius: 10,
-    padding: 10,
-  },
-  navPickupResultText: {
-    color: "#111827",
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  navPickupSavedText: {
-    color: "#166534",
-    fontWeight: "900",
-    fontSize: 12,
-    marginTop: 2,
   },
   seatsRow: {
     minHeight: 46,

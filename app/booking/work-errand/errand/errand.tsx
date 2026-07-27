@@ -1,7 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  QueryDocumentSnapshot,
+} from "firebase/firestore";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,6 +26,7 @@ import { useLanguage } from "../../../i18n/LanguageProvider";
 import { chevronForwardIconName, positionEnd } from "../../../i18n/rtl";
 import DriverReviewsSection from "../../DriverReviewsSection";
 import { getDisplayedDriverId } from "../../driverReviewsLib";
+import { getErrandBookingCount, isErrandHiddenFromSearch } from "../../homeFeedLib";
 
 type Driver = {
   id: string;
@@ -40,7 +48,17 @@ type Driver = {
   day: string;
   location: string;
   seats: number;
+  // Real passenger booking count — see getErrandBookingCount in
+  // homeFeedLib.ts. Never just `seats`, which is a static capacity number
+  // that never decrements.
+  bookingCount: number;
 };
+
+// Re-checked once a minute while this screen stays open (plus on focus) so
+// an unbooked errand whose 5-minute grace window (see
+// isErrandHiddenFromSearch) has elapsed disappears without needing a new
+// Firestore read — mirrors Home's own EXPIRY_RECHECK_INTERVAL_MS pattern.
+const EXPIRY_RECHECK_INTERVAL_MS = 60000;
 
 const LANGUAGES_MAP: Record<string, string> = {
   ar: "العربية",
@@ -85,10 +103,31 @@ export default function ErrandsScreen() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Ticks once a minute (plus on focus) purely to force an unbooked-and-
+  // expired errand out of visibleDrivers below — never re-fetches from
+  // Firestore by itself (see EXPIRY_RECHECK_INTERVAL_MS above).
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNowTick(Date.now()), EXPIRY_RECHECK_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     loadErrands();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-fetch whenever the passenger returns to this screen (spec: "apply
+  // the filter... whenever the user returns to the screen") — picks up
+  // both new/removed listings and any booking made elsewhere in the
+  // meantime, not just the passage of time.
+  useFocusEffect(
+    useCallback(() => {
+      loadErrands();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
 
   const loadErrands = async () => {
     try {
@@ -101,7 +140,7 @@ export default function ErrandsScreen() {
       // for School/Personal/Work — never a value cached on the errand
       // listing itself, so it stays correct after every future rating.
       const errandsList: Driver[] = await Promise.all(
-        snapshot.docs.map(async (docSnap): Promise<Driver> => {
+        snapshot.docs.map(async (docSnap: QueryDocumentSnapshot): Promise<Driver> => {
           const data = docSnap.data();
 
           let ratingAverage = 0;
@@ -149,6 +188,8 @@ export default function ErrandsScreen() {
 
             location: data.location || "",
             seats: Number(data.seats || 1),
+
+            bookingCount: getErrandBookingCount(data),
           };
         }),
       );
@@ -171,6 +212,20 @@ export default function ErrandsScreen() {
       setLoading(false);
     }
   };
+
+  // The ONE place this screen hides an unbooked-and-expired errand — same
+  // shared rule (isErrandHiddenFromSearch) the Home feed uses, re-evaluated
+  // against nowTick so a card disappears on its own while this screen stays
+  // open, without waiting for a new Firestore read (spec: "recalculate
+  // automatically while the screen is open").
+  const visibleDrivers = useMemo(
+    () =>
+      drivers.filter(
+        (driver) =>
+          !isErrandHiddenFromSearch(driver.date, driver.departureTime, driver.bookingCount, nowTick),
+      ),
+    [drivers, nowTick],
+  );
 
   const handleSelectDriver = (driver: Driver) => {
     router.push({
@@ -214,7 +269,7 @@ export default function ErrandsScreen() {
           </View>
         </View>
 
-        {drivers.length === 0 ? (
+        {visibleDrivers.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="location-outline" size={44} color="#7A665C" />
             <Text style={styles.emptyTitle}>{t("workErrand.noErrandsFound")}</Text>
@@ -222,7 +277,7 @@ export default function ErrandsScreen() {
           </View>
         ) : (
           <View style={styles.list}>
-            {drivers.map((driver) => {
+            {visibleDrivers.map((driver) => {
               return (
                 <View key={driver.id} style={styles.card}>
                   <View style={styles.header}>
