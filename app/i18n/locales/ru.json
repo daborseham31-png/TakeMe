@@ -241,7 +241,7 @@
     "thisWeek": "Эта неделя",
     "nextWeek": "Следующая неделя",
     "addDaysHintDriver": "Добавьте дни, которые хотите предложить на этой неделе.",
-    "addDaysHintPassenger": "Добавьте дни, которые вам нужны на этой неделе.",
+    "addDaysHintPassenger": "Добавьте дни, которые хотите забронировать на этой неделе.",
     "dayNumber": "День {{number}}",
     "alreadyAddedTitle": "Уже добавлено",
     "alreadyAddedMessage": "Вы уже добавили этот день. Выберите другую дату.",
@@ -1118,8 +1118,8 @@
     "headerTitle": "Школьная поездка",
     "subtitle": "Забронируйте поездку в школу или университет",
     "schoolNameLabel": "Название школы / университета",
-    "schoolNamePlaceholder": "Название школы",
-    "toPlaceholder": "Адрес школы"
+    "schoolNamePlaceholder": "Выберите школу или университет",
+    "toPlaceholder": "Введите город назначения"
   },
   "schoolTrip": {
     "outboundOnly": "Только туда",
@@ -1272,11 +1272,11 @@
     "childAlreadySelectedError": "Этот ребёнок уже выбран в другой строке.",
     "childSchoolMismatchError": "Школа этого ребёнка не совпадает со школой, для которой вы бронируете.",
     "childNameLabel": "Имя ребёнка",
-    "cityLabel": "Город / район",
-    "selectCityPlaceholder": "Найдите город или район",
-    "cityRequired": "Пожалуйста, выберите город или район.",
-    "selectCityFirstMessage": "Сначала выберите город",
-    "schoolCityMismatchError": "Эта школа не относится к выбранному городу/району."
+    "cityLabel": "Район школы",
+    "selectCityPlaceholder": "Найдите город или район школы",
+    "cityRequired": "Пожалуйста, выберите район школы.",
+    "selectCityFirstMessage": "Сначала выберите район школы",
+    "schoolCityMismatchError": "Эта школа не относится к выбранному району школы."
   },
   "driverCreate": {
     "newTripTitle": "Создать новую поездку",

@@ -238,7 +238,7 @@
     "thisWeek": "השבוע",
     "nextWeek": "השבוע הבא",
     "addDaysHintDriver": "הוסף את הימים שברצונך להציע השבוע.",
-    "addDaysHintPassenger": "הוסף את הימים שברצונך השבוע.",
+    "addDaysHintPassenger": "הוסף את הימים שברצונך להזמין השבוע.",
     "dayNumber": "יום {{number}}",
     "alreadyAddedTitle": "כבר נוסף",
     "alreadyAddedMessage": "כבר הוספת את היום הזה. יש לבחור תאריך אחר.",
@@ -1114,8 +1114,8 @@
     "headerTitle": "נסיעת בית ספר",
     "subtitle": "הזמן נסיעה לבית ספר או לאוניברסיטה",
     "schoolNameLabel": "שם בית הספר / האוניברסיטה",
-    "schoolNamePlaceholder": "שם בית הספר",
-    "toPlaceholder": "כתובת בית הספר"
+    "schoolNamePlaceholder": "בחר את בית הספר או האוניברסיטה",
+    "toPlaceholder": "הזן עיר יעד"
   },
   "schoolTrip": {
     "outboundOnly": "הלוך בלבד",
@@ -1268,11 +1268,11 @@
     "childAlreadySelectedError": "הילד הזה כבר נבחר בשורה אחרת.",
     "childSchoolMismatchError": "בית הספר של הילד הזה אינו תואם לבית הספר שאתה מזמין עבורו.",
     "childNameLabel": "שם הילד",
-    "cityLabel": "עיר / אזור",
-    "selectCityPlaceholder": "חפש עיר או אזור",
-    "cityRequired": "נא לבחור עיר או אזור.",
-    "selectCityFirstMessage": "בחר עיר תחילה",
-    "schoolCityMismatchError": "בית הספר הזה אינו שייך לעיר/אזור שנבחרו."
+    "cityLabel": "אזור בית הספר",
+    "selectCityPlaceholder": "חפש את עיר/אזור בית הספר",
+    "cityRequired": "נא לבחור את אזור בית הספר.",
+    "selectCityFirstMessage": "בחר את אזור בית הספר תחילה",
+    "schoolCityMismatchError": "בית הספר הזה אינו שייך לאזור בית הספר שנבחר."
   },
   "driverCreate": {
     "newTripTitle": "יצירת נסיעה חדשה",

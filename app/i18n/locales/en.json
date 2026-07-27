@@ -235,7 +235,7 @@
     "thisWeek": "This week",
     "nextWeek": "Next week",
     "addDaysHintDriver": "Add the days you want to offer this week.",
-    "addDaysHintPassenger": "Add the days you want this week.",
+    "addDaysHintPassenger": "Add the days you want to book this week.",
     "dayNumber": "Day {{number}}",
     "alreadyAddedTitle": "Already added",
     "alreadyAddedMessage": "You already added this day. Please choose a different date.",
@@ -1110,8 +1110,8 @@
     "headerTitle": "School Ride",
     "subtitle": "Book a ride to school or university",
     "schoolNameLabel": "School / University Name",
-    "schoolNamePlaceholder": "School name",
-    "toPlaceholder": "School address"
+    "schoolNamePlaceholder": "Select the school or university",
+    "toPlaceholder": "Enter destination city"
   },
   "schoolTrip": {
     "outboundOnly": "Outbound only",
@@ -1264,11 +1264,11 @@
     "childAlreadySelectedError": "That child is already selected for another row.",
     "childSchoolMismatchError": "That child's school does not match the school you're booking.",
     "childNameLabel": "Child's name",
-    "cityLabel": "City / Area",
-    "selectCityPlaceholder": "Search for a city or area",
-    "cityRequired": "Please select a city or area.",
-    "selectCityFirstMessage": "Select a city first",
-    "schoolCityMismatchError": "That school does not belong to the selected city/area."
+    "cityLabel": "School Area",
+    "selectCityPlaceholder": "Search for the school's city or area",
+    "cityRequired": "Please select the school area.",
+    "selectCityFirstMessage": "Select the school area first",
+    "schoolCityMismatchError": "That school does not belong to the selected school area."
   },
   "driverCreate": {
     "newTripTitle": "Create a New Trip",

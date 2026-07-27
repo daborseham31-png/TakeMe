@@ -666,12 +666,16 @@ const createBookingAfterPayment = async (
           <Text style={styles.askReturnTitle}>{t("schoolTrip.bookReturnQuestion")}</Text>
           <Text style={styles.askReturnSubtitle}>{t("schoolTrip.bookReturnQuestionHint")}</Text>
 
-          <Pressable style={styles.continueButton} onPress={handleContinueToSchoolReturn}>
-            <Text style={styles.continueText}>{t("schoolTrip.bookReturn")}</Text>
+          <Pressable style={styles.askReturnPrimaryButton} onPress={handleContinueToSchoolReturn}>
+            <Text style={styles.askReturnPrimaryText} numberOfLines={1}>
+              {t("schoolTrip.bookReturn")}
+            </Text>
           </Pressable>
 
           <Pressable style={styles.askReturnSkipButton} onPress={handleSkipSchoolReturn}>
-            <Text style={styles.askReturnSkipText}>{t("common.no")}</Text>
+            <Text style={styles.askReturnSkipText} numberOfLines={1}>
+              {t("common.no")}
+            </Text>
           </Pressable>
         </View>
       </DirectionalScreen>
@@ -1311,13 +1315,42 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 18,
   },
+  // Both buttons deliberately stretch to the full width of askReturnBox
+  // (which supplies the outer 30px horizontal margin) — askReturnBox's own
+  // `alignItems: "center"` would otherwise shrink-wrap each button to its
+  // own text, which is what made "Book a return ride" look cramped (no
+  // horizontal padding + no explicit width to center that padding within).
+  askReturnPrimaryButton: {
+    alignSelf: "stretch",
+    backgroundColor: "#F58220",
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+  },
+  askReturnPrimaryText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 16,
+    textAlign: "center",
+  },
   askReturnSkipButton: {
+    alignSelf: "stretch",
     marginTop: 12,
     borderWidth: 1,
     borderColor: "#E2D8CF",
-    borderRadius: 12,
-    padding: 15,
+    borderRadius: 14,
+    paddingVertical: 15,
+    paddingHorizontal: 24,
     alignItems: "center",
+    justifyContent: "center",
   },
-  askReturnSkipText: { color: "#7C5F46", fontWeight: "800" },
+  askReturnSkipText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 15,
+    textAlign: "center",
+  },
 });

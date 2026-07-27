@@ -23,6 +23,12 @@ type Props = {
   onChange: (rows: WeekDayRow[]) => void;
   defaultTime: string;
   mode: "passenger" | "driver";
+  // Overrides the default per-mode title ("Weekly Trip Days" for driver,
+  // "Choose Days" for passenger) — e.g. the School weekly search screen
+  // wants "Weekly Trip Days" on the passenger side too, without changing
+  // the title any OTHER existing caller (Personal Ride weekly, driver
+  // route creation) already relies on.
+  title?: string;
 };
 
 const parseYMDToEndOfDay = (ymd: string) => {
@@ -40,6 +46,7 @@ export default function WeeklyDaysCard({
   onChange,
   defaultTime,
   mode,
+  title,
 }: Props) {
   const { t } = useTranslation();
   const [openDatePickerId, setOpenDatePickerId] = useState<string | null>(null);
@@ -130,7 +137,7 @@ export default function WeeklyDaysCard({
   return (
     <View style={styles.container}>
       <Text style={sharedStyles.label}>
-        {mode === "driver" ? t("rides.weeklyTripDays") : t("rides.chooseDaysLabel")}
+        {title ?? (mode === "driver" ? t("rides.weeklyTripDays") : t("rides.chooseDaysLabel"))}
       </Text>
       <Text style={styles.hint}>{t("rides.weeklyHintRange")}</Text>
       <Text style={styles.hint}>

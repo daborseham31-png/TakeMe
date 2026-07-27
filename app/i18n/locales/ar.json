@@ -246,7 +246,7 @@
     "thisWeek": "هذا الأسبوع",
     "nextWeek": "الأسبوع القادم",
     "addDaysHintDriver": "أضف الأيام التي تريد تقديمها هذا الأسبوع.",
-    "addDaysHintPassenger": "أضف الأيام التي تريدها هذا الأسبوع.",
+    "addDaysHintPassenger": "أضف الأيام التي تريد حجزها هذا الأسبوع.",
     "dayNumber": "اليوم {{number}}",
     "alreadyAddedTitle": "تمت الإضافة مسبقًا",
     "alreadyAddedMessage": "لقد أضفت هذا اليوم مسبقًا. يرجى اختيار تاريخ مختلف.",
@@ -1125,8 +1125,8 @@
     "headerTitle": "رحلة مدرسية",
     "subtitle": "احجز رحلة إلى المدرسة أو الجامعة",
     "schoolNameLabel": "اسم المدرسة / الجامعة",
-    "schoolNamePlaceholder": "اسم المدرسة",
-    "toPlaceholder": "عنوان المدرسة"
+    "schoolNamePlaceholder": "اختر المدرسة أو الجامعة",
+    "toPlaceholder": "أدخل مدينة الوجهة"
   },
   "schoolTrip": {
     "outboundOnly": "الذهاب فقط",
@@ -1279,11 +1279,11 @@
     "childAlreadySelectedError": "هذا الطفل مختار بالفعل في صف آخر.",
     "childSchoolMismatchError": "مدرسة هذا الطفل لا تطابق المدرسة التي تحجز لها.",
     "childNameLabel": "اسم الطفل",
-    "cityLabel": "المدينة / المنطقة",
-    "selectCityPlaceholder": "ابحث عن مدينة أو منطقة",
-    "cityRequired": "الرجاء اختيار مدينة أو منطقة.",
-    "selectCityFirstMessage": "اختر مدينة أولاً",
-    "schoolCityMismatchError": "هذه المدرسة لا تنتمي إلى المدينة/المنطقة المختارة."
+    "cityLabel": "منطقة المدرسة",
+    "selectCityPlaceholder": "ابحث عن مدينة أو منطقة المدرسة",
+    "cityRequired": "الرجاء اختيار منطقة المدرسة.",
+    "selectCityFirstMessage": "اختر منطقة المدرسة أولاً",
+    "schoolCityMismatchError": "هذه المدرسة لا تنتمي إلى منطقة المدرسة المختارة."
   },
   "driverCreate": {
     "newTripTitle": "إنشاء رحلة جديدة",
