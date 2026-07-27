@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -19,6 +20,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
+import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import {
   analyzeIdImage,
   analyzeLicenseImage,
@@ -330,7 +332,12 @@ export default function SignUpScreen() {
 
   return (
     <SafeAreaView style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <KeyboardAvoidingWrapper>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { flexGrow: 1 }]}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+      >
         <View style={styles.card}>
           <Text style={styles.title}>{t("auth.signUp")}</Text>
           <Text style={styles.subtitle}>{t("auth.createYourAccount")}</Text>
@@ -670,6 +677,7 @@ export default function SignUpScreen() {
           </Pressable>
         </View>
       </ScrollView>
+      </KeyboardAvoidingWrapper>
     </SafeAreaView>
   );
 }

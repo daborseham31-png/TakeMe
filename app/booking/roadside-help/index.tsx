@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +14,7 @@ import {
 import MapView, { Marker, Region } from "react-native-maps";
 import { useTranslation } from "react-i18next";
 
+import KeyboardSafeScreen from "../../components/KeyboardSafeScreen";
 import {
   DirectionalScreen,
   PhysicalDirectionalBlockText,
@@ -230,7 +230,7 @@ export default function RoadsideHelpScreen() {
 
   return (
     <DirectionalScreen style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <KeyboardSafeScreen contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
         </Pressable>
@@ -376,7 +376,7 @@ export default function RoadsideHelpScreen() {
             </>
           )}
         </Pressable>
-      </ScrollView>
+      </KeyboardSafeScreen>
     </DirectionalScreen>
   );
 }

@@ -23,6 +23,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { useLanguage } from "../../i18n/LanguageProvider";
+import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import CurrentLocationButton, {
   CurrentLocationResult,
 } from "../CurrentLocationButton";
@@ -248,6 +249,7 @@ export default function LegacySchoolSearchForm() {
   };
 
   return (
+    <KeyboardAvoidingWrapper>
     <ScrollView
       contentContainerStyle={styles.scroll}
       keyboardShouldPersistTaps="handled"
@@ -453,6 +455,7 @@ export default function LegacySchoolSearchForm() {
         <Text style={styles.searchText}>{t("booking.searchDrivers")}</Text>
       </Pressable>
     </ScrollView>
+    </KeyboardAvoidingWrapper>
   );
 }
 

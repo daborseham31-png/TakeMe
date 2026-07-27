@@ -29,6 +29,7 @@ import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { canStartTrip, getStartTripBlockedReason } from "../booking/bookingsLib";
+import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import {
   captureDriverLocationOnce,
   startDriverLocationTracking,
@@ -1257,7 +1258,7 @@ export default function RideNavigationScreen() {
         transparent
         onRequestClose={closeVerifyModal}
       >
-        <View style={styles.verifyOverlay}>
+        <KeyboardAvoidingWrapper style={styles.verifyOverlay}>
           <DirectionalCard style={styles.verifySheet}>
             <DirectionalText style={styles.verifySheetTitle}>
               {t("booking.verifyAndStartTrip")}
@@ -1304,7 +1305,7 @@ export default function RideNavigationScreen() {
               <DirectionalText style={styles.backText}>{t("common.cancel")}</DirectionalText>
             </Pressable>
           </DirectionalCard>
-        </View>
+        </KeyboardAvoidingWrapper>
       </Modal>
     </DirectionalScreen>
   );

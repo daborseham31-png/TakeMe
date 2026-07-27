@@ -68,6 +68,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
+import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import {
   BookingBucket,
   buildSearchText,
@@ -1362,7 +1363,7 @@ export default function useMySchoolRows({
   const modals = (
     <>
       <Modal visible={!!ratingBooking} animationType="fade" transparent onRequestClose={closeRatingModal}>
-        <View style={styles.ratingOverlay}>
+        <KeyboardAvoidingWrapper style={styles.ratingOverlay}>
           <DirectionalCard style={styles.ratingSheet}>
             <Text style={styles.ratingTitle}>{t("booking.arrivedSafelyTitle")}</Text>
             <Text style={styles.ratingSubtitle}>{t("booking.rateYourDriverSubtitle")}</Text>
@@ -1404,7 +1405,7 @@ export default function useMySchoolRows({
               <Text style={styles.ratingCancelText}>{t("common.cancel")}</Text>
             </Pressable>
           </DirectionalCard>
-        </View>
+        </KeyboardAvoidingWrapper>
       </Modal>
 
       <Modal
@@ -1413,7 +1414,7 @@ export default function useMySchoolRows({
         transparent
         onRequestClose={closeCancelTripModal}
       >
-        <View style={styles.ratingOverlay}>
+        <KeyboardAvoidingWrapper style={styles.ratingOverlay}>
           <DirectionalCard style={styles.ratingSheet}>
             <Ionicons name="warning-outline" size={32} color="#B91C1C" />
             <Text style={styles.ratingTitle}>{t("schoolTrip.cancelTripButton")}</Text>
@@ -1453,7 +1454,7 @@ export default function useMySchoolRows({
               <Text style={styles.ratingCancelText}>{t("common.cancel")}</Text>
             </Pressable>
           </DirectionalCard>
-        </View>
+        </KeyboardAvoidingWrapper>
       </Modal>
     </>
   );

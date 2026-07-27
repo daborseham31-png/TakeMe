@@ -14,6 +14,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth } from "../firebase";
+import KeyboardSafeScreen from "./components/KeyboardSafeScreen";
 import {
   DirectionalRow,
   DirectionalScreen,
@@ -117,7 +118,7 @@ export default function AppStartScreen() {
   }
 
   return (
-    <DirectionalScreen style={styles.page}>
+    <DirectionalScreen style={styles.pageSafe}>
       <Pressable
         style={[styles.languagePill, positionEnd(20, isRTL)]}
         onPress={() => setLanguageModalVisible(true)}
@@ -127,6 +128,7 @@ export default function AppStartScreen() {
         <Text style={styles.languagePillText}>{language.toUpperCase()}</Text>
       </Pressable>
 
+      <KeyboardSafeScreen contentContainerStyle={styles.page}>
       <View style={styles.card}>
         <Text style={styles.title}>{t("auth.loginTitle")}</Text>
         <Text style={styles.subtitle}>{t("auth.welcomeBack")}</Text>
@@ -230,6 +232,7 @@ export default function AppStartScreen() {
           </Text>
         </Pressable>
       </View>
+      </KeyboardSafeScreen>
 
       <LanguageSelectorModal
         visible={languageModalVisible}
@@ -259,9 +262,12 @@ const styles = StyleSheet.create({
   loader: {
     marginTop: 30,
   },
-  page: {
+  pageSafe: {
     flex: 1,
     backgroundColor: "#FBF7F1",
+  },
+  page: {
+    flexGrow: 1,
     justifyContent: "center",
     padding: 20,
   },

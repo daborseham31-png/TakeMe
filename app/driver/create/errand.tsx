@@ -18,6 +18,7 @@ import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import AutocompleteTextField from "../../components/AutocompleteTextField";
+import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import { fetchDriverEligibility } from "../driverEligibility";
 import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
 import { useLanguage } from "../../i18n/LanguageProvider";
@@ -238,6 +239,7 @@ export default function ErrandJobScreen() {
 
   return (
     <DirectionalScreen style={styles.page}>
+      <KeyboardAvoidingWrapper>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -385,6 +387,7 @@ export default function ErrandJobScreen() {
           </Pressable>
         </View>
       </ScrollView>
+      </KeyboardAvoidingWrapper>
     </DirectionalScreen>
   );
 }

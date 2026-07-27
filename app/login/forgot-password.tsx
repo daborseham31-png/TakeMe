@@ -14,6 +14,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, firebaseAuthDomain } from "../../firebase";
+import KeyboardSafeScreen from "../components/KeyboardSafeScreen";
 import { useLanguage } from "../i18n/LanguageProvider";
 
 // The reset link opens a small standalone static page (see
@@ -97,7 +98,8 @@ export default function ForgotPasswordScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <SafeAreaView style={styles.pageSafe}>
+      <KeyboardSafeScreen contentContainerStyle={styles.page}>
       <View style={styles.card}>
         <Text style={[styles.title, isRTL && styles.textRTL]}>
           {t("auth.resetPasswordTitle")}
@@ -136,14 +138,18 @@ export default function ForgotPasswordScreen() {
           <Text style={styles.backText}>{t("auth.backToLoginButton")}</Text>
         </Pressable>
       </View>
+      </KeyboardSafeScreen>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  page: {
+  pageSafe: {
     flex: 1,
     backgroundColor: "#FBF7F1",
+  },
+  page: {
+    flexGrow: 1,
     justifyContent: "center",
     padding: 20,
   },

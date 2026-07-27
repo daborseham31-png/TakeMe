@@ -14,11 +14,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { auth } from "../../../firebase";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
+import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import SchoolAutocomplete from "../../booking/SchoolAutocomplete";
@@ -472,10 +473,12 @@ export default function SchoolTripForm() {
       : t("schoolTrip.publishOutboundTrip");
 
   return (
-    <ScrollView
-      contentContainerStyle={{ paddingBottom: 8 }}
-      keyboardShouldPersistTaps="handled"
-    >
+    <KeyboardAvoidingWrapper>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 8 }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+      >
       <Text style={[styles.label, isRTL && { textAlign: "right" }, { marginTop: 0 }]}>
         {t("schoolTrip.selectTripMode")}
       </Text>
@@ -694,7 +697,8 @@ export default function SchoolTripForm() {
           {loading ? t("driverCreate.creating") : publishLabel}
         </Text>
       </Pressable>
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingWrapper>
   );
 }
 

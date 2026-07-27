@@ -4,6 +4,7 @@ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,6 +29,7 @@ import { translateCategoryLabel } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { backIconName } from "../../i18n/rtl";
 import AutocompleteTextField from "../../components/AutocompleteTextField";
+import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { fetchDriverEligibility } from "../driverEligibility";
 import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
@@ -577,34 +579,40 @@ export default function RideForm({
 
   if (embedded) {
     return (
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 8 }}
-        keyboardShouldPersistTaps="handled"
-      >
-        {content}
-      </ScrollView>
+      <KeyboardAvoidingWrapper>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: 8 }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          {content}
+        </ScrollView>
+      </KeyboardAvoidingWrapper>
     );
   }
 
   return (
     <DirectionalScreen style={styles.page}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={categoryStyles.topRow}>
-          <Pressable
-            style={styles.backButton}
-            onPress={() => (onBack ? onBack() : router.back())}
-          >
-            <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
-          </Pressable>
+      <KeyboardAvoidingWrapper>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          <View style={categoryStyles.topRow}>
+            <Pressable
+              style={styles.backButton}
+              onPress={() => (onBack ? onBack() : router.back())}
+            >
+              <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
+            </Pressable>
 
-          {categoryBadge}
-        </View>
+            {categoryBadge}
+          </View>
 
-        {content}
-      </ScrollView>
+          {content}
+        </ScrollView>
+      </KeyboardAvoidingWrapper>
     </DirectionalScreen>
   );
 }

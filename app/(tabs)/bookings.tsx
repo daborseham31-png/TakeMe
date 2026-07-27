@@ -28,6 +28,7 @@ import {
 } from "react-native";
 
 import { auth, db } from "../../firebase";
+import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import useMySchoolRows, {
   SchoolDriverRow,
   SchoolPassengerRow,
@@ -3710,9 +3711,11 @@ useEffect(() => {
 
   return (
     <DirectionalScreen style={styles.page}>
+      <KeyboardAvoidingWrapper>
       <ScrollView
         ref={mainScrollRef}
         contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
         onScroll={(e) => {
           scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
         }}
@@ -4003,6 +4006,7 @@ useEffect(() => {
           })()
         )}
       </ScrollView>
+      </KeyboardAvoidingWrapper>
 
       {school.modals}
 
@@ -4110,7 +4114,7 @@ useEffect(() => {
           setRoadsideRatingBooking(null);
         }}
       >
-        <View style={styles.ratingBackdrop}>
+        <KeyboardAvoidingWrapper style={styles.ratingBackdrop}>
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={() => {
@@ -4186,7 +4190,7 @@ useEffect(() => {
               )}
             </Pressable>
           </DirectionalCard>
-        </View>
+        </KeyboardAvoidingWrapper>
       </Modal>
     </DirectionalScreen>
   );

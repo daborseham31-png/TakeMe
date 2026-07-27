@@ -225,7 +225,7 @@ export default function ProfileScreen() {
 
   return (
     <DirectionalScreen style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
           <View style={styles.avatarWrapper}>
             {photo ? (

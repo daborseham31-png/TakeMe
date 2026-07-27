@@ -15,6 +15,7 @@ import CurrentLocationButton, {
   CurrentLocationResult,
 } from "../booking/CurrentLocationButton";
 import IsraelLocationAutocomplete from "../booking/IsraelLocationAutocomplete";
+import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { IsraelLocation } from "../booking/israelLocations";
 import { validateWeeklyRows, WeekDayRow } from "../booking/weeklyBookingLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
@@ -307,6 +308,7 @@ export default function PersonalRideScreen() {
 
   return (
     <DirectionalScreen style={styles.page}>
+      <KeyboardAvoidingWrapper>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -555,6 +557,7 @@ export default function PersonalRideScreen() {
           <Text style={styles.searchText}>{t("booking.searchDrivers")}</Text>
         </Pressable>
       </ScrollView>
+      </KeyboardAvoidingWrapper>
     </DirectionalScreen>
   );
 }

@@ -36,6 +36,7 @@ import {
 } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { ltrContentStyle } from "../../i18n/rtl";
+import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import DateInput, { TimeInput } from "../../driver/create/DateInput";
 import { normalizeDateToYMD, styles } from "../../driver/create/driverHelpers";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
@@ -617,6 +618,7 @@ export default function DirectionSearchForm() {
   };
 
   return (
+    <KeyboardAvoidingWrapper>
     <ScrollView contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
       <View
         style={[
@@ -867,6 +869,7 @@ export default function DirectionSearchForm() {
         </View>
       </Modal>
     </ScrollView>
+    </KeyboardAvoidingWrapper>
   );
 }
 

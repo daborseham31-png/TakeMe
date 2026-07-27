@@ -22,6 +22,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
+import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { marginEnd } from "../i18n/rtl";
@@ -222,6 +223,7 @@ export default function MessagesScreen() {
 
   return (
     <DirectionalScreen style={styles.page}>
+      <KeyboardAvoidingWrapper>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.headerRow}>
           <View style={styles.header}>
@@ -351,6 +353,7 @@ export default function MessagesScreen() {
           </View>
         )}
       </ScrollView>
+      </KeyboardAvoidingWrapper>
     </DirectionalScreen>
   );
 }

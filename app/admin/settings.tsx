@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { signOutAndRedirectToLogin } from "../authLib";
+import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { useLanguage } from "../i18n/LanguageProvider";
 import LanguageSelectorModal from "../i18n/LanguageSelectorModal";
 import { SUPPORTED_LANGUAGES } from "../i18n/languages";
@@ -110,7 +111,11 @@ export default function AdminSettingsScreen() {
 
   return (
     <AdminScreen title={t("admin.settings")} activeKey="settings">
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <KeyboardAvoidingWrapper>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.card}>
           <Pressable style={styles.avatarWrapper} onPress={pickImage}>
             {photo ? (
@@ -174,6 +179,7 @@ export default function AdminSettingsScreen() {
           <Text style={styles.logoutText}>{t("common.logOut")}</Text>
         </Pressable>
       </ScrollView>
+      </KeyboardAvoidingWrapper>
 
       <LanguageSelectorModal
         visible={languageModalVisible}
