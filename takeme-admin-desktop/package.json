@@ -1,0 +1,47 @@
+{
+  "name": "takeme-admin-desktop",
+  "productName": "TakeMe Admin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TakeMe admin dashboard, packaged as a Windows desktop app (Electron + React Native Web), reusing the existing admin screens from the TakeMe mobile app.",
+  "author": "TakeMe",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env NODE_ENV=development electron .\"",
+    "start": "electron-forge start",
+    "package": "npm run build && electron-forge package",
+    "make": "npm run build && electron-forge make",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.3",
+    "electron-squirrel-startup": "^1.0.1",
+    "firebase": "^12.14.0",
+    "history": "^5.3.0",
+    "i18next": "^26.3.6",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-i18next": "^17.0.9",
+    "react-native": "0.81.5",
+    "react-native-web": "~0.21.0",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.6.0",
+    "@electron-forge/maker-squirrel": "^7.6.0",
+    "@electron-forge/maker-zip": "^7.6.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "typescript": "~5.9.2",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  }
+}
+
+

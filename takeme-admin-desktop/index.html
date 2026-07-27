@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      The Content-Security-Policy is applied by electron/main.cjs's
+      onHeadersReceived instead of a <meta> tag here — it needs to differ
+      between dev (Vite's HMR client needs an inline bootstrap script) and
+      the packaged production build (strict, no 'unsafe-inline'), and a
+      single static HTML file can't express that conditionally on its own.
+    -->
+    <title>TakeMe Admin</title>
+    <style>
+      html, body, #root {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: #FBF7F1;
+      }
+      * { box-sizing: border-box; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
