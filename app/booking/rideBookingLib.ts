@@ -349,22 +349,38 @@ export const cancelRideBooking = async (
     didCancel = true;
   });
 
+  // The booking is ALREADY cancelled at this point (the transaction above
+  // already committed) — re-cancelling an already-cancelled booking is a
+  // safe no-op (didCancel stays false), making this function idempotent.
   if (!didCancel || !notifyReceiverId) return;
 
-  await notify({
-    receiverId: notifyReceiverId,
-    type: "cancelled",
-    title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
-    message:
-      cancelledBy === "passenger"
-        ? `${notifyPassengerName} cancelled their ride booking`
-        : `${notifyDriverName} cancelled your ride booking`,
-    applicationId: bookingId,
-    bookingId,
-    category: RIDE_CATEGORY,
-    status: "cancelled",
-    targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
-  });
+  // Best-effort — the cancellation itself already succeeded, so a
+  // notify() failure must never be reported back to the caller as a
+  // failed cancellation. Logged, never re-thrown (see cancelGeneralBooking
+  // in bookingsLib.ts for the same pattern).
+  try {
+    await notify({
+      receiverId: notifyReceiverId,
+      type: "cancelled",
+      title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
+      message:
+        cancelledBy === "passenger"
+          ? `${notifyPassengerName} cancelled their ride booking`
+          : `${notifyDriverName} cancelled your ride booking`,
+      applicationId: bookingId,
+      bookingId,
+      category: RIDE_CATEGORY,
+      status: "cancelled",
+      targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
+    });
+  } catch (error) {
+    console.log("cancelRideBooking: notify failed (booking already cancelled, non-fatal)", {
+      bookingId,
+      category: RIDE_CATEGORY,
+      path: "notifications",
+      error,
+    });
+  }
 };
 
 // ---------------------------------------------------------------------------

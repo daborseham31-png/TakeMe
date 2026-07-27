@@ -1242,44 +1242,72 @@ export const cancelGeneralBooking = async (
     }
   });
 
-// Only continue after a real cancellation transition.
-// Re-cancelling an already-cancelled booking must not create another
-// violation or send another notification.
-if (!didCancel) return;
+  // Only continue after a real cancellation transition — the booking is
+  // ALREADY cancelled at this point (the transaction above already
+  // committed). Re-cancelling an already-cancelled booking must not create
+  // another violation or send another notification, so this makes
+  // cancelGeneralBooking itself idempotent: calling it again on an
+  // already-cancelled booking resolves successfully and does nothing more.
+  if (!didCancel) return;
 
-if (cancelledBy === "driver" && booking.driverId) {
-  const date = getBookingDateYMD(booking);
-  const time = getBookingTime(booking);
+  // Everything below is a best-effort side effect, never the reason a
+  // cancellation that ALREADY succeeded gets reported to the caller as
+  // failed. Each is wrapped and logged instead of re-thrown — e.g. a
+  // missing Firestore composite index on cancellationViolations (adminExcused
+  // + createdAt) previously bubbled all the way up from here, past the one
+  // successful transaction above, and out to the UI as a generic
+  // "Something went wrong" even though the booking had already been
+  // cancelled. See recordDriverCancellationViolation (driverViolationsLib.ts)
+  // and notify (work-errand/workErrandLib.ts) for what each actually writes.
+  if (cancelledBy === "driver" && booking.driverId) {
+    const date = getBookingDateYMD(booking);
+    const time = getBookingTime(booking);
 
-  if (date) {
-    await recordDriverCancellationViolation({
-      driverId: booking.driverId,
-      sourceCollection: "bookings",
-      sourceId: bookingId,
-      sourceCategory: booking.category || "",
-      scheduledDeparture: new Date(
-        `${date}T${time || "00:00"}:00`
-      ),
+    if (date) {
+      try {
+        await recordDriverCancellationViolation({
+          driverId: booking.driverId,
+          sourceCollection: "bookings",
+          sourceId: bookingId,
+          sourceCategory: booking.category || "",
+          scheduledDeparture: new Date(`${date}T${time || "00:00"}:00`),
+        });
+      } catch (error) {
+        console.log("cancelGeneralBooking: recordDriverCancellationViolation failed (booking already cancelled, non-fatal)", {
+          bookingId,
+          category: booking.category,
+          path: `users/${booking.driverId}/cancellationViolations`,
+          error,
+        });
+      }
+    }
+  }
+
+  if (!notifyReceiverId) return;
+
+  try {
+    await notify({
+      receiverId: notifyReceiverId,
+      type: "cancelled",
+      title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
+      message:
+        cancelledBy === "passenger"
+          ? `${notifyPassengerName || "The passenger"} cancelled their booking`
+          : `${notifyDriverName || "The driver"} cancelled your booking`,
+      applicationId: bookingId,
+      bookingId,
+      category: booking.category,
+      status: "cancelled",
+      targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
+    });
+  } catch (error) {
+    console.log("cancelGeneralBooking: notify failed (booking already cancelled, non-fatal)", {
+      bookingId,
+      category: booking.category,
+      path: "notifications",
+      error,
     });
   }
-}
-
-if (!notifyReceiverId) return;
-
-await notify({
-  receiverId: notifyReceiverId,
-  type: "cancelled",
-  title: i18n.t("schoolTrip.bookingCancelledNotificationTitle"),
-  message:
-    cancelledBy === "passenger"
-      ? `${notifyPassengerName || "The passenger"} cancelled their booking`
-      : `${notifyDriverName || "The driver"} cancelled your booking`,
-  applicationId: bookingId,
-  bookingId,
-  category: booking.category,
-  status: "cancelled",
-  targetTab: cancelledBy === "passenger" ? "driver" : "passenger",
-});
 };
 
 export type DriverTripItem = {

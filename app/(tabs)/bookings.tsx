@@ -39,6 +39,7 @@ import {
   cancelGeneralBooking,
   canStartTrip,
   dismissRatingNotifications,
+  DRIVER_CANCEL_LOCK_HOURS,
   DriverCollection,
   DriverTripItem,
   getCategoryMeta,
@@ -48,6 +49,7 @@ import {
   getPassengerTripBucket,
   getPassengerTripStatus,
   getStartTripBlockedReason,
+  getTimeBasedCancelBlockedReason,
   getTripTimestamp,
   isCompletedItem,
   markCompleted,
@@ -1516,6 +1518,60 @@ runApp(
     ]);
   };
 
+  // "Cancel Trip" on a driver's own NOT-YET-completed listing (driverRoutes/
+  // workJobs/errandJobs — Personal Ride, School Ride, and every other
+  // driver-created trip card) — the pre-departure counterpart to the trash
+  // icon on a completed one (confirmDeleteTrip above), gated by the SAME
+  // 5-hour driver cancellation window every other category already uses
+  // (DRIVER_CANCEL_LOCK_HOURS — never the 2-hour passenger window). Reuses
+  // deleteTrip's own hide (deletedForDriver:true), then — ONLY when this
+  // specific trip actually has at least one passenger/worker booking (see
+  // tagTrip's activeBookingCount) — records a driver cancellation violation,
+  // exactly like cancelGeneralBooking does for an already-booked trip. A
+  // zero-booking listing affects nobody, so cancelling it never creates one.
+  const cancelDriverTrip = async (trip: TaggedTrip) => {
+    await deleteTrip(trip);
+
+    if (trip.activeBookingCount > 0) {
+      try {
+        await recordDriverCancellationViolation({
+          driverId: uid || "",
+          sourceCollection: trip.collectionName,
+          sourceId: trip.id,
+          sourceCategory: trip.category || "",
+          scheduledDeparture: new Date(`${trip.date}T${trip.time || "00:00"}:00`),
+        });
+      } catch (error) {
+        console.log("cancelDriverTrip: recordDriverCancellationViolation failed (trip already cancelled, non-fatal)", {
+          tripId: trip.id,
+          collection: trip.collectionName,
+          category: trip.category,
+          error,
+        });
+      }
+    }
+  };
+
+  const confirmCancelDriverTrip = (trip: TaggedTrip) => {
+    // Re-validated fresh at press time, not just trusted from whatever the
+    // disabled prop showed at last render — same defense-in-depth every
+    // other cancel confirm in this file already applies.
+    const blocked = getTimeBasedCancelBlockedReason(trip, DRIVER_CANCEL_LOCK_HOURS);
+    if (blocked) {
+      Alert.alert(t("booking.cannotCancelTitle"), blocked);
+      return;
+    }
+
+    Alert.alert(t("schoolTrip.cancelTripButton"), t("schoolTrip.cancelTripConfirm"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("schoolTrip.cancelTripButton"),
+        style: "destructive",
+        onPress: () => runApp(trip.id, () => cancelDriverTrip(trip)),
+      },
+    ]);
+  };
+
   // "Clear All" is a PURE per-user My Bookings view-hide action — never a
   // cancellation. It only ever acts on the exact role tab + status tab the
   // user currently has open (see clearAllScopeRows above), and only ever
@@ -1955,7 +2011,12 @@ runApp(
               // Help specifically, the driver-facing `roadsideRequests`
               // record (Help Requests screen, RoadsideAcceptedCard) needs
               // its own status flipped too, or it would keep showing stale
-              // action buttons forever.
+              // action buttons forever. Safe to call directly and let it
+              // resolve either way: syncCancelledRoadsideRequest already
+              // catches and logs its own errors internally (see
+              // roadsideLib.ts) rather than throwing — the booking is
+              // ALREADY cancelled by the time this runs, so this must never
+              // be able to turn into a false "cancellation failed" here.
               if (b.category === "roadside" && b.requestId) {
                 await syncCancelledRoadsideRequest(b.requestId);
               }
@@ -2623,10 +2684,10 @@ useEffect(() => {
                   <Pressable
                     style={[
                       styles.cancelBookingButton,
-                      !!rideCancelBlocked && styles.cancelBookingButtonDisabled,
+                      (!!rideCancelBlocked || busy) && styles.cancelBookingButtonDisabled,
                     ]}
                     onPress={() => handleCancelRideBooking(r, viewer)}
-                    disabled={!!rideCancelBlocked}
+                    disabled={!!rideCancelBlocked || busy}
                   >
                     <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
                     <Text style={styles.cancelBookingButtonText}>
@@ -2685,10 +2746,10 @@ useEffect(() => {
                 <Pressable
                   style={[
                     styles.cancelBookingButton,
-                    !!rideCancelBlocked && styles.cancelBookingButtonDisabled,
+                    (!!rideCancelBlocked || busy) && styles.cancelBookingButtonDisabled,
                   ]}
                   onPress={() => handleCancelRideBooking(r, viewer)}
-                  disabled={!!rideCancelBlocked}
+                  disabled={!!rideCancelBlocked || busy}
                 >
                   <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
                   <Text style={styles.cancelBookingButtonText}>
@@ -2789,6 +2850,7 @@ useEffect(() => {
 
   const renderBookingCard = (b: BookingItem, viewer: Tab = "passenger") => {
     const meta = getCategoryMeta(b.category);
+    const busy = busyId === b.id;
     const tripStatus = (b as any).tripStatus;
     const cancelled = b.status === "cancelled";
     const done = !cancelled && (b.status === "completed" || tripStatus === "completed");
@@ -2914,10 +2976,10 @@ useEffect(() => {
                 <Pressable
                   style={[
                     styles.cancelBookingButton,
-                    !!bookingCancelBlocked && styles.cancelBookingButtonDisabled,
+                    (!!bookingCancelBlocked || busy) && styles.cancelBookingButtonDisabled,
                   ]}
                   onPress={() => handleCancelGeneralBooking(b, viewer)}
-                  disabled={!!bookingCancelBlocked}
+                  disabled={!!bookingCancelBlocked || busy}
                 >
                   <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
                   <Text style={styles.cancelBookingButtonText}>
@@ -2982,10 +3044,10 @@ useEffect(() => {
                 <Pressable
                   style={[
                     styles.cancelBookingButton,
-                    !!bookingCancelBlocked && styles.cancelBookingButtonDisabled,
+                    (!!bookingCancelBlocked || busy) && styles.cancelBookingButtonDisabled,
                   ]}
                   onPress={() => handleCancelGeneralBooking(b, viewer)}
-                  disabled={!!bookingCancelBlocked}
+                  disabled={!!bookingCancelBlocked || busy}
                 >
                   <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
                   <Text style={styles.cancelBookingButtonText}>
@@ -3006,6 +3068,7 @@ useEffect(() => {
 
   const renderTripCard = (trip: TaggedTrip) => {
     const meta = getCategoryMeta(trip.category);
+    const busy = busyId === trip.id;
     const done = trip.status === "completed";
     const daysText = trip.days.length > 0 ? trip.days.join(", ") : "";
     const waitingForBooking = trip.waitingForBooking;
@@ -3014,6 +3077,13 @@ useEffect(() => {
     // ones read "Expired — No bookings", never the same text once the
     // departure time has passed.
     const isExpiredUnbooked = waitingForBooking && getDriverTripStatus(trip) === "expiredNoBookings";
+    // Every trip's own date/time (never a value shared across cards) — the
+    // exact 5-hour driver window every other category already uses, so a
+    // trip less than 5 hours from departure never disables any OTHER
+    // trip's button.
+    const cancelBlockedReason = !done
+      ? getTimeBasedCancelBlockedReason(trip, DRIVER_CANCEL_LOCK_HOURS)
+      : null;
 
     return (
       <View
@@ -3128,6 +3198,60 @@ useEffect(() => {
     <Ionicons name="checkmark-done" size={17} color="#166534" />
     <Text style={styles.completeButtonText}>{t("booking.markAsCompletedTitle")}</Text>
   </Pressable>
+) : null}
+
+{/* "Cancel Trip" — same wording and the same 5-hour (DRIVER_CANCEL_LOCK_HOURS)
+    window as every other driver-cancel button in this file
+    (renderRideCard/renderBookingCard's driver view), computed fresh from
+    THIS trip's own date/time above — never shared with or disabled by any
+    other card. Always shown for a not-yet-completed trip regardless of
+    booking count (never "Delete Trip" wording); only whether it ALSO
+    records a driver cancellation violation depends on activeBookingCount
+    (see cancelDriverTrip above) — a zero-booking listing never does.
+    Personal Ride uses the small, compact style (matching the School Ride
+    card in useMySchoolRows.tsx's own renderTripCard — same
+    marginTop/alignSelf/fontSize/color) instead of the large full-width
+    button every other category here still uses — a UI-only distinction,
+    the underlying eligibility/press handler is identical either way. */}
+{!done ? (
+  trip.category === "personal" ? (
+    <>
+      <Pressable
+        style={[
+          styles.smallCancelTripButton,
+          (!!cancelBlockedReason || busy) && styles.smallCancelTripButtonDisabled,
+        ]}
+        onPress={() => confirmCancelDriverTrip(trip)}
+        disabled={!!cancelBlockedReason || busy}
+      >
+        <Text style={styles.smallCancelTripButtonText}>
+          {t("schoolTrip.cancelTripButton")}
+        </Text>
+      </Pressable>
+
+      {cancelBlockedReason ? (
+        <Text style={styles.smallCancelTripHint}>{cancelBlockedReason}</Text>
+      ) : null}
+    </>
+  ) : (
+    <>
+      <Pressable
+        style={[
+          styles.cancelBookingButton,
+          (!!cancelBlockedReason || busy) && styles.cancelBookingButtonDisabled,
+        ]}
+        onPress={() => confirmCancelDriverTrip(trip)}
+        disabled={!!cancelBlockedReason || busy}
+      >
+        <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+        <Text style={styles.cancelBookingButtonText}>{t("schoolTrip.cancelTripButton")}</Text>
+      </Pressable>
+
+      {cancelBlockedReason ? (
+        <Text style={styles.appHint}>{cancelBlockedReason}</Text>
+      ) : null}
+    </>
+  )
 ) : null}
       </View>
     );
@@ -4845,6 +4969,27 @@ const styles = StyleSheet.create({
   },
   cancelBookingButtonDisabled: {
     opacity: 0.5,
+  },
+  // Personal Ride's driver "Unbooked Trips" card only — matches the School
+  // Ride card's own small cancel action exactly (useMySchoolRows.tsx's
+  // cancelButton/cancelButtonText/noReturnRowText), instead of the large
+  // full-width cancelBookingButton every other category card here uses.
+  smallCancelTripButton: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+  },
+  smallCancelTripButtonDisabled: {
+    opacity: 0.5,
+  },
+  smallCancelTripButtonText: {
+    color: "#B91C1C",
+    fontWeight: "800",
+    fontSize: 12.5,
+  },
+  smallCancelTripHint: {
+    fontSize: 12,
+    color: "#7C5F46",
+    fontWeight: "700",
   },
   primaryButton: {
     flexDirection: "row",
