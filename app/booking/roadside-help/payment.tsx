@@ -22,7 +22,6 @@ import {
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -39,7 +38,6 @@ import { useLanguage } from "../../i18n/LanguageProvider";
 import { backIconName } from "../../i18n/rtl";
 import BitBadge from "../BitBadge";
 import { openBitPayment } from "../bitPayment";
-import { payRoadsideHelp, RoadsidePaymentMethod } from "./roadsideLib";
 
 type BookingDoc = {
   id: string;
@@ -50,6 +48,7 @@ type BookingDoc = {
   etaMinutes: number | null;
   price: number | null;
   status: string;
+  paymentMethod: string;
   paymentStatus: string;
   paidAmount: number | null;
 };
@@ -63,6 +62,7 @@ const normalize = (id: string, data: any): BookingDoc => ({
   etaMinutes: typeof data.etaMinutes === "number" ? data.etaMinutes : null,
   price: typeof data.price === "number" ? data.price : null,
   status: data.status || "",
+  paymentMethod: data.paymentMethod || "",
   paymentStatus: data.paymentStatus || "",
   paidAmount: typeof data.paidAmount === "number" ? data.paidAmount : null,
 });
@@ -81,8 +81,6 @@ export default function RoadsideHelpPaymentScreen() {
   const [bookingId, setBookingId] = useState(bookingIdParam);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [method, setMethod] = useState<RoadsidePaymentMethod | null>(null);
-  const [processing, setProcessing] = useState(false);
 
   // Resolve the booking id: prefer the one passed in (from the payment
   // notification), otherwise look it up by requestId.
@@ -149,37 +147,13 @@ export default function RoadsideHelpPaymentScreen() {
     return unsubscribe;
   }, [bookingId]);
 
-  const handleSelectBit = () => {
-    setMethod("bit");
+  // Opening BIT never marks anything paid — see bitPayment.ts's own module
+  // note. The payment only ever leaves "pending" via the accepted helper's
+  // own "Confirm Cash Received" (cash) or a real Bit confirmation this
+  // project has no automated path for yet (bit stays "pending" until
+  // settled out of band — see roadsideLib.ts's confirmCompletion comment).
+  const handleOpenBit = () => {
     openBitPayment(booking?.driverPhone || "", booking?.price ?? amountParam);
-  };
-
-  const handlePay = async () => {
-    if (!bookingId || processing || !method) return;
-
-    try {
-      setProcessing(true);
-      const result = await payRoadsideHelp(bookingId, method);
-
-      Alert.alert(
-        t("roadsideHelp.paymentSuccessfulTitle"),
-        t("roadsideHelp.paidAmountMessage", { amount: result.amount }),
-        [
-          {
-            text: t("common.ok"),
-            onPress: () =>
-              router.replace({
-                pathname: "/(tabs)/bookings",
-                params: { tab: "passenger", bookingId },
-              } as any),
-          },
-        ],
-      );
-    } catch (error: any) {
-      Alert.alert(t("roadsideHelp.paymentFailedTitle"), error?.message || t("validation.pleaseTryAgain"));
-    } finally {
-      setProcessing(false);
-    }
   };
 
   const driverName = booking?.driverName || driverNameParam;
@@ -264,66 +238,36 @@ export default function RoadsideHelpPaymentScreen() {
                   {t("roadsideHelp.notReadyForPaymentMessage")}
                 </Text>
               </View>
+            ) : booking.paymentMethod === "cash" ? (
+              <View style={styles.card}>
+                <View style={styles.cardTitleRow}>
+                  <Text style={styles.cashEmoji}>💵</Text>
+                  <Text style={styles.cardTitle}>{t("common.cash")}</Text>
+                </View>
+                <Text style={styles.summaryText}>
+                  {t("roadsideHelp.payCashDirectlyMessage", { amount, name: driverName })}
+                </Text>
+              </View>
             ) : (
               <>
                 <View style={styles.card}>
                   <View style={styles.cardTitleRow}>
-                    <Ionicons name="card-outline" size={20} color="#F58220" />
-                    <Text style={styles.cardTitle}>{t("rides.paymentMethod")}</Text>
+                    <BitBadge size={20} />
+                    <Text style={styles.cardTitle}>{t("roadsideHelp.payWithBit")}</Text>
                   </View>
 
-                  <View style={styles.methodRow}>
-                    <Pressable
-                      style={[
-                        styles.methodButton,
-                        method === "cash" && styles.methodButtonActive,
-                      ]}
-                      onPress={() => setMethod("cash")}
-                    >
-                      <Text style={styles.cashEmoji}>💵</Text>
-                      <Text
-                        style={[
-                          styles.methodText,
-                          method === "cash" && styles.methodTextActive,
-                        ]}
-                      >
-                        {t("common.cash")}
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      style={[
-                        styles.methodButton,
-                        method === "bit" && styles.methodButtonActive,
-                      ]}
-                      onPress={handleSelectBit}
-                    >
-                      <BitBadge size={18} />
-                      <Text
-                        style={[
-                          styles.methodText,
-                          method === "bit" && styles.methodTextActive,
-                        ]}
-                      >
-                        {t("roadsideHelp.payWithBit")}
-                      </Text>
-                    </Pressable>
+                  <View style={styles.bitInfoBox}>
+                    <Ionicons
+                      name="information-circle-outline"
+                      size={16}
+                      color="#B86115"
+                    />
+                    <Text style={styles.bitInfoText}>
+                      {t("roadsideHelp.bitOpenedInfo", {
+                        phone: booking.driverPhone || t("roadsideHelp.theDriversNumberFallback"),
+                      })}
+                    </Text>
                   </View>
-
-                  {method === "bit" ? (
-                    <View style={styles.bitInfoBox}>
-                      <Ionicons
-                        name="information-circle-outline"
-                        size={16}
-                        color="#B86115"
-                      />
-                      <Text style={styles.bitInfoText}>
-                        {t("roadsideHelp.bitOpenedInfo", {
-                          phone: booking.driverPhone || t("roadsideHelp.theDriversNumberFallback"),
-                        })}
-                      </Text>
-                    </View>
-                  ) : null}
                 </View>
 
                 <View style={styles.secureRow}>
@@ -333,26 +277,13 @@ export default function RoadsideHelpPaymentScreen() {
                     color="#7C5F46"
                   />
                   <Text style={styles.secureText}>
-                    {t("roadsideHelp.securePaymentNote")}
+                    {t("roadsideHelp.bitStaysPendingNote")}
                   </Text>
                 </View>
 
-                <Pressable
-                  style={[
-                    styles.payButton,
-                    (!method || processing) && styles.payButtonDisabled,
-                  ]}
-                  onPress={handlePay}
-                  disabled={!method || processing}
-                >
-                  {processing ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <Ionicons name="card-outline" size={20} color="#FFFFFF" />
-                      <Text style={styles.payText}>{t("roadsideHelp.payAmount", { amount })}</Text>
-                    </>
-                  )}
+                <Pressable style={styles.payButton} onPress={handleOpenBit}>
+                  <Ionicons name="phone-portrait-outline" size={20} color="#FFFFFF" />
+                  <Text style={styles.payText}>{t("roadsideHelp.payWithBit")}</Text>
                 </Pressable>
               </>
             )}

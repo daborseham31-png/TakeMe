@@ -57,6 +57,9 @@ export type TripTrackingStatus =
   | "driver_on_way"
   | "arrived_pickup"
   | "in_progress"
+  // Roadside Help only — the helper pressed "Finish Help" but the customer
+  // hasn't confirmed completion yet (see roadside-help/roadsideLib.ts).
+  | "completion_pending"
   | "completed";
 
 export type LatLng = {
@@ -894,12 +897,11 @@ const normalizeTripStatus = (value: any): TripTrackingStatus => {
     value === "driver_on_way" ||
     value === "arrived_pickup" ||
     value === "in_progress" ||
+    value === "completion_pending" ||
     value === "completed"
   ) {
     return value;
   }
-
-  if (value === "completed") return "completed";
 
   return "booked";
 };
@@ -974,8 +976,11 @@ export type BookingItem = {
   driverPhone: string;
   requestId: string;
   offerId: string;
-  // "not_due" | "pending" | "paid" — see roadsideLib.ts.
+  // "not_due" | "selected" | "pending" | "paid" | "failed" — see roadsideLib.ts.
   paymentStatus: string;
+  // "cash" | "bit" | "" — chosen once, at offer-acceptance time, and never
+  // changed afterward (see roadsideLib.ts's acceptOffer + firestore.rules).
+  paymentMethod: string;
   helpCompleted: boolean;
 };
 
@@ -1068,6 +1073,7 @@ export const normalizeBooking = (id: string, data: any): BookingItem => {
     requestId: data.requestId || "",
     offerId: data.offerId || "",
     paymentStatus: data.paymentStatus || "",
+    paymentMethod: data.paymentMethod || "",
     helpCompleted: data.helpCompleted === true,
     searchText: buildSearchText([
       meta.label,

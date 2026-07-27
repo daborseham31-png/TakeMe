@@ -126,6 +126,185 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------
+    // Roadside Help — helper stage machine (Start Driving -> I've Arrived ->
+    // Start Help -> Finish Help -> customer Confirm Completion -> cash-only
+    // Confirm Cash Received) plus offer acceptance and cancellation sync.
+    // See app/booking/roadside-help/roadsideLib.ts, which is the ONLY
+    // client code that ever writes these three collections' post-creation
+    // fields — every branch below matches ONE of its transaction write
+    // shapes exactly (field-for-field, via hasOnly()), which is what makes
+    // "the accepted helper, price, and payment method cannot be changed
+    // after acceptance" a real guarantee: those fields simply never appear
+    // in any allowed key list once the accept-transition itself has run.
+    // ---------------------------------------------------------------
+    function isValidRoadsideRequestUpdate() {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      return (
+        // Accept — the request owner only, exactly once (oldData.status
+        // must still be "open"), choosing exactly one helper + payment
+        // method for the rest of this request's life.
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status == "open" &&
+          newData.status == "helper_assigned" &&
+          newData.selectedDriverId is string && newData.selectedDriverId != "" &&
+          newData.paymentMethod in ["cash", "bit"] &&
+          newData.diff(oldData).affectedKeys().hasOnly([
+            "status", "selectedOfferId", "selectedDriverId", "selectedDriverName",
+            "selectedDriverPhone", "passengerId", "passengerName", "passengerPhone",
+            "serviceType", "address", "latitude", "longitude", "agreedPrice",
+            "etaMinutes", "estimatedArrivalMinutes", "paymentMethod", "paymentStatus",
+            "bookingId", "acceptedAt", "updatedAt",
+          ])) ||
+
+        // Helper stage transitions — the accepted helper only, exactly one
+        // step forward at a time.
+        (oldData.get("selectedDriverId", null) == request.auth.uid &&
+          (
+            (oldData.status == "helper_assigned" && newData.status == "helper_on_way") ||
+            (oldData.status == "helper_on_way" && newData.status == "arrived") ||
+            (oldData.status == "arrived" && newData.status == "in_progress") ||
+            (oldData.status == "in_progress" && newData.status == "completion_pending")
+          ) &&
+          newData.diff(oldData).affectedKeys().hasOnly(
+            ["status", "driverOnTheWayAt", "arrivedAt", "helpStartedAt", "finishedAt", "updatedAt"]
+          )) ||
+
+        // Customer confirms completion — the ONLY path to "completed".
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status == "completion_pending" &&
+          newData.status == "completed" &&
+          newData.diff(oldData).affectedKeys().hasOnly([
+            "status", "paymentStatus", "helpCompleted", "needsPassengerRating",
+            "ratingSubmitted", "completedAt", "updatedAt",
+          ])) ||
+
+        // Accepted helper confirms cash received — cash method only, only
+        // once the customer has already confirmed completion.
+        (oldData.get("selectedDriverId", null) == request.auth.uid &&
+          oldData.paymentMethod == "cash" &&
+          oldData.status == "completed" &&
+          oldData.get("paymentStatus", "") == "pending" &&
+          newData.paymentStatus == "paid" &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["paymentStatus", "paidBy", "paidTo", "paidAmount", "paidAt", "updatedAt"])) ||
+
+        // Passenger rates the helper (submitRoadsideRating) — only once,
+        // only after the service has actually reached "completed".
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status == "completed" &&
+          oldData.get("ratingSubmitted", false) == false &&
+          newData.rating is int && newData.rating >= 1 && newData.rating <= 5 &&
+          newData.diff(oldData).affectedKeys().hasOnly(
+            ["rating", "reviewComment", "ratingSubmitted", "needsPassengerRating", "ratedAt", "updatedAt"]
+          )) ||
+
+        // Customer cancels — cancelRoadsideRequestByPassenger — ONLY while
+        // still "open" or "helper_assigned", i.e. before the accepted
+        // helper has pressed Start Driving. This is the sole enforcement
+        // point that matters once the UI button is gone: even a direct
+        // client write past this point is rejected here.
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status in ["open", "helper_assigned"] &&
+          newData.status == "cancelled" &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["status", "cancelledBy", "cancelledAt", "updatedAt"])) ||
+
+        // Driver cancels — syncCancelledRoadsideRequest, run right after
+        // cancelGeneralBooking's own `bookings` write succeeds. Unrestricted
+        // by stage (unchanged from before) — this task only tightens the
+        // customer's own cancellation window, not the driver's.
+        (oldData.get("selectedDriverId", null) == request.auth.uid &&
+          newData.status == "cancelled" &&
+          newData.diff(oldData).affectedKeys().hasOnly(["status", "updatedAt"]))
+      );
+    }
+
+    function isValidRoadsideOfferUpdate() {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      return (
+        // The request owner accepts/rejects offers on their own request
+        // (acceptOffer, rejectOffer) and later marks the accepted offer
+        // completed once they confirm completion — every offer carries its
+        // own passengerId (copied at creation), so this needs no
+        // cross-collection get().
+        (oldData.passengerId == request.auth.uid &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["status", "paymentStatus", "acceptedAt", "completedAt", "updatedAt"]) &&
+          (
+            (oldData.status == "pending" && newData.status in ["accepted", "not_selected"]) ||
+            (oldData.status == "accepted" && newData.status in ["not_selected", "completed"])
+          )) ||
+        // The accepted helper confirms cash received on their own offer.
+        (oldData.driverId == request.auth.uid &&
+          oldData.status == "completed" &&
+          oldData.get("paymentStatus", "") == "pending" &&
+          newData.paymentStatus == "paid" &&
+          newData.diff(oldData).affectedKeys().hasOnly(["paymentStatus", "paidAt", "updatedAt"]))
+      );
+    }
+
+    function isValidRoadsideBookingUpdate() {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      return (
+        // Helper stage transitions.
+        (oldData.driverId == request.auth.uid &&
+          (
+            (oldData.tripStatus == "booked" && newData.tripStatus == "driver_on_way") ||
+            (oldData.tripStatus == "driver_on_way" && newData.tripStatus == "arrived_pickup") ||
+            (oldData.tripStatus == "arrived_pickup" && newData.tripStatus == "in_progress") ||
+            (oldData.tripStatus == "in_progress" && newData.tripStatus == "completion_pending")
+          ) &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["tripStatus", "trackingEnabled", "updatedAt"])) ||
+
+        // Customer confirms completion.
+        (oldData.passengerId == request.auth.uid &&
+          oldData.tripStatus == "completion_pending" &&
+          newData.tripStatus == "completed" &&
+          newData.diff(oldData).affectedKeys().hasOnly([
+            "status", "tripStatus", "paymentStatus", "helpCompleted",
+            "needsPassengerRating", "ratingSubmitted", "completedAt", "updatedAt",
+          ])) ||
+
+        // Accepted helper confirms cash received.
+        (oldData.driverId == request.auth.uid &&
+          oldData.paymentMethod == "cash" &&
+          oldData.status == "completed" &&
+          oldData.get("paymentStatus", "") == "pending" &&
+          newData.paymentStatus == "paid" &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["paymentStatus", "paidAmount", "paidAt", "updatedAt"])) ||
+
+        // Passenger rates the helper (submitRoadsideRating).
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status == "completed" &&
+          oldData.get("ratingSubmitted", false) == false &&
+          newData.rating is int && newData.rating >= 1 && newData.rating <= 5 &&
+          newData.diff(oldData).affectedKeys().hasOnly(
+            ["rating", "reviewComment", "ratingSubmitted", "needsPassengerRating", "ratedAt", "updatedAt"]
+          )) ||
+
+        // Customer cancels — cancelRoadsideRequestByPassenger — ONLY while
+        // tripStatus is still "booked" (before Start Driving). Same cutoff
+        // as isValidRoadsideRequestUpdate's matching branch above.
+        (oldData.passengerId == request.auth.uid &&
+          oldData.tripStatus == "booked" &&
+          newData.status == "cancelled" &&
+          newData.diff(oldData).affectedKeys().hasOnly(["status", "updatedAt"])) ||
+
+        // Driver cancels (cancelGeneralBooking — shared across every
+        // category, see the `bookings` match block's own comment below).
+        // Unrestricted by stage, unchanged from before.
+        (oldData.driverId == request.auth.uid &&
+          newData.status == "cancelled" &&
+          newData.diff(oldData).affectedKeys().hasOnly(["status", "updatedAt"]))
+      );
+    }
+
+    // ---------------------------------------------------------------
     // users/{userId}
     // ---------------------------------------------------------------
     match /users/{userId} {
@@ -253,7 +432,26 @@ service cloud.firestore {
     // re-read the current document fresh before acting on it.
     // ---------------------------------------------------------------
     match /bookings/{bookingId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+
+      // Creation stays broad for every category (see the comment above) —
+      // acceptOffer's own transaction (the passenger's client) creates the
+      // roadside booking doc this way too.
+      allow create: if isSignedIn();
+
+      // Roadside Help (category == "roadside") is the one category with a
+      // real, audited field-transition shape post-creation — see
+      // isValidRoadsideBookingUpdate above. Every other category keeps
+      // today's broad behavior unchanged (see the comment above on why).
+      // Admin overrides (adminBookingsLib.ts's cancelBooking, etc.) keep
+      // working exactly as before, for every category including roadside.
+      allow update: if isSignedIn() &&
+        (isAdmin() || resource.data.get("category", "") != "roadside" || isValidRoadsideBookingUpdate());
+
+      // Nothing in this app ever deletes a booking doc (cancellation is a
+      // status update, never a delete) — denying it here is a pure
+      // tightening with no known write path affected.
+      allow delete: if false;
     }
 
     match /driverRoutes/{routeId} {
@@ -314,11 +512,29 @@ service cloud.firestore {
     }
 
     match /roadsideRequests/{requestId} {
-      allow read, write: if isSignedIn();
+      // Broad authenticated read: nearby drivers browse open requests
+      // (Help Requests screen), and sendDriverOffer reads a request that
+      // doesn't belong to the calling driver to copy its passenger info
+      // onto a new offer.
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() && request.resource.data.passengerId == request.auth.uid;
+
+      allow update: if isSignedIn() && (isAdmin() || isValidRoadsideRequestUpdate());
+
+      allow delete: if false;
     }
 
     match /roadsideOffers/{offerId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+        request.resource.data.driverId == request.auth.uid &&
+        request.resource.data.status == "pending";
+
+      allow update: if isSignedIn() && (isAdmin() || isValidRoadsideOfferUpdate());
+
+      allow delete: if false;
     }
 
     // See isValidDriverReview above — reviewId must equal the bookingId

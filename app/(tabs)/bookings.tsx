@@ -95,10 +95,15 @@ import {
 } from "../booking/work-errand/workErrandLib";
 import RoadsideAcceptedCard from "../booking/roadside-help/RoadsideAcceptedCard";
 import {
+  cancelRoadsideRequestByPassenger,
+  confirmCompletion,
   normalizeRoadsideRequest,
   RoadsideRequestRecord,
   submitRoadsideRating,
+  syncCancelledRoadsideRequest,
 } from "../booking/roadside-help/roadsideLib";
+import { openBitPayment } from "../booking/bitPayment";
+import { createReport } from "../admin/adminReportsLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -346,6 +351,13 @@ export default function BookingsScreen() {
   const [ratedSchoolBookingIds, setRatedSchoolBookingIds] = useState<string[]>(
     [],
   );
+
+  // "Report a Problem" (customer-only, roadside completion_pending stage) —
+  // reuses the exact same adminReports collection/flow as the profile
+  // screen's own "Report a Problem" entry point (see adminReportsLib.ts).
+  const [reportBooking, setReportBooking] = useState<BookingItem | null>(null);
+  const [reportDescription, setReportDescription] = useState("");
+  const [submittingReport, setSubmittingReport] = useState(false);
 
   // Set only from a tapped rating notification (see the params effect below)
   // — the ONLY way the rating modal opens on its own now. Cleared the moment
@@ -1880,6 +1892,32 @@ runApp(
   };
 
   const handleCancelGeneralBooking = (b: BookingItem, viewer: Tab) => {
+    // Roadside Help's PASSENGER cancellation has its own, stricter rule —
+    // owner only, and only while the accepted helper hasn't pressed Start
+    // Driving yet (tripStatus still "booked") — enforced here, again inside
+    // cancelRoadsideRequestByPassenger's own transaction, and a third time
+    // in firestore.rules, so a direct client write can never bypass it
+    // either. This never touches driver-side cancellation or any other
+    // booking category, both of which keep using the generic path below.
+    if (b.category === "roadside" && viewer === "passenger") {
+      if (b.tripStatus !== "booked") return; // button is hidden for this stage; stay safe regardless.
+
+      Alert.alert(t("booking.cancelBookingTitle"), t("booking.cancelBookingConfirm"), [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("booking.cancelBookingTitle"),
+          style: "destructive",
+          onPress: () =>
+            runApp(
+              b.id,
+              () => cancelRoadsideRequestByPassenger(b.requestId),
+              (error: any) => error?.message || t("booking.somethingWentWrong"),
+            ),
+        },
+      ]);
+      return;
+    }
+
     const blocked = getGeneralBookingCancelBlockedReason(b, viewer);
     if (blocked) {
       Alert.alert(t("booking.cannotCancelTitle"), blocked);
@@ -1897,7 +1935,23 @@ runApp(
         text: title,
         style: "destructive",
         onPress: () =>
-          runApp(b.id, () => cancelGeneralBooking(b.id, b, viewer), translateCancellationError),
+          runApp(
+            b.id,
+            async () => {
+              await cancelGeneralBooking(b.id, b, viewer);
+
+              // cancelGeneralBooking only ever touches the shared `bookings`
+              // doc (it's generic across every category) — for Roadside
+              // Help specifically, the driver-facing `roadsideRequests`
+              // record (Help Requests screen, RoadsideAcceptedCard) needs
+              // its own status flipped too, or it would keep showing stale
+              // action buttons forever.
+              if (b.category === "roadside" && b.requestId) {
+                await syncCancelledRoadsideRequest(b.requestId);
+              }
+            },
+            translateCancellationError,
+          ),
       },
     ]);
   };
@@ -3059,19 +3113,53 @@ useEffect(() => {
     );
   };
 
-  const goToRoadsidePayment = (b: BookingItem) => {
-    router.push({
-      pathname: "/booking/roadside-help/payment",
-      params: {
-        bookingId: b.id,
-        requestId: b.requestId,
-        offerId: b.offerId,
-        driverId: b.driverId,
-        driverName: b.driverName,
-        amount: typeof b.price === "number" ? String(b.price) : "",
-        category: "roadside",
-      },
-    } as any);
+  const goToLiveTracking = (b: BookingItem) => {
+    router.push({ pathname: "/booking/live-tracking", params: { id: b.id } } as any);
+  };
+
+  const openReportProblemModal = (b: BookingItem) => {
+    setReportDescription("");
+    setReportBooking(b);
+  };
+
+  const submitProblemReport = async () => {
+    if (!reportBooking || !reportDescription.trim() || submittingReport) return;
+
+    try {
+      setSubmittingReport(true);
+      await createReport({
+        category: "booking",
+        targetType: "booking",
+        targetId: reportBooking.id,
+        description: reportDescription.trim(),
+      });
+      setReportBooking(null);
+      setReportDescription("");
+      Alert.alert(t("profile.reportSentTitle"), t("profile.reportSent"));
+    } catch (error: any) {
+      Alert.alert(t("common.error"), error?.message || t("profile.couldNotSendReport"));
+    } finally {
+      setSubmittingReport(false);
+    }
+  };
+
+  const handleConfirmCompletion = (b: BookingItem) => {
+    Alert.alert(
+      t("roadsideHelp.confirmCompletionTitle"),
+      t("roadsideHelp.confirmCompletionConfirm"),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("common.confirm"),
+          onPress: () =>
+            runApp(b.id, () => confirmCompletion(b.id), (error: any) => error?.message || t("roadsideHelp.couldNotConfirmCompletion")),
+        },
+      ],
+    );
+  };
+
+  const handlePayWithBit = (b: BookingItem) => {
+    openBitPayment(b.driverPhone || "", b.price ?? null);
   };
 
   const renderRoadsideCard = (b: BookingItem, viewer: Tab) => {
@@ -3080,13 +3168,51 @@ useEffect(() => {
     const otherPhone = viewer === "passenger" ? b.driverPhone : b.passengerPhone;
     const isDriverView = viewer === "driver";
 
-    const isAccepted = b.status !== "completed" && !b.helpCompleted;
-    const isCompletedUnpaid =
-      (b.status === "completed" || b.helpCompleted) && b.paymentStatus !== "paid";
+    const isCancelled = b.status === "cancelled";
+    const isAccepted = b.status !== "completed" && !b.helpCompleted && !isCancelled;
+    const isCompletionPendingStage = b.tripStatus === "completion_pending";
+    const isCompletedStage = b.status === "completed" || b.helpCompleted;
     const isPaid = b.paymentStatus === "paid";
-    const roadsideCancelBlocked = isAccepted
-      ? getGeneralBookingCancelBlockedReason(b, viewer)
-      : null;
+    const isBitMethod = b.paymentMethod === "bit";
+
+    // Live Tracking is shown from the moment an offer is accepted through
+    // the helper's whole visit — disabled (spec #1) until they press Start
+    // Driving, and hidden again once the request is cancelled/fully done.
+    const showLiveTracking = !isCancelled && !isCompletedStage;
+    const liveTrackingReady =
+      b.tripStatus === "driver_on_way" ||
+      b.tripStatus === "arrived_pickup" ||
+      b.tripStatus === "in_progress";
+
+    // Passenger cancellation: allowed ONLY while tripStatus is still
+    // "booked" (open/helper_assigned — before the helper presses Start
+    // Driving). Once it advances (driver_on_way/arrived_pickup/in_progress/
+    // completion_pending/completed), the button is removed from the card
+    // entirely — no disabled state, no "can no longer be cancelled" text
+    // (see cancelRoadsideRequestByPassenger + firestore.rules, which
+    // enforce this exact same cutoff server-side). Driver-view keeps its
+    // existing (unrestricted) cancel behavior, unchanged.
+    const canCancelRoadsideAsPassenger =
+      !isDriverView && isAccepted && b.tripStatus === "booked";
+
+    const driverRoadsideCancelBlocked =
+      isDriverView && isAccepted ? getGeneralBookingCancelBlockedReason(b, viewer) : null;
+
+    const stageBadge = isPaid
+      ? { label: t("roadsideHelp.badgeCompleted"), style: styles.statusDone, textStyle: styles.statusTextDone, icon: "cash" as const }
+      : isCancelled
+        ? { label: t("roadsideHelp.badgeCancelled"), style: styles.statusDead, textStyle: styles.statusTextDead, icon: "close-circle" as const }
+        : isCompletedStage
+          ? { label: t("roadsideHelp.badgeCompleted"), style: styles.statusDone, textStyle: styles.statusTextDone, icon: "checkmark-done" as const }
+          : isCompletionPendingStage
+            ? { label: t("roadsideHelp.badgeAwaitingConfirmation"), style: styles.statusOngoing, textStyle: styles.statusTextOngoing, icon: "time" as const }
+            : b.tripStatus === "in_progress"
+              ? { label: t("roadsideHelp.badgeInProgress"), style: styles.statusOngoing, textStyle: styles.statusTextOngoing, icon: "construct" as const }
+              : b.tripStatus === "arrived_pickup"
+                ? { label: t("roadsideHelp.badgeArrived"), style: styles.statusOngoing, textStyle: styles.statusTextOngoing, icon: "flag" as const }
+                : b.tripStatus === "driver_on_way"
+                  ? { label: t("roadsideHelp.badgeOnTheWay"), style: styles.statusOngoing, textStyle: styles.statusTextOngoing, icon: "navigate" as const }
+                  : { label: t("roadsideHelp.badgeAccepted"), style: styles.statusOngoing, textStyle: styles.statusTextOngoing, icon: "checkmark-circle" as const };
 
     return (
       <View
@@ -3104,28 +3230,10 @@ useEffect(() => {
           </View>
 
           <View style={styles.cardTopActions}>
-            {isPaid ? (
-              <View style={[styles.statusPill, styles.statusDone]}>
-                <Ionicons name="cash" size={13} color="#166534" />
-                <Text style={[styles.statusText, styles.statusTextDone]}>
-                  {t("booking.paymentReceivedLabel")}
-                </Text>
-              </View>
-            ) : isCompletedUnpaid ? (
-              <View style={[styles.statusPill, styles.statusOngoing]}>
-                <Ionicons name="time" size={13} color="#B86115" />
-                <Text style={[styles.statusText, styles.statusTextOngoing]}>
-                  {t("booking.waitingForPaymentLabel")}
-                </Text>
-              </View>
-            ) : (
-              <View style={[styles.statusPill, styles.statusOngoing]}>
-                <Ionicons name="checkmark-circle" size={13} color="#B86115" />
-                <Text style={[styles.statusText, styles.statusTextOngoing]}>
-                  {t("roadsideHelp.badgeAccepted")}
-                </Text>
-              </View>
-            )}
+            <View style={[styles.statusPill, stageBadge.style]}>
+              <Ionicons name={stageBadge.icon} size={13} color={stageBadge.textStyle === styles.statusTextDone ? "#166534" : stageBadge.textStyle === styles.statusTextDead ? "#B91C1C" : "#B86115"} />
+              <Text style={[styles.statusText, stageBadge.textStyle]}>{stageBadge.label}</Text>
+            </View>
             {!isAccepted
               ? renderDeleteButton(() =>
                   confirmHideGeneralBooking(b, viewer, t("booking.roadsideHelpLowercase")),
@@ -3181,16 +3289,96 @@ useEffect(() => {
               <Text style={styles.metaText}>{t("booking.minutesShort", { count: b.etaMinutes })}</Text>
             </View>
           ) : null}
+
+          {!isDriverView && b.paymentMethod ? (
+            <View style={styles.metaItem}>
+              <Ionicons
+                name={isBitMethod ? "phone-portrait-outline" : "cash-outline"}
+                size={15}
+                color="#7C5F46"
+              />
+              <Text style={styles.metaTextMuted}>
+                {isBitMethod ? t("roadsideHelp.payWithBit") : t("common.cash")}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
-        {!isDriverView && isCompletedUnpaid ? (
-          <Pressable
-            style={styles.primaryButtonFull}
-            onPress={() => goToRoadsidePayment(b)}
-          >
-            <Ionicons name="card" size={18} color="#FFFFFF" />
-            <Text style={styles.primaryButtonText}>{t("booking.payNowButton")}</Text>
-          </Pressable>
+        {/* Live Tracking — see requirement #1: disabled + explanatory
+            message until the helper presses Start Driving. */}
+        {!isDriverView && showLiveTracking ? (
+          <>
+            <Pressable
+              style={[styles.startButton, !liveTrackingReady && styles.startDisabled]}
+              onPress={() => goToLiveTracking(b)}
+              disabled={!liveTrackingReady}
+            >
+              <Ionicons name="navigate-circle-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.startButtonText}>{t("roadsideHelp.liveTrackingButton")}</Text>
+            </Pressable>
+
+            {!liveTrackingReady ? (
+              <Text style={styles.appHint}>{t("roadsideHelp.waitingForHelperToStartDriving")}</Text>
+            ) : b.tripStatus === "arrived_pickup" ? (
+              <Text style={styles.appHint}>{t("roadsideHelp.helperArrivedHint")}</Text>
+            ) : b.tripStatus === "in_progress" ? (
+              <Text style={styles.appHint}>{t("roadsideHelp.helpInProgressHint")}</Text>
+            ) : null}
+          </>
+        ) : null}
+
+        {/* Completion_pending — ONLY the customer ever sees these two
+            buttons (spec #2/#3): confirm the problem is resolved, or flag
+            an issue instead via the existing Reports flow. Stacked
+            vertically (never side-by-side) as two full-width, same-height
+            buttons — Report a Problem on top, Confirm Completion (green)
+            underneath. */}
+        {!isDriverView && isCompletionPendingStage ? (
+          <View style={styles.completionActionsColumn}>
+            <Pressable
+              style={styles.reportProblemButtonFull}
+              onPress={() => openReportProblemModal(b)}
+            >
+              <Text style={styles.reportProblemButtonText}>{t("roadsideHelp.reportProblemButton")}</Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.primaryButtonFull, styles.completionConfirmButton]}
+              onPress={() => handleConfirmCompletion(b)}
+            >
+              <Ionicons name="checkmark-done" size={18} color="#FFFFFF" />
+              <Text style={styles.primaryButtonText}>{t("roadsideHelp.confirmCompletionButton")}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* Payment — cash is settled directly between the two people (only
+            the accepted helper's own Confirm Cash Received ever marks it
+            paid, see RoadsideAcceptedCard.tsx); Bit only ever opens the Bit
+            app (see bitPayment.ts) and NEVER marks itself paid here. */}
+        {!isDriverView && isCompletedStage && !isPaid ? (
+          isBitMethod ? (
+            <Pressable style={styles.primaryButtonFull} onPress={() => handlePayWithBit(b)}>
+              <Ionicons name="phone-portrait-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.primaryButtonText}>{t("roadsideHelp.payWithBit")}</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.payRow}>
+              <Ionicons name="cash-outline" size={16} color="#7C5F46" />
+              <Text style={styles.payText}>
+                {t("roadsideHelp.payCashDirectlyMessage", { amount: b.price ?? 0, name: otherName })}
+              </Text>
+            </View>
+          )
+        ) : null}
+
+        {isPaid ? (
+          <View style={styles.payRow}>
+            <Ionicons name="checkmark-done-circle" size={16} color="#166534" />
+            <Text style={styles.payText}>
+              {t("roadsideHelp.paymentReceivedAmount", { amount: b.price ?? 0 })}
+            </Text>
+          </View>
         ) : null}
 
         {typeof b.rating === "number" ? (
@@ -3210,8 +3398,9 @@ useEffect(() => {
           </View>
         ) : null}
 
-        {/* Rating no longer waits on payment — it opens right after
-            Finished Help, same trigger point as every other category. */}
+        {/* Rating only unlocks after the CUSTOMER confirms completion
+            (tripStatus reaches "completed") — never merely after the
+            helper's own Finish Help. */}
         {!isDriverView && bookingNeedsRating(b) ? (
           <Pressable
             style={styles.primaryButton}
@@ -3222,24 +3411,39 @@ useEffect(() => {
           </Pressable>
         ) : null}
 
-        {isAccepted ? (
+        {/* Passenger: Cancel Booking shows ONLY while still cancellable
+            (tripStatus "booked") — completely absent for every later stage,
+            never a disabled button or a "can no longer be cancelled" hint. */}
+        {canCancelRoadsideAsPassenger ? (
+          <Pressable
+            style={styles.cancelBookingButton}
+            onPress={() => handleCancelGeneralBooking(b, viewer)}
+          >
+            <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+            <Text style={styles.cancelBookingButtonText}>{t("booking.cancelBookingTitle")}</Text>
+          </Pressable>
+        ) : null}
+
+        {/* Driver-view fallback keeps its existing (unrestricted) cancel
+            behavior, unchanged. */}
+        {isDriverView && isAccepted ? (
           <>
             <Pressable
               style={[
                 styles.cancelBookingButton,
-                !!roadsideCancelBlocked && styles.cancelBookingButtonDisabled,
+                !!driverRoadsideCancelBlocked && styles.cancelBookingButtonDisabled,
               ]}
               onPress={() => handleCancelGeneralBooking(b, viewer)}
-              disabled={!!roadsideCancelBlocked}
+              disabled={!!driverRoadsideCancelBlocked}
             >
               <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
               <Text style={styles.cancelBookingButtonText}>
-                {isDriverView ? t("schoolTrip.cancelTripButton") : t("booking.cancelBookingTitle")}
+                {t("schoolTrip.cancelTripButton")}
               </Text>
             </Pressable>
 
-            {roadsideCancelBlocked ? (
-              <Text style={styles.appHint}>{roadsideCancelBlocked}</Text>
+            {driverRoadsideCancelBlocked ? (
+              <Text style={styles.appHint}>{driverRoadsideCancelBlocked}</Text>
             ) : null}
           </>
         ) : null}
@@ -4192,6 +4396,54 @@ useEffect(() => {
           </DirectionalCard>
         </KeyboardAvoidingWrapper>
       </Modal>
+
+      <Modal
+        visible={!!reportBooking}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReportBooking(null)}
+      >
+        <KeyboardAvoidingWrapper style={styles.ratingBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setReportBooking(null)}
+          />
+
+          <DirectionalCard style={styles.ratingCard}>
+            <View style={styles.ratingIconCircle}>
+              <Ionicons name="alert-circle-outline" size={34} color="#B91C1C" />
+            </View>
+
+            <Text style={styles.ratingTitle}>{t("roadsideHelp.reportProblemTitle")}</Text>
+            <Text style={styles.ratingSubtitle}>{t("roadsideHelp.reportProblemSubtitle")}</Text>
+
+            <TextInput
+              style={styles.ratingInput}
+              value={reportDescription}
+              onChangeText={setReportDescription}
+              placeholder={t("admin.describeIssue")}
+              placeholderTextColor="#9B7A68"
+              multiline
+              textAlignVertical="top"
+            />
+
+            <Pressable
+              style={[
+                styles.ratingSubmit,
+                (!reportDescription.trim() || submittingReport) && styles.ratingSubmitDisabled,
+              ]}
+              onPress={submitProblemReport}
+              disabled={!reportDescription.trim() || submittingReport}
+            >
+              {submittingReport ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.ratingSubmitText}>{t("roadsideHelp.submitReportButton")}</Text>
+              )}
+            </Pressable>
+          </DirectionalCard>
+        </KeyboardAvoidingWrapper>
+      </Modal>
     </DirectionalScreen>
   );
 }
@@ -4532,6 +4784,12 @@ const styles = StyleSheet.create({
     color: "#111827",
     flexShrink: 1,
   },
+  metaTextMuted: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#7C5F46",
+    flexShrink: 1,
+  },
   completeButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -4591,6 +4849,34 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 14,
     marginTop: 4,
+  },
+  // Completion_pending's two passenger-only actions — always stacked
+  // vertically, never side-by-side, both full-width with identical height/
+  // radius/spacing so they read as one aligned pair (see renderRoadsideCard).
+  completionActionsColumn: {
+    gap: 10,
+    marginTop: 4,
+  },
+  reportProblemButtonFull: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#E4DDD7",
+    backgroundColor: "#FFFDFC",
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  reportProblemButtonText: {
+    color: "#7C5F46",
+    fontWeight: "900",
+    fontSize: 15,
+  },
+  // Cancels out primaryButtonFull's own marginTop so the two buttons in
+  // completionActionsColumn are separated by exactly one consistent gap.
+  completionConfirmButton: {
+    marginTop: 0,
   },
   finishButton: {
     flexDirection: "row",
