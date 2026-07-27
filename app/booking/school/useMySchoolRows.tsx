@@ -84,8 +84,10 @@ import {
   translateCancellationError,
 } from "../bookingsLib";
 import {
+  CANCELLATION_WARNING_MESSAGE_KEY,
+  CancellationWarningPreview,
+  getDriverCancellationWarningPreview,
   getDriverSuspensionBlockedReason,
-  recordDriverCancellationViolation,
 } from "../driverViolationsLib";
 import { DirectionalCard } from "../../i18n/DirectionalPrimitives";
 import { formatLocalizedDateFromYMD, translateCategoryLabel } from "../../i18n/formatters";
@@ -208,6 +210,11 @@ export default function useMySchoolRows({
   const [cancelTripTarget, setCancelTripTarget] = useState<SchoolTrip | null>(null);
   const [cancelReasonInput, setCancelReasonInput] = useState("");
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  // Fetched fresh from Firestore the moment the cancel-with-reason modal
+  // opens (see handleCancelTrip below) — never from local/cached state, and
+  // always BEFORE the new violation this cancellation would create, so the
+  // "remaining" count shown is always accurate (item 3).
+  const [cancelWarningPreview, setCancelWarningPreview] = useState<CancellationWarningPreview | null>(null);
 
   useEffect(() => {
     if (!uid) {
@@ -361,7 +368,7 @@ export default function useMySchoolRows({
   // cancel-with-reason modal below; the reason is stamped onto the trip
   // doc and read server-side by the onSchoolTripCancelled Cloud Function to
   // search for replacement trips for those passengers (AGENTS.md).
-  const handleCancelTrip = (trip: SchoolTrip) => {
+  const handleCancelTrip = async (trip: SchoolTrip) => {
     const blocked = getSchoolCancelBlockedReason(
       trip.date,
       trip.departureTime,
@@ -378,6 +385,9 @@ export default function useMySchoolRows({
     ).length;
 
     if (affectedCount === 0) {
+      // Item 4 — an unbooked trip never shows the violation warning and
+      // never creates one; this is the exact same plain confirm used before
+      // this feature existed.
       Alert.alert(t("booking.cancelBookingTitle"), t("schoolTrip.cancelTripConfirm"), [
         { text: t("common.cancel"), style: "cancel" },
         {
@@ -409,6 +419,23 @@ export default function useMySchoolRows({
       return;
     }
 
+    // Item 1/2/3 — this trip has at least one real passenger booking, so the
+    // pre-cancellation warning modal (below) must show how many valid
+    // cancellations remain, read FRESH from Firestore right now — never a
+    // stale local count, and always before the modal opens. setBusyId here
+    // also blocks a double-tap on the Cancel Trip button from firing this
+    // fetch twice (the button is disabled while busyId === trip.id).
+    setBusyId(trip.id);
+    try {
+      const preview = await getDriverCancellationWarningPreview(trip.driverId);
+      setCancelWarningPreview(preview);
+    } catch (error) {
+      console.log("handleCancelTrip: getDriverCancellationWarningPreview failed", { tripId: trip.id, error });
+      setCancelWarningPreview(null);
+    } finally {
+      setBusyId(null);
+    }
+
     setCancelTripTarget(trip);
     setCancelReasonInput("");
   };
@@ -416,6 +443,7 @@ export default function useMySchoolRows({
   const closeCancelTripModal = () => {
     setCancelTripTarget(null);
     setCancelReasonInput("");
+    setCancelWarningPreview(null);
   };
 
   const confirmCancelTripWithReason = async () => {
@@ -423,17 +451,16 @@ export default function useMySchoolRows({
 
     setCancelSubmitting(true);
     try {
-      await cancelSchoolTrip(cancelTripTarget.id, cancelReasonInput.trim());
-      if (cancelTripTarget.driverId) {
-        await recordDriverCancellationViolation({
-          driverId: cancelTripTarget.driverId,
-          sourceCollection: "schoolTrips",
-          sourceId: cancelTripTarget.id,
-          sourceCategory: "school",
-          scheduledDeparture: new Date(
-            `${cancelTripTarget.date}T${cancelTripTarget.departureTime || "00:00"}:00`,
-          ),
-        });
+      // cancelSchoolTrip now writes the violation atomically inside its own
+      // transaction and evaluates the resulting standing itself — see
+      // driverViolationsLib.ts's own header for why this is no longer a
+      // separate, skippable step. 1st-through-5th violations were already
+      // fully explained by the pre-cancellation warning modal the driver
+      // just confirmed through above; the only thing left to report here is
+      // the account actually becoming suspended (6th violation).
+      const standing = await cancelSchoolTrip(cancelTripTarget.id, cancelReasonInput.trim());
+      if (standing?.warning === "suspended") {
+        Alert.alert(t("driver.accountSuspendedTitle"), t("driver.cancellationSuspensionBlockedMessage"));
       }
       closeCancelTripModal();
     } catch (error: any) {
@@ -1426,6 +1453,12 @@ export default function useMySchoolRows({
               })}
             </Text>
 
+            {cancelWarningPreview ? (
+              <Text style={styles.cancelWarningText}>
+                {t(CANCELLATION_WARNING_MESSAGE_KEY[cancelWarningPreview.level])}
+              </Text>
+            ) : null}
+
             <TextInput
               style={styles.commentInput}
               placeholder={t("schoolTrip.cancellationReasonPlaceholder")}
@@ -1446,12 +1479,12 @@ export default function useMySchoolRows({
               {cancelSubmitting ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.ratingSubmitText}>{t("schoolTrip.cancelTripButton")}</Text>
+                <Text style={styles.ratingSubmitText}>{t("driver.cancellationContinueAndCancel")}</Text>
               )}
             </Pressable>
 
             <Pressable style={styles.ratingCancelButton} onPress={closeCancelTripModal}>
-              <Text style={styles.ratingCancelText}>{t("common.cancel")}</Text>
+              <Text style={styles.ratingCancelText}>{t("driver.cancellationDoNotCancel")}</Text>
             </Pressable>
           </DirectionalCard>
         </KeyboardAvoidingWrapper>
@@ -1645,6 +1678,17 @@ const styles = StyleSheet.create({
   },
   ratingTitle: { fontSize: 18, fontWeight: "900", color: "#111827" },
   ratingSubtitle: { fontSize: 13, color: "#7C5F46", fontWeight: "700", marginTop: 4, marginBottom: 16 },
+  cancelWarningText: {
+    fontSize: 12.5,
+    color: "#B86115",
+    fontWeight: "800",
+    textAlign: "center",
+    backgroundColor: "#FFF4E5",
+    borderRadius: 10,
+    padding: 10,
+    marginTop: -8,
+    marginBottom: 14,
+  },
   starsRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
   commentInput: {
     width: "100%",

@@ -60,8 +60,14 @@ import {
   translateCancellationError,
 } from "../booking/bookingsLib";
 import {
+  CANCELLATION_WARNING_MESSAGE_KEY,
+  CancellationStandingResult,
+  CancellationWarningPreview,
+  evaluateDriverCancellationStanding,
+  getDriverCancellationWarningPreview,
   getDriverSuspensionBlockedReason,
-  recordDriverCancellationViolation,
+  readExistingCancellationViolation,
+  writeCancellationViolationIfNew,
 } from "../booking/driverViolationsLib";
 import {
   arriveRide,
@@ -1093,6 +1099,73 @@ const bookedRouteIds = useMemo(() => {
     }
   };
 
+  // Shown after a successful driver cancellation, once
+  // evaluateDriverCancellationStanding has actually run (see each cancel
+  // call site below) — never blocks/replaces the cancellation's own success
+  // path. 1st-through-5th violations are already fully explained by the
+  // PRE-cancellation warning modal the driver just confirmed through (see
+  // confirmDriverCancellation below); the only thing left to report here is
+  // the one state change that happens strictly AFTER confirmation — the
+  // account becoming suspended on the 6th violation.
+  const showDriverCancellationStandingAlert = (result: CancellationStandingResult | null) => {
+    if (!result || result.warning !== "suspended") return;
+    Alert.alert(t("driver.accountSuspendedTitle"), t("driver.cancellationSuspensionBlockedMessage"));
+  };
+
+  // Item 1/2/3/4/9 — before actually executing a driver's cancellation of a
+  // trip, show a modal explaining the up-to-5-per-30-days policy and exactly
+  // how many cancellations will remain, with "Continue and Cancel" (proceeds)
+  // and "Do Not Cancel" (does nothing) as the only two actions. The warning
+  // count is read FRESH from Firestore right here, every time — never from
+  // local/cached state — and only ever shown when this specific trip/booking
+  // has a real passenger on it (hasRealBooking); a zero-booking trip instead
+  // falls straight through to the exact same plain confirm every cancellation
+  // already used before this feature existed, with no violation warning at
+  // all. Setting/clearing busyId around the fetch also blocks a double-tap on
+  // the triggering button from firing this twice.
+  const confirmDriverCancellation = async (
+    id: string,
+    hasRealBooking: boolean,
+    title: string,
+    baseMessage: string,
+    confirmLabel: string,
+    onConfirm: () => Promise<void>,
+    resolveErrorMessage?: (error: unknown) => string,
+    cancelLabel: string = t("common.cancel"),
+  ) => {
+    if (!hasRealBooking || !uid) {
+      Alert.alert(title, baseMessage, [
+        { text: cancelLabel, style: "cancel" },
+        {
+          text: confirmLabel,
+          style: "destructive",
+          onPress: () => runApp(id, onConfirm, resolveErrorMessage),
+        },
+      ]);
+      return;
+    }
+
+    setBusyId(id);
+    let preview: CancellationWarningPreview | null = null;
+    try {
+      preview = await getDriverCancellationWarningPreview(uid);
+    } catch (error) {
+      console.log("confirmDriverCancellation: getDriverCancellationWarningPreview failed", { id, error });
+    }
+    setBusyId(null);
+
+    const warningLine = preview ? t(CANCELLATION_WARNING_MESSAGE_KEY[preview.level]) : "";
+
+    Alert.alert(title, warningLine ? `${baseMessage}\n\n${warningLine}` : baseMessage, [
+      { text: t("driver.cancellationDoNotCancel"), style: "cancel" },
+      {
+        text: t("driver.cancellationContinueAndCancel"),
+        style: "destructive",
+        onPress: () => runApp(id, onConfirm, resolveErrorMessage),
+      },
+    ]);
+  };
+
   const callPhone = (phone?: string | null) => {
     const callNumber = formatPhoneForCall(phone);
 
@@ -1423,33 +1496,34 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     const title = by === "driver" ? t("schoolTrip.cancelTripButton") : t("booking.cancelBookingTitle");
     const message = by === "driver" ? t("schoolTrip.cancelTripConfirm") : t("booking.cancelBookingConfirm");
 
-    Alert.alert(title, message, [
-      { text: t("common.no"), style: "cancel" },
-      {
-        text: t("common.yesCancel"),
-        style: "destructive",
-        onPress: () =>
-runApp(
-  a.id,
-  async () => {
-    await cancelApplication(a.kind, a.id, a, by);
+    confirmDriverCancellation(
+      a.id,
+      by === "driver",
+      title,
+      message,
+      t("common.yesCancel"),
+      async () => {
+        const result = await cancelApplication(a.kind, a.id, a, by);
 
-    if (by === "driver" && a.providerId && a.date) {
-      await recordDriverCancellationViolation({
-        driverId: a.providerId,
-        sourceCollection: a.kind === "work" ? "workJobs" : "errandJobs",
-        sourceId: a.id,
-        sourceCategory: a.category,
-        scheduledDeparture: new Date(
-          `${a.date}T${a.startTime || "00:00"}:00`
-        ),
-      });
-    }
-  },
-  translateCancellationError,
-),
+        // The violation doc itself was already written atomically inside
+        // cancelApplication's own transaction — this only counts/warns/
+        // suspends, best-effort (see driverViolationsLib.ts's own header).
+        if (result?.violationCreated) {
+          try {
+            const standing = await evaluateDriverCancellationStanding(result.driverId);
+            showDriverCancellationStandingAlert(standing);
+          } catch (error) {
+            console.log("handleAppCancel: evaluateDriverCancellationStanding failed (violation already recorded, non-fatal)", {
+              id: a.id,
+              driverId: result.driverId,
+              error,
+            });
+          }
+        }
       },
-    ]);
+      translateCancellationError,
+      t("common.no"),
+    );
   };
 
   const handleAppAccept = (a: NormalizedApplication) =>
@@ -1523,32 +1597,64 @@ runApp(
   // driver-created trip card) — the pre-departure counterpart to the trash
   // icon on a completed one (confirmDeleteTrip above), gated by the SAME
   // 5-hour driver cancellation window every other category already uses
-  // (DRIVER_CANCEL_LOCK_HOURS — never the 2-hour passenger window). Reuses
-  // deleteTrip's own hide (deletedForDriver:true), then — ONLY when this
-  // specific trip actually has at least one passenger/worker booking (see
-  // tagTrip's activeBookingCount) — records a driver cancellation violation,
-  // exactly like cancelGeneralBooking does for an already-booked trip. A
-  // zero-booking listing affects nobody, so cancelling it never creates one.
-  const cancelDriverTrip = async (trip: TaggedTrip) => {
-    await deleteTrip(trip);
+  // (DRIVER_CANCEL_LOCK_HOURS — never the 2-hour passenger window). The
+  // deletedForDriver hide and the violation write (ONLY when this specific
+  // trip actually has at least one passenger/worker booking — see tagTrip's
+  // activeBookingCount) happen in the SAME transaction, exactly like
+  // cancelGeneralBooking does for an already-booked trip — never a
+  // separate, skippable step. A zero-booking listing affects nobody, so
+  // cancelling it never creates one.
+  const cancelDriverTrip = async (
+    trip: TaggedTrip,
+  ): Promise<CancellationStandingResult | null> => {
+    const tripRef = doc(db, trip.collectionName, trip.id);
+    let violationCreated = false;
 
-    if (trip.activeBookingCount > 0) {
-      try {
-        await recordDriverCancellationViolation({
-          driverId: uid || "",
+    await runTransaction(db, async (transaction) => {
+      // PHASE 1 — the only read.
+      const violationSnap =
+        trip.activeBookingCount > 0 && uid
+          ? await readExistingCancellationViolation(transaction, uid, trip.collectionName, trip.id)
+          : null;
+
+      // PHASE 2 — every write.
+      transaction.update(tripRef, {
+        deletedForDriver: true,
+        updatedAt: serverTimestamp(),
+      });
+
+      if (violationSnap && uid) {
+        violationCreated = writeCancellationViolationIfNew(transaction, violationSnap, {
+          driverId: uid,
           sourceCollection: trip.collectionName,
           sourceId: trip.id,
           sourceCategory: trip.category || "",
           scheduledDeparture: new Date(`${trip.date}T${trip.time || "00:00"}:00`),
-        });
-      } catch (error) {
-        console.log("cancelDriverTrip: recordDriverCancellationViolation failed (trip already cancelled, non-fatal)", {
-          tripId: trip.id,
-          collection: trip.collectionName,
-          category: trip.category,
-          error,
+          passengerBookingCount: trip.activeBookingCount,
         });
       }
+    });
+
+    if (trip.collectionName === "driverRoutes") {
+      setRoutes((prev) => prev.filter((r) => r.id !== trip.id));
+    } else if (trip.collectionName === "workJobs") {
+      setWorkJobs((prev) => prev.filter((r) => r.id !== trip.id));
+    } else {
+      setErrandJobs((prev) => prev.filter((r) => r.id !== trip.id));
+    }
+
+    if (!violationCreated || !uid) return null;
+
+    try {
+      return await evaluateDriverCancellationStanding(uid);
+    } catch (error) {
+      console.log("cancelDriverTrip: evaluateDriverCancellationStanding failed (violation already recorded, non-fatal)", {
+        tripId: trip.id,
+        collection: trip.collectionName,
+        category: trip.category,
+        error,
+      });
+      return null;
     }
   };
 
@@ -1562,14 +1668,17 @@ runApp(
       return;
     }
 
-    Alert.alert(t("schoolTrip.cancelTripButton"), t("schoolTrip.cancelTripConfirm"), [
-      { text: t("common.cancel"), style: "cancel" },
-      {
-        text: t("schoolTrip.cancelTripButton"),
-        style: "destructive",
-        onPress: () => runApp(trip.id, () => cancelDriverTrip(trip)),
+    confirmDriverCancellation(
+      trip.id,
+      trip.activeBookingCount > 0,
+      t("schoolTrip.cancelTripButton"),
+      t("schoolTrip.cancelTripConfirm"),
+      t("schoolTrip.cancelTripButton"),
+      async () => {
+        const result = await cancelDriverTrip(trip);
+        showDriverCancellationStandingAlert(result);
       },
-    ]);
+    );
   };
 
   // "Clear All" is a PURE per-user My Bookings view-hide action — never a
@@ -1946,15 +2055,18 @@ runApp(
     const message =
       viewer === "driver" ? t("schoolTrip.cancelTripConfirm") : t("booking.cancelBookingConfirm");
 
-    Alert.alert(title, message, [
-      { text: t("common.cancel"), style: "cancel" },
-      {
-        text: title,
-        style: "destructive",
-        onPress: () =>
-          runApp(r.id, () => cancelRideBooking(r.id, r, viewer), translateCancellationError),
+    confirmDriverCancellation(
+      r.id,
+      viewer === "driver",
+      title,
+      message,
+      title,
+      async () => {
+        const result = await cancelRideBooking(r.id, r, viewer);
+        showDriverCancellationStandingAlert(result);
       },
-    ]);
+      translateCancellationError,
+    );
   };
 
   const handleCancelGeneralBooking = (b: BookingItem, viewer: Tab) => {
@@ -1995,36 +2107,33 @@ runApp(
     const message =
       viewer === "driver" ? t("schoolTrip.cancelTripConfirm") : t("booking.cancelBookingConfirm");
 
-    Alert.alert(title, message, [
-      { text: t("common.cancel"), style: "cancel" },
-      {
-        text: title,
-        style: "destructive",
-        onPress: () =>
-          runApp(
-            b.id,
-            async () => {
-              await cancelGeneralBooking(b.id, b, viewer);
+    confirmDriverCancellation(
+      b.id,
+      viewer === "driver",
+      title,
+      message,
+      title,
+      async () => {
+        const result = await cancelGeneralBooking(b.id, b, viewer);
+        showDriverCancellationStandingAlert(result);
 
-              // cancelGeneralBooking only ever touches the shared `bookings`
-              // doc (it's generic across every category) — for Roadside
-              // Help specifically, the driver-facing `roadsideRequests`
-              // record (Help Requests screen, RoadsideAcceptedCard) needs
-              // its own status flipped too, or it would keep showing stale
-              // action buttons forever. Safe to call directly and let it
-              // resolve either way: syncCancelledRoadsideRequest already
-              // catches and logs its own errors internally (see
-              // roadsideLib.ts) rather than throwing — the booking is
-              // ALREADY cancelled by the time this runs, so this must never
-              // be able to turn into a false "cancellation failed" here.
-              if (b.category === "roadside" && b.requestId) {
-                await syncCancelledRoadsideRequest(b.requestId);
-              }
-            },
-            translateCancellationError,
-          ),
+        // cancelGeneralBooking only ever touches the shared `bookings`
+        // doc (it's generic across every category) — for Roadside
+        // Help specifically, the driver-facing `roadsideRequests`
+        // record (Help Requests screen, RoadsideAcceptedCard) needs
+        // its own status flipped too, or it would keep showing stale
+        // action buttons forever. Safe to call directly and let it
+        // resolve either way: syncCancelledRoadsideRequest already
+        // catches and logs its own errors internally (see
+        // roadsideLib.ts) rather than throwing — the booking is
+        // ALREADY cancelled by the time this runs, so this must never
+        // be able to turn into a false "cancellation failed" here.
+        if (b.category === "roadside" && b.requestId) {
+          await syncCancelledRoadsideRequest(b.requestId);
+        }
       },
-    ]);
+      translateCancellationError,
+    );
   };
 
   const bookingNeedsRating = (

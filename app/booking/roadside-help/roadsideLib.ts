@@ -43,6 +43,7 @@ import {
 
 import { auth, db } from "../../../firebase";
 import i18n from "../../i18n";
+import { getDriverSuspensionBlockedReason } from "../driverViolationsLib";
 import { notify } from "../work-errand/workErrandLib";
 
 export type LatLng = { latitude: number; longitude: number };
@@ -366,6 +367,12 @@ export type SendOfferInput = {
 export const sendDriverOffer = async (input: SendOfferInput) => {
   const user = auth.currentUser;
   if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
+
+  // A suspended driver may not send/accept Roadside Help offers — same
+  // cancellation-standing check every other "creates/accepts driver work"
+  // action in this app already runs (see driverViolationsLib.ts).
+  const suspended = await getDriverSuspensionBlockedReason(user.uid);
+  if (suspended) throw new Error(suspended);
 
   let driverName = user.displayName || "Driver";
   let driverGender = "";

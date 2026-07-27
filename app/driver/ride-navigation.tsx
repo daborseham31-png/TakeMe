@@ -29,6 +29,7 @@ import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { canStartTrip, getStartTripBlockedReason } from "../booking/bookingsLib";
+import { getDriverSuspensionBlockedReason } from "../booking/driverViolationsLib";
 import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import {
   captureDriverLocationOnce,
@@ -462,6 +463,20 @@ export default function RideNavigationScreen() {
 
   const updateTripStatus = async (nextStatus: TripStatus) => {
     if (!id || !booking) return;
+
+    // Guard the actual write, not just the button — this is THE ONE place
+    // every trip-lifecycle transition on this screen (driver_on_way ->
+    // arrived_pickup -> in_progress -> completed, for both School and
+    // Personal/legacy-School bookings) passes through, so a suspended
+    // driver can never start/edit/modify an active trip regardless of
+    // which button got them here.
+    if (auth.currentUser) {
+      const suspended = await getDriverSuspensionBlockedReason(auth.currentUser.uid);
+      if (suspended) {
+        Alert.alert(t("driver.accountSuspendedTitle"), suspended);
+        return;
+      }
+    }
 
     // Guard the actual write, not just the button — this is the one place
     // that flips tripStatus to driver_on_way for school + weekly bookings

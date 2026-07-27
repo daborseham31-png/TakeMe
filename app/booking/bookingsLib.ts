@@ -39,7 +39,12 @@ import {
   PASSENGER_CANCEL_LOCK_HOURS,
 } from "./cancellationEligibility";
 
-import { recordDriverCancellationViolation } from "./driverViolationsLib";
+import {
+  CancellationStandingResult,
+  evaluateDriverCancellationStanding,
+  readExistingCancellationViolation,
+  writeCancellationViolationIfNew,
+} from "./driverViolationsLib";
 
 import { notify } from "./work-errand/workErrandLib";
 
@@ -1139,7 +1144,7 @@ export const cancelGeneralBooking = async (
   bookingId: string,
   booking: BookingItem,
   cancelledBy: "passenger" | "driver",
-): Promise<void> => {
+): Promise<CancellationStandingResult | null> => {
   const user = auth.currentUser;
   if (!user) throw new CancellationError("NOT_AUTHORIZED");
 
@@ -1149,6 +1154,8 @@ export const cancelGeneralBooking = async (
   let notifyPassengerName = "";
   let notifyDriverName = "";
   let didCancel = false;
+  let driverIdForViolation = "";
+  let violationCreated = false;
 
   await runTransaction(db, async (transaction) => {
     // -----------------------------------------------------------------
@@ -1191,6 +1198,16 @@ export const cancelGeneralBooking = async (
     const routeRef = current.routeId ? doc(db, "driverRoutes", current.routeId) : null;
     const routeSnap = routeRef ? await transaction.get(routeRef) : null;
 
+    // This one BookingItem doc IS exactly one real, confirmed passenger
+    // booking — read the violation doc now (still PHASE 1) so it can be
+    // written atomically alongside the cancellation below (see
+    // driverViolationsLib.ts's own header for why this must never be a
+    // separate, skippable step).
+    const violationSnap =
+      cancelledBy === "driver" && current.driverId
+        ? await readExistingCancellationViolation(transaction, current.driverId, "bookings", bookingId)
+        : null;
+
     // -----------------------------------------------------------------
     // PHASE 2 — every write. No transaction.get() below this point.
     // -----------------------------------------------------------------
@@ -1198,6 +1215,18 @@ export const cancelGeneralBooking = async (
       status: "cancelled",
       updatedAt: serverTimestamp(),
     });
+
+    if (violationSnap && current.driverId) {
+      driverIdForViolation = current.driverId;
+      violationCreated = writeCancellationViolationIfNew(transaction, violationSnap, {
+        driverId: current.driverId,
+        sourceCollection: "bookings",
+        sourceId: bookingId,
+        sourceCategory: current.category || "",
+        scheduledDeparture: new Date(`${current.date}T${current.time || "00:00"}:00`),
+        passengerBookingCount: 1,
+      });
+    }
 
     notifyReceiverId = cancelledBy === "passenger" ? current.driverId : current.passengerId;
     notifyPassengerName = current.passengerName;
@@ -1209,6 +1238,33 @@ export const cancelGeneralBooking = async (
     const routeData: any = routeSnap.data();
     const hasWeeklyTrips =
       Array.isArray(routeData.weeklyTrips) && routeData.weeklyTrips.length > 0;
+
+    // A PASSENGER cancellation frees the seat/route so someone else can
+    // book it — the driver is still running this trip. A DRIVER
+    // cancellation means the driver themselves no longer wants to run it:
+    // the seat/route must never be reopened or made bookable again (this
+    // was the exact cause of a driver-cancelled trip wrongly reappearing
+    // under Unbooked Trips and in passenger search — see this fix's own PR).
+    if (cancelledBy !== "passenger") {
+      if (!hasWeeklyTrips && routeData.bookingId === bookingId) {
+        // Whole-route booking (no per-day capacity) — this route WAS this
+        // one trip. Cancel it outright and hide it from the driver's own
+        // Upcoming/Unbooked Trips — the just-cancelled `bookings` doc above
+        // remains the retained history record — instead of reopening it.
+        transaction.update(routeRef, {
+          status: "cancelled",
+          isBooked: true,
+          available: false,
+          deletedForDriver: true,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      // Weekly: deliberately NO write here — that occurrence's seat stays
+      // exactly as already consumed (never restored), so it can never be
+      // rebooked, while every OTHER day in the same weekly series is left
+      // completely untouched.
+      return;
+    }
 
     if (hasWeeklyTrips && current.date) {
       const weeklyTrips = [...routeData.weeklyTrips];
@@ -1248,42 +1304,29 @@ export const cancelGeneralBooking = async (
   // another violation or send another notification, so this makes
   // cancelGeneralBooking itself idempotent: calling it again on an
   // already-cancelled booking resolves successfully and does nothing more.
-  if (!didCancel) return;
+  if (!didCancel) return null;
 
-  // Everything below is a best-effort side effect, never the reason a
-  // cancellation that ALREADY succeeded gets reported to the caller as
-  // failed. Each is wrapped and logged instead of re-thrown — e.g. a
-  // missing Firestore composite index on cancellationViolations (adminExcused
-  // + createdAt) previously bubbled all the way up from here, past the one
-  // successful transaction above, and out to the UI as a generic
-  // "Something went wrong" even though the booking had already been
-  // cancelled. See recordDriverCancellationViolation (driverViolationsLib.ts)
-  // and notify (work-errand/workErrandLib.ts) for what each actually writes.
-  if (cancelledBy === "driver" && booking.driverId) {
-    const date = getBookingDateYMD(booking);
-    const time = getBookingTime(booking);
-
-    if (date) {
-      try {
-        await recordDriverCancellationViolation({
-          driverId: booking.driverId,
-          sourceCollection: "bookings",
-          sourceId: bookingId,
-          sourceCategory: booking.category || "",
-          scheduledDeparture: new Date(`${date}T${time || "00:00"}:00`),
-        });
-      } catch (error) {
-        console.log("cancelGeneralBooking: recordDriverCancellationViolation failed (booking already cancelled, non-fatal)", {
-          bookingId,
-          category: booking.category,
-          path: `users/${booking.driverId}/cancellationViolations`,
-          error,
-        });
-      }
+  // Best-effort — safe to re-run from anywhere, never a single point of
+  // failure (see driverViolationsLib.ts's own header). The violation doc
+  // itself was already written atomically inside the transaction above;
+  // this only counts/warns/suspends, which previously bubbled a missing
+  // Firestore composite index (or any other transient failure) all the way
+  // out to the UI as a generic "Something went wrong" even though the
+  // booking had already been cancelled — never again, now it's isolated.
+  let standingResult: CancellationStandingResult | null = null;
+  if (violationCreated && driverIdForViolation) {
+    try {
+      standingResult = await evaluateDriverCancellationStanding(driverIdForViolation);
+    } catch (error) {
+      console.log("cancelGeneralBooking: evaluateDriverCancellationStanding failed (violation already recorded, non-fatal)", {
+        bookingId,
+        driverId: driverIdForViolation,
+        error,
+      });
     }
   }
 
-  if (!notifyReceiverId) return;
+  if (!notifyReceiverId) return standingResult;
 
   try {
     await notify({
@@ -1308,6 +1351,8 @@ export const cancelGeneralBooking = async (
       error,
     });
   }
+
+  return standingResult;
 };
 
 export type DriverTripItem = {

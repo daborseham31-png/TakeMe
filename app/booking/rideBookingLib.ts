@@ -47,7 +47,12 @@ import {
   getCancellationEligibility,
 } from "./cancellationEligibility";
 
-import { recordDriverCancellationViolation } from "./driverViolationsLib";
+import {
+  CancellationStandingResult,
+  evaluateDriverCancellationStanding,
+  readExistingCancellationViolation,
+  writeCancellationViolationIfNew,
+} from "./driverViolationsLib";
 import { GeoPoint, notify } from "./work-errand/workErrandLib";
 
 export const RIDE_CATEGORY = "personal_ride";
@@ -292,7 +297,7 @@ export const cancelRideBooking = async (
   bookingId: string,
   ride: RideBooking,
   cancelledBy: "passenger" | "driver",
-): Promise<void> => {
+): Promise<CancellationStandingResult | null> => {
   const user = auth.currentUser;
   if (!user) throw new CancellationError("NOT_AUTHORIZED");
 
@@ -302,6 +307,8 @@ export const cancelRideBooking = async (
   let notifyPassengerName = "";
   let notifyDriverName = "";
   let didCancel = false;
+  let driverIdForViolation = "";
+  let violationCreated = false;
 
   // PHASE 1 (the transaction's only read) then PHASE 2 (its only write) —
   // never a read after a write in the same transaction.
@@ -338,10 +345,32 @@ export const cancelRideBooking = async (
       throw new CancellationError(eligibilityReasonToErrorCode(eligibility.reason, cancelledBy));
     }
 
+    // A driver cancellation of an ALREADY-booked personal ride is exactly
+    // one real passenger booking (this very doc) — read the violation doc
+    // NOW (PHASE 1, before any write below) so it can be written atomically
+    // alongside the cancellation itself (see driverViolationsLib.ts's own
+    // header for why this must never be a separate, skippable step).
+    const violationSnap =
+      cancelledBy === "driver" && current.driverId
+        ? await readExistingCancellationViolation(transaction, current.driverId, "bookings", bookingId)
+        : null;
+
     transaction.update(bookingRef, {
       status: "cancelled" as RideStatus,
       updatedAt: serverTimestamp(),
     });
+
+    if (violationSnap && current.driverId) {
+      driverIdForViolation = current.driverId;
+      violationCreated = writeCancellationViolationIfNew(transaction, violationSnap, {
+        driverId: current.driverId,
+        sourceCollection: "bookings",
+        sourceId: bookingId,
+        sourceCategory: RIDE_CATEGORY,
+        scheduledDeparture: new Date(`${current.date}T${current.time || "00:00"}:00`),
+        passengerBookingCount: 1,
+      });
+    }
 
     notifyReceiverId = cancelledBy === "passenger" ? current.driverId : current.passengerId;
     notifyPassengerName = current.passengerName;
@@ -352,7 +381,24 @@ export const cancelRideBooking = async (
   // The booking is ALREADY cancelled at this point (the transaction above
   // already committed) — re-cancelling an already-cancelled booking is a
   // safe no-op (didCancel stays false), making this function idempotent.
-  if (!didCancel || !notifyReceiverId) return;
+  if (!didCancel) return null;
+
+  // Best-effort — safe to re-run from anywhere, never a single point of
+  // failure (see driverViolationsLib.ts's own header).
+  let standingResult: CancellationStandingResult | null = null;
+  if (violationCreated && driverIdForViolation) {
+    try {
+      standingResult = await evaluateDriverCancellationStanding(driverIdForViolation);
+    } catch (error) {
+      console.log("cancelRideBooking: evaluateDriverCancellationStanding failed (violation already recorded, non-fatal)", {
+        bookingId,
+        driverId: driverIdForViolation,
+        error,
+      });
+    }
+  }
+
+  if (!notifyReceiverId) return standingResult;
 
   // Best-effort — the cancellation itself already succeeded, so a
   // notify() failure must never be reported back to the caller as a
@@ -381,6 +427,8 @@ export const cancelRideBooking = async (
       error,
     });
   }
+
+  return standingResult;
 };
 
 // ---------------------------------------------------------------------------

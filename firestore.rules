@@ -47,6 +47,24 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
+    // A driver suspended for repeated booked-trip cancellations (see
+    // app/booking/driverViolationsLib.ts's cancellationStanding — a
+    // completely separate flag from driverVerificationStatus/accountStatus,
+    // an unrelated admin-suspension system) may never publish/create new
+    // driver work while suspended. This is deliberately a resilient OR-style
+    // check (same reasoning as isAdmin()'s own get() above): if the caller's
+    // own users/{uid} doc doesn't exist for some reason, this evaluates to
+    // false rather than throwing, since a nonexistent standing can never be
+    // "suspended". Applied to CREATE only below — narrow, well-understood
+    // field shapes (driverId/employerId always equal request.auth.uid on a
+    // legitimate create) rather than every existing update path on these
+    // collections, which stays exactly as broad/unaudited as it already was.
+    function isDriverSuspended() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid))
+          .data.get("cancellationStanding", {}).get("suspensionActive", false) == true;
+    }
+
     function unchanged(field) {
       return !(field in request.resource.data) ||
         !(field in resource.data) ||
@@ -535,15 +553,25 @@ service cloud.firestore {
     }
 
     match /driverRoutes/{routeId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      // A suspended driver may not publish a new ride/weekly trip listing —
+      // see isDriverSuspended() above. update/delete stay exactly as broad
+      // as before (see the comment above on why — cancellation flows
+      // restore seats on routes the calling passenger doesn't own).
+      allow create: if isSignedIn() && !isDriverSuspended();
+      allow update, delete: if isSignedIn();
     }
 
     match /workJobs/{jobId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && !isDriverSuspended();
+      allow update, delete: if isSignedIn();
     }
 
     match /errandJobs/{errandId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && !isDriverSuspended();
+      allow update, delete: if isSignedIn();
     }
 
     // workApplications/errandApplications, unlike the four collections
@@ -608,7 +636,10 @@ service cloud.firestore {
     match /roadsideOffers/{offerId} {
       allow read: if isSignedIn();
 
+      // A suspended driver may not send a new Roadside Help offer — see
+      // isDriverSuspended() above.
       allow create: if isSignedIn() &&
+        !isDriverSuspended() &&
         request.resource.data.driverId == request.auth.uid &&
         request.resource.data.status == "pending";
 
@@ -675,7 +706,10 @@ service cloud.firestore {
       // security-sensitive field on this document.
       allow read: if isSignedIn();
 
+      // A suspended driver may not create a new School Trip listing — see
+      // isDriverSuspended() above.
       allow create: if isSignedIn() &&
+        !isDriverSuspended() &&
         request.resource.data.driverId == request.auth.uid &&
         request.resource.data.availableSeats == request.resource.data.totalSeats;
 
@@ -749,7 +783,7 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
         request.resource.data.passengerId == request.auth.uid;
 
-      // Seven legitimate update shapes:
+      // Eight legitimate update shapes:
       //   1) The booking passenger cancels it — driver/trip/price/seat
       //      fields are immutable after creation, and this can only ever
       //      move status to "cancelled" + expire the passenger's own
@@ -891,6 +925,30 @@ service cloud.firestore {
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(["deletedForDriver", "updatedAt"]) &&
             request.resource.data.deletedForDriver == true
           )
+        ) ||
+        (
+          // 8) The owning driver cancels the ENTIRE trip (cancelSchoolTrip)
+          //    — this booking is one of possibly several affected by the
+          //    same trip cancellation, all updated in the same transaction.
+          //    Never restores/reopens anything (there is nothing left to
+          //    rebook once the trip itself is cancelled) — only moves
+          //    status to "cancelled" and expires the passenger's own
+          //    verification code, exactly like the passenger's own
+          //    cancellation (shape 1), but tagged cancelledBy "driver" with
+          //    the driver's own stated reason preserved for history/the
+          //    replacement-offer flow. driver/passenger/trip identity is
+          //    frozen, same as every other driver-side shape above.
+          resource.data.driverId == request.auth.uid &&
+          request.resource.data.driverId == resource.data.driverId &&
+          request.resource.data.passengerId == resource.data.passengerId &&
+          request.resource.data.tripId == resource.data.tripId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "status", "verificationStatus", "bookingStatus", "cancelledBy",
+            "cancellationReason", "cancelledAt", "originalTripId", "updatedAt"
+          ]) &&
+          request.resource.data.status == "cancelled" &&
+          request.resource.data.verificationStatus == "expired" &&
+          request.resource.data.cancelledBy == "driver"
         )
       );
 

@@ -1,11 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
 import { doc, onSnapshot } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -30,11 +31,15 @@ import { LoadingState } from "../components/AdminStates";
 import ConfirmModal from "../components/ConfirmModal";
 import { translateDriverVerificationStatus } from "../../i18n/formatters";
 import {
+  ADMIN_EXCUSE_REASON_LABEL_KEY,
+  ADMIN_EXCUSE_REASONS,
+  AdminExcuseReasonKey,
   DriverCancellationStanding,
   DriverCancellationViolation,
   excuseDriverCancellationViolation,
   liftDriverCancellationSuspension,
   normalizeCancellationStanding,
+  ROLLING_WINDOW_DAYS,
   subscribeDriverCancellationViolations,
 } from "../../booking/driverViolationsLib";
 
@@ -63,6 +68,8 @@ export default function AdminDriverDetailScreen() {
   const [liftSuspensionModalOpen, setLiftSuspensionModalOpen] = useState(false);
   const [liftingSuspension, setLiftingSuspension] = useState(false);
   const [excusingViolationId, setExcusingViolationId] = useState<string | null>(null);
+  const [excuseReasonKey, setExcuseReasonKey] = useState<AdminExcuseReasonKey | null>(null);
+  const [excuseNote, setExcuseNote] = useState("");
   const [excuseBusy, setExcuseBusy] = useState(false);
 
   useEffect(() => {
@@ -136,6 +143,24 @@ export default function AdminDriverDetailScreen() {
     !!standing?.suspensionActive &&
     (!standing.suspensionMinEndAt || standing.suspensionMinEndAt.toMillis() <= Date.now());
 
+  // Derived live from the same onSnapshot-subscribed violations list (never
+  // a second, separate Firestore fetch) — this is what makes excusing a
+  // violation immediately recalculate BOTH counts on this screen without a
+  // reload (item 8/9): filtering out the just-excused doc updates
+  // `violations` via the live listener, which this useMemo re-derives from.
+  const currentValidCount = useMemo(() => {
+    const windowStartSeconds = Date.now() / 1000 - ROLLING_WINDOW_DAYS * 24 * 60 * 60;
+    return violations.filter((v) => !v.adminExcused && v.createdAtSeconds >= windowStartSeconds)
+      .length;
+  }, [violations]);
+
+  const countSinceReinstatement = useMemo(() => {
+    const reinstatedAtSeconds = standing?.reinstatedAt ? standing.reinstatedAt.seconds : null;
+    return violations.filter(
+      (v) => !v.adminExcused && (!reinstatedAtSeconds || v.createdAtSeconds >= reinstatedAtSeconds),
+    ).length;
+  }, [violations, standing]);
+
   const runLiftSuspension = async (reason: string) => {
     if (liftingSuspension) return;
 
@@ -151,13 +176,24 @@ export default function AdminDriverDetailScreen() {
     }
   };
 
-  const runExcuseViolation = async (reason: string) => {
-    if (!excusingViolationId || excuseBusy) return;
+  const closeExcuseModal = () => {
+    setExcusingViolationId(null);
+    setExcuseReasonKey(null);
+    setExcuseNote("");
+  };
+
+  const runExcuseViolation = async () => {
+    if (!excusingViolationId || !excuseReasonKey || excuseBusy) return;
 
     try {
       setExcuseBusy(true);
-      await excuseDriverCancellationViolation(driverId, excusingViolationId, reason);
-      setExcusingViolationId(null);
+      await excuseDriverCancellationViolation(
+        driverId,
+        excusingViolationId,
+        excuseReasonKey,
+        excuseNote.trim(),
+      );
+      closeExcuseModal();
       Alert.alert(t("admin.savedTitle"), t("admin.violationExcusedMessage"));
     } catch (error: any) {
       Alert.alert(t("common.error"), error?.message || t("admin.couldNotUpdateDriver"));
@@ -345,6 +381,16 @@ export default function AdminDriverDetailScreen() {
                   label={t("admin.suspensionReasonLabel")}
                   value={standing.suspensionReason || "—"}
                 />
+                <Row
+                  icon="infinite-outline"
+                  label={t("admin.suspensionIndefiniteLabel")}
+                  value={standing.indefinite ? t("common.yes") : t("common.no")}
+                />
+                <Row
+                  icon="eye-outline"
+                  label={t("admin.manualReviewAvailableLabel")}
+                  value={canLiftSuspension ? t("common.yes") : t("common.no")}
+                />
 
                 {!canLiftSuspension ? (
                   <Text style={styles.missingText}>{t("admin.liftSuspensionTooEarlyMessage")}</Text>
@@ -369,6 +415,17 @@ export default function AdminDriverDetailScreen() {
                 value={String(standing.suspensionCount)}
               />
             ) : null}
+
+            <Row
+              icon="calendar-number-outline"
+              label={t("admin.currentValidCountLabel")}
+              value={String(currentValidCount)}
+            />
+            <Row
+              icon="refresh-outline"
+              label={t("admin.countSinceReinstatementLabel")}
+              value={String(countSinceReinstatement)}
+            />
           </View>
 
           <View style={styles.section}>
@@ -387,6 +444,19 @@ export default function AdminDriverDetailScreen() {
                     </Text>
                     <Text style={styles.violationCategory}>{violation.sourceCategory}</Text>
                   </View>
+
+                  <Text style={styles.violationMeta}>
+                    {t("admin.violationBookingIdLabel")}: {violation.sourceId || "—"}
+                  </Text>
+                  <Text style={styles.violationMeta}>
+                    {t("admin.violationScheduledLabel")}:{" "}
+                    {violation.scheduledDepartureSeconds
+                      ? new Date(violation.scheduledDepartureSeconds * 1000).toLocaleString()
+                      : "—"}
+                  </Text>
+                  <Text style={styles.violationMeta}>
+                    {t("admin.violationPassengerCountLabel")}: {violation.passengerBookingCount}
+                  </Text>
 
                   <View style={styles.violationBadgeRow}>
                     {violation.lateCancellation ? (
@@ -409,7 +479,13 @@ export default function AdminDriverDetailScreen() {
                       <Text style={styles.excuseButtonText}>{t("admin.excuseViolationButton")}</Text>
                     </Pressable>
                   ) : violation.excuseReason ? (
-                    <Text style={styles.violationExcuseReason}>{violation.excuseReason}</Text>
+                    <Text style={styles.violationExcuseReason}>
+                      {t(
+                        ADMIN_EXCUSE_REASON_LABEL_KEY[violation.excuseReason as AdminExcuseReasonKey] ||
+                          "admin.excuseReasonOther",
+                      )}
+                      {violation.excuseNote ? ` — ${violation.excuseNote}` : ""}
+                    </Text>
                   ) : null}
                 </View>
               ))
@@ -469,18 +545,79 @@ export default function AdminDriverDetailScreen() {
         onConfirm={runLiftSuspension}
       />
 
-      <ConfirmModal
+      {/* A plain ConfirmModal only ever collects one free-text reason — this
+          needs a fixed, translated PRESET list (item 8) plus an optional
+          note, so it's its own small modal instead. */}
+      <Modal
         visible={!!excusingViolationId}
-        title={t("admin.excuseViolationButton")}
-        message={t("admin.excuseViolationReasonPlaceholder")}
-        confirmLabel={t("admin.confirmButton")}
-        destructive={false}
-        requireReason
-        reasonPlaceholder={t("admin.excuseViolationReasonPlaceholder")}
-        busy={excuseBusy}
-        onCancel={() => setExcusingViolationId(null)}
-        onConfirm={runExcuseViolation}
-      />
+        transparent
+        animationType="fade"
+        onRequestClose={excuseBusy ? () => {} : closeExcuseModal}
+      >
+        <View style={styles.excuseBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={excuseBusy ? undefined : closeExcuseModal}
+          />
+
+          <View style={styles.excuseCard}>
+            <Text style={styles.excuseTitle}>{t("admin.excuseViolationButton")}</Text>
+            <Text style={styles.excuseSubtitle}>{t("admin.excuseReasonPickerHint")}</Text>
+
+            {ADMIN_EXCUSE_REASONS.map((reasonKey) => (
+              <Pressable
+                key={reasonKey}
+                style={[
+                  styles.excuseReasonOption,
+                  excuseReasonKey === reasonKey && styles.excuseReasonOptionActive,
+                ]}
+                onPress={() => setExcuseReasonKey(reasonKey)}
+              >
+                <Ionicons
+                  name={excuseReasonKey === reasonKey ? "radio-button-on" : "radio-button-off"}
+                  size={18}
+                  color={excuseReasonKey === reasonKey ? adminColors.primary : adminColors.textMuted}
+                />
+                <Text style={styles.excuseReasonOptionText}>
+                  {t(ADMIN_EXCUSE_REASON_LABEL_KEY[reasonKey])}
+                </Text>
+              </Pressable>
+            ))}
+
+            <TextInput
+              style={styles.excuseNoteInput}
+              placeholder={t("admin.excuseNotePlaceholder")}
+              placeholderTextColor={adminColors.placeholder}
+              value={excuseNote}
+              onChangeText={setExcuseNote}
+              multiline
+            />
+
+            <View style={styles.excuseButtonsRow}>
+              <Pressable
+                style={styles.excuseCancelButton}
+                onPress={closeExcuseModal}
+                disabled={excuseBusy}
+              >
+                <Text style={styles.excuseCancelButtonText}>{t("common.cancel")}</Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.excuseConfirmButton,
+                  (!excuseReasonKey || excuseBusy) && styles.excuseConfirmButtonDisabled,
+                ]}
+                onPress={runExcuseViolation}
+                disabled={!excuseReasonKey || excuseBusy}
+              >
+                <Text style={styles.excuseConfirmButtonText}>
+                  {excuseBusy ? t("admin.savingButton") : t("admin.confirmButton")}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </AdminScreen>
   );
 }
@@ -710,6 +847,10 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     textTransform: "capitalize",
   },
+  violationMeta: {
+    color: adminColors.textMuted,
+    fontSize: 12,
+  },
   violationBadgeRow: {
     flexDirection: "row",
     gap: 6,
@@ -765,6 +906,88 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   saveNoteText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+  },
+  excuseBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    padding: adminSpacing.lg,
+  },
+  excuseCard: {
+    backgroundColor: adminColors.card,
+    borderRadius: adminRadius.lg,
+    padding: adminSpacing.lg,
+  },
+  excuseTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: adminColors.text,
+    marginBottom: 4,
+  },
+  excuseSubtitle: {
+    fontSize: 13,
+    color: adminColors.textMuted,
+    marginBottom: 12,
+  },
+  excuseReasonOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: adminColors.border,
+  },
+  excuseReasonOptionActive: {
+    // The radio icon itself already shows the selected state — this just
+    // keeps the row from looking identical to an unselected one.
+    opacity: 1,
+  },
+  excuseReasonOptionText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: adminColors.text,
+  },
+  excuseNoteInput: {
+    borderWidth: 1,
+    borderColor: adminColors.borderStrong,
+    borderRadius: adminRadius.sm,
+    padding: 12,
+    minHeight: 60,
+    textAlignVertical: "top",
+    color: adminColors.text,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  excuseButtonsRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 10,
+  },
+  excuseCancelButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: adminColors.borderStrong,
+    borderRadius: adminRadius.sm,
+    paddingVertical: 13,
+    alignItems: "center",
+  },
+  excuseCancelButtonText: {
+    color: adminColors.textMuted,
+    fontWeight: "900",
+  },
+  excuseConfirmButton: {
+    flex: 1,
+    backgroundColor: adminColors.primary,
+    borderRadius: adminRadius.sm,
+    paddingVertical: 13,
+    alignItems: "center",
+  },
+  excuseConfirmButtonDisabled: {
+    opacity: 0.5,
+  },
+  excuseConfirmButtonText: {
     color: "#FFFFFF",
     fontWeight: "900",
   },

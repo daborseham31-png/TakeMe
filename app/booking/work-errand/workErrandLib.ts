@@ -44,6 +44,13 @@ import {
   eligibilityReasonToErrorCode,
   getCancellationEligibility,
 } from "../cancellationEligibility";
+// Same reasoning as the cancellationEligibility import above — this is the
+// dependency-free core (no notify()/i18n import), not driverViolationsLib.ts
+// itself, which imports notify() FROM this file.
+import {
+  readExistingCancellationViolation,
+  writeCancellationViolationIfNew,
+} from "../driverViolationCore";
 
 export type WorkErrandKind = "work" | "errand";
 
@@ -1007,7 +1014,7 @@ export const cancelApplication = async (
   data: NormalizedApplication,
   cancelledBy: "passenger" | "driver",
   reason?: string,
-): Promise<void> => {
+): Promise<{ violationCreated: boolean; driverId: string } | null> => {
   const user = auth.currentUser;
   if (!user) throw new CancellationError("NOT_AUTHORIZED");
 
@@ -1017,6 +1024,8 @@ export const cancelApplication = async (
   let notifyTitle = "";
   let notifyCategory = "";
   let didCancel = false;
+  let driverIdForViolation = "";
+  let violationCreated = false;
 
   await runTransaction(db, async (transaction) => {
     // -----------------------------------------------------------------
@@ -1077,6 +1086,20 @@ export const cancelApplication = async (
     const jobRef = isAcceptedWork ? doc(db, "workJobs", current.sourceId) : null;
     const jobSnap = jobRef ? await transaction.get(jobRef) : null;
 
+    // An accepted application (work or errand) IS exactly one real,
+    // confirmed customer/employer booking — read the violation doc now
+    // (still PHASE 1) so it can be written atomically alongside the
+    // cancellation below (see driverViolationCore.ts's own header).
+    const violationSnap =
+      cancelledBy === "driver" && current.providerId
+        ? await readExistingCancellationViolation(
+            transaction,
+            current.providerId,
+            kind === "work" ? "workJobs" : "errandJobs",
+            id,
+          )
+        : null;
+
     // -----------------------------------------------------------------
     // PHASE 2 — every write. No transaction.get() below this point.
     // -----------------------------------------------------------------
@@ -1088,20 +1111,51 @@ export const cancelApplication = async (
       updatedAt: serverTimestamp(),
     });
 
+    if (violationSnap && current.providerId) {
+      driverIdForViolation = current.providerId;
+      violationCreated = writeCancellationViolationIfNew(transaction, violationSnap, {
+        driverId: current.providerId,
+        sourceCollection: kind === "work" ? "workJobs" : "errandJobs",
+        sourceId: id,
+        sourceCategory: current.category,
+        scheduledDeparture: new Date(`${current.date}T${current.startTime || "00:00"}:00`),
+        passengerBookingCount: 1,
+      });
+    }
+
     notifyOtherId = cancelledBy === "passenger" ? current.providerId : current.customerId;
     notifyTitle = current.title;
     notifyCategory = current.category;
     didCancel = true;
 
-    // Errand only: a cancelled request no longer counts as "booked" — see
-    // the matching increment in createApplication above. increment(-1)
-    // needs no prior read, so this can run alongside the appRef write
-    // above without an extra transaction.get().
     if (kind === "errand" && current.sourceId) {
-      transaction.update(doc(db, "errandJobs", current.sourceId), {
-        bookingCount: increment(-1),
-        updatedAt: serverTimestamp(),
-      });
+      if (cancelledBy === "driver") {
+        // The driver (the one who posted this errand offer) no longer
+        // wants to run it at all — cancel the whole listing and hide it
+        // from the driver's own Upcoming/Unbooked Trips (the just-cancelled
+        // application above is the retained history record), instead of
+        // merely decrementing the booking counter, which would leave it
+        // silently reappearing/re-searchable for a different customer (an
+        // errand job is always exactly one customer, never a shared-seat
+        // resource like a weekly route or a multi-worker job — see the
+        // "effectively taken by exactly one customer" comment elsewhere in
+        // this file).
+        transaction.update(doc(db, "errandJobs", current.sourceId), {
+          status: "cancelled",
+          deletedForDriver: true,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        // Passenger (customer) cancellation — the driver still offers this
+        // errand; just record that one fewer real request exists (see the
+        // matching increment in createApplication above). increment(-1)
+        // needs no prior read, so this can run alongside the appRef write
+        // above without an extra transaction.get().
+        transaction.update(doc(db, "errandJobs", current.sourceId), {
+          bookingCount: increment(-1),
+          updatedAt: serverTimestamp(),
+        });
+      }
     }
 
     if (!jobRef || !jobSnap || !jobSnap.exists()) return;
@@ -1132,18 +1186,40 @@ export const cancelApplication = async (
 
   // Only notify for a REAL transition — a no-op re-cancel (already-cancelled
   // early return above) must never send a second cancellation notification.
-  if (!didCancel || !notifyOtherId) return;
+  if (!didCancel) return null;
 
-  await notify({
-    receiverId: notifyOtherId,
-    type: "cancelled",
-    title: "Booking cancelled",
-    message: `The ${cancelledBy} cancelled "${notifyTitle}".`,
-    applicationId: id,
-    kind,
-    category: notifyCategory,
-    status: "cancelled",
-  });
+  const violationResult = driverIdForViolation
+    ? { violationCreated, driverId: driverIdForViolation }
+    : null;
+
+  if (!notifyOtherId) return violationResult;
+
+  // Best-effort — the cancellation itself already succeeded, so a notify()
+  // failure must never be reported back to the caller as a failed
+  // cancellation (same pattern as every other cancel function in this
+  // codebase — see cancelGeneralBooking in bookingsLib.ts).
+  try {
+    await notify({
+      receiverId: notifyOtherId,
+      type: "cancelled",
+      title: "Booking cancelled",
+      message: `The ${cancelledBy} cancelled "${notifyTitle}".`,
+      applicationId: id,
+      kind,
+      category: notifyCategory,
+      status: "cancelled",
+    });
+  } catch (error) {
+    console.log("cancelApplication: notify failed (booking already cancelled, non-fatal)", {
+      id,
+      kind,
+      category: notifyCategory,
+      path: "notifications",
+      error,
+    });
+  }
+
+  return violationResult;
 };
 
 // ---------------------------------------------------------------------------
