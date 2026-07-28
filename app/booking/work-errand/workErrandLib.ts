@@ -44,6 +44,46 @@ import {
   getCancellationEligibility,
 } from "../cancellationEligibility";
 
+const NOTIFICATION_WORKER_URL =
+  "https://takeme-notifications.yvcstudent4.workers.dev";
+
+// After the in-app Firestore notification is created, ask the trusted
+// Cloudflare Worker to deliver the matching OneSignal Web Push. The Worker
+// verifies the current Firebase ID token, reads this exact notification doc
+// through Firestore Security Rules, and only sends it when senderId matches
+// the authenticated caller. No OneSignal secret is stored in the mobile app.
+const sendExternalPushForNotification = async (
+  notificationId: string,
+): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user || !notificationId) return;
+
+  try {
+    const idToken = await user.getIdToken(true);
+
+    const response = await fetch(
+      `${NOTIFICATION_WORKER_URL}/send-notification`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ notificationId }),
+      },
+    );
+
+    if (!response.ok) {
+      const details = await response.text().catch(() => "");
+      console.warn("External push delivery failed", response.status, details);
+    }
+  } catch (error) {
+    // The in-app notification was already saved. A temporary push failure must
+    // never cancel the real booking/request action.
+    console.warn("External push delivery failed", error);
+  }
+};
+
 export type WorkErrandKind = "work" | "errand";
 
 // A dedicated error type for "this work job is already full" — deliberately
@@ -219,7 +259,7 @@ export const notify = async (input: NotifyInput) => {
     input.targetTab || input.roleTarget || input.openBookingTab || null;
 
   try {
-    await addDoc(collection(db, "notifications"), {
+    const notificationRef = await addDoc(collection(db, "notifications"), {
       // userId is kept for backwards-compatible querying; receiverId is the
       // canonical field per the notification schema.
       userId: input.receiverId,
@@ -251,8 +291,13 @@ export const notify = async (input: NotifyInput) => {
       deleted: false,
       createdAt: serverTimestamp(),
     });
-  } catch {
+
+    // Wait until the Worker accepted the request so the sender cannot close
+    // the app before the outgoing push request was even started.
+    await sendExternalPushForNotification(notificationRef.id);
+  } catch (error) {
     // Notifications are best-effort – never block the main action on them.
+    console.warn("Notification creation/delivery failed", error);
   }
 };
 
@@ -746,7 +791,8 @@ export const beginJobTrip = async (
     receiverId: data.customerId,
     type: "trip_in_progress",
     title: kind === "work" ? "Work started" : "Errand started",
-    message: kind === "work" ? "Your work has started." : "Your errand has started.",
+    message:
+      kind === "work" ? "Your work has started." : "Your errand has started.",
     applicationId: id,
     kind,
     category: data.category,
@@ -993,7 +1039,8 @@ export const cancelApplication = async (
     const rawAppData: any = appSnap.data();
     const current = normalizeApplication(appSnap.id, rawAppData, kind);
 
-    const expectedUid = cancelledBy === "driver" ? current.providerId : current.customerId;
+    const expectedUid =
+      cancelledBy === "driver" ? current.providerId : current.customerId;
     if (!expectedUid || expectedUid !== user.uid) {
       throw new CancellationError("NOT_AUTHORIZED");
     }
@@ -1030,15 +1077,21 @@ export const cancelApplication = async (
 
     if (!eligibility.canCancel) {
       throw new CancellationError(
-        eligibilityReasonToErrorCode(eligibility.reason, cancelledBy === "driver" ? "driver" : "passenger"),
+        eligibilityReasonToErrorCode(
+          eligibility.reason,
+          cancelledBy === "driver" ? "driver" : "passenger",
+        ),
       );
     }
 
     // Only an ACCEPTED work request ever took a place out of the job's
     // capacity — a still-pending one never touched remainingSeats, so
     // cancelling it needs no restore. Errand has no capacity concept at all.
-    const isAcceptedWork = kind === "work" && current.status === "accepted" && !!current.sourceId;
-    const jobRef = isAcceptedWork ? doc(db, "workJobs", current.sourceId) : null;
+    const isAcceptedWork =
+      kind === "work" && current.status === "accepted" && !!current.sourceId;
+    const jobRef = isAcceptedWork
+      ? doc(db, "workJobs", current.sourceId)
+      : null;
     const jobSnap = jobRef ? await transaction.get(jobRef) : null;
 
     // -----------------------------------------------------------------
@@ -1052,7 +1105,8 @@ export const cancelApplication = async (
       updatedAt: serverTimestamp(),
     });
 
-    notifyOtherId = cancelledBy === "passenger" ? current.providerId : current.customerId;
+    notifyOtherId =
+      cancelledBy === "passenger" ? current.providerId : current.customerId;
     notifyTitle = current.title;
     notifyCategory = current.category;
     didCancel = true;
@@ -1061,17 +1115,28 @@ export const cancelApplication = async (
 
     const jobData: any = jobSnap.data();
 
-    const totalSeats = Number(jobData.totalSeats ?? jobData.seats ?? jobData.workersNeeded ?? 1);
+    const totalSeats = Number(
+      jobData.totalSeats ?? jobData.seats ?? jobData.workersNeeded ?? 1,
+    );
     const currentRemaining =
       typeof jobData.remainingSeats === "number" ? jobData.remainingSeats : 0;
     // requestedSeats has no dedicated field in NormalizedApplication — read
     // straight off this SAME fresh snapshot's raw data, matching the exact
     // field precedence the previous implementation used.
-    const requestedSeats = Math.max(1, Number(rawAppData.requestedSeats || current.seats || 1));
+    const requestedSeats = Math.max(
+      1,
+      Number(rawAppData.requestedSeats || current.seats || 1),
+    );
 
     // Never let remainingSeats climb above totalSeats.
-    const nextRemaining = Math.min(currentRemaining + requestedSeats, totalSeats);
-    const nextAcceptedCount = Math.max(Number(jobData.acceptedWorkersCount || 0) - 1, 0);
+    const nextRemaining = Math.min(
+      currentRemaining + requestedSeats,
+      totalSeats,
+    );
+    const nextAcceptedCount = Math.max(
+      Number(jobData.acceptedWorkersCount || 0) - 1,
+      0,
+    );
 
     transaction.update(jobRef, {
       remainingSeats: nextRemaining,
@@ -1349,94 +1414,97 @@ export const submitApplicationRating = async (
   console.log("[rating] transaction started", ratingWritePaths);
 
   try {
-  await runTransaction(db, async (transaction) => {
-    const appSnap = await transaction.get(appRef);
+    await runTransaction(db, async (transaction) => {
+      const appSnap = await transaction.get(appRef);
 
-    if (!appSnap.exists()) {
-      throw new Error(i18n.t("rides.bookingNotFound"));
-    }
+      if (!appSnap.exists()) {
+        throw new Error(i18n.t("rides.bookingNotFound"));
+      }
 
-    const appData: any = appSnap.data();
+      const appData: any = appSnap.data();
 
-    // Never trust the already-loaded `app` object — re-verify ownership +
-    // real completion against the current server state. "work" applications
-    // use applicantId (never passengerId); "errand" applications use
-    // passengerId — see the two payload shapes in requestWorkOrErrand above.
-    const callerOwnsThis =
-      appData.applicantId === user.uid || appData.passengerId === user.uid;
+      // Never trust the already-loaded `app` object — re-verify ownership +
+      // real completion against the current server state. "work" applications
+      // use applicantId (never passengerId); "errand" applications use
+      // passengerId — see the two payload shapes in requestWorkOrErrand above.
+      const callerOwnsThis =
+        appData.applicantId === user.uid || appData.passengerId === user.uid;
 
-    if (!callerOwnsThis) {
-      throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
-    }
-    if (appData.tripStatus !== "completed" || appData.status !== "completed") {
-      throw new Error(i18n.t("booking.tripNotCompletedYet"));
-    }
-    if (appData.ratingSubmitted === true) {
-      return;
-    }
+      if (!callerOwnsThis) {
+        throw new Error(i18n.t("workErrand.mustBeLoggedIn"));
+      }
+      if (
+        appData.tripStatus !== "completed" ||
+        appData.status !== "completed"
+      ) {
+        throw new Error(i18n.t("booking.tripNotCompletedYet"));
+      }
+      if (appData.ratingSubmitted === true) {
+        return;
+      }
 
-    const reviewSnap = await transaction.get(reviewRef);
-    if (reviewSnap.exists()) {
-      return;
-    }
+      const reviewSnap = await transaction.get(reviewRef);
+      if (reviewSnap.exists()) {
+        return;
+      }
 
-    const driverSnap = await transaction.get(driverRef);
-    const driverData: any = driverSnap.exists() ? driverSnap.data() : {};
+      const driverSnap = await transaction.get(driverRef);
+      const driverData: any = driverSnap.exists() ? driverSnap.data() : {};
 
-    const oldCount = Number(driverData.ratingCount) || 0;
-    const oldSum = Number(driverData.ratingSum) || 0;
+      const oldCount = Number(driverData.ratingCount) || 0;
+      const oldSum = Number(driverData.ratingSum) || 0;
 
-    const newCount = oldCount + 1;
-    const newSum = oldSum + cleanRating;
-    // Stored RAW (never toFixed()'d) — firestore.rules checks
-    // ratingAverage == ratingSum / ratingCount for exact equality.
-    const newAverage = newSum / newCount;
+      const newCount = oldCount + 1;
+      const newSum = oldSum + cleanRating;
+      // Stored RAW (never toFixed()'d) — firestore.rules checks
+      // ratingAverage == ratingSum / ratingCount for exact equality.
+      const newAverage = newSum / newCount;
 
-    transaction.set(reviewRef, {
-      bookingId: id,
-      routeId: app.sourceId || "",
-      // Literal "work"/"errands" per the shared driverReviews schema — not
-      // app.category, which stores the job-listing category ("workErrands").
-      category: kind === "work" ? "work" : "errands",
+      transaction.set(reviewRef, {
+        bookingId: id,
+        routeId: app.sourceId || "",
+        // Literal "work"/"errands" per the shared driverReviews schema — not
+        // app.category, which stores the job-listing category ("workErrands").
+        category: kind === "work" ? "work" : "errands",
 
-      driverId: app.providerId,
-      driverName: app.providerName || "Provider",
+        driverId: app.providerId,
+        driverName: app.providerName || "Provider",
 
-      passengerId: user.uid,
-      passengerName: app.customerName || user.displayName || "Passenger",
+        passengerId: user.uid,
+        passengerName: app.customerName || user.displayName || "Passenger",
 
-      rating: cleanRating,
-      comment: cleanComment,
-      reviewComment: cleanComment,
+        rating: cleanRating,
+        comment: cleanComment,
+        reviewComment: cleanComment,
 
-      from: "",
-      to: "",
-      date: app.date || "",
-      time: app.startTime || "",
+        from: "",
+        to: "",
+        date: app.date || "",
+        time: app.startTime || "",
 
-      createdAt: serverTimestamp(),
-    });
+        createdAt: serverTimestamp(),
+      });
 
-    transaction.update(appRef, {
-      rating: cleanRating,
-      reviewComment: cleanComment,
-      ratingSubmitted: true,
-      needsPassengerRating: false,
-      ratedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    transaction.set(
-      driverRef,
-      {
-        ratingCount: newCount,
-        ratingSum: newSum,
-        ratingAverage: newAverage,
+      transaction.update(appRef, {
+        rating: cleanRating,
+        reviewComment: cleanComment,
+        ratingSubmitted: true,
+        needsPassengerRating: false,
+        ratedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-  });
+      });
+
+      transaction.set(
+        driverRef,
+        {
+          ratingCount: newCount,
+          ratingSum: newSum,
+          ratingAverage: newAverage,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    });
 
     console.log("[rating] transaction succeeded", { bookingId: id });
   } catch (error) {
@@ -1464,5 +1532,4 @@ export const STATUS_LABEL: Record<FlowStatus, string> = {
 
 // Whether the booking is still awaiting its payment step.
 export const isAwaitingPayment = (status: FlowStatus) =>
-  status === "payment_pending_driver" ||
-  status === "payment_pending_passenger";
+  status === "payment_pending_driver" || status === "payment_pending_passenger";
