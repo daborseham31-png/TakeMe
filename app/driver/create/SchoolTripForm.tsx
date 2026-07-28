@@ -49,10 +49,18 @@ import { recordUsedFormValues, useSavedFormValues } from "./savedFormValuesLib";
 const MODE_TABS: { key: DriverSchoolTripMode; labelKey: string }[] = [
   { key: "outbound_only", labelKey: "schoolTrip.outboundOnly" },
   { key: "return_only", labelKey: "schoolTrip.returnOnly" },
-  { key: "outbound_and_return", labelKey: "schoolTrip.outboundAndReturn" },
+  { key: "outbound_and_return", labelKey: "schoolTrip.roundTrip" },
 ];
 
-export default function SchoolTripForm() {
+type Props = {
+  // Rendered inside this form's own card (above the Outbound/Return trip
+  // section), instead of a separate header card above the mode toggle/tab
+  // row — see app/driver/create/school.tsx, the only current caller.
+  headerTitle?: string;
+  headerSubtitle?: string;
+};
+
+export default function SchoolTripForm({ headerTitle, headerSubtitle }: Props) {
   const { t } = useTranslation();
   const { isRTL, language } = useLanguage();
   const { driverName, phone, driverAge } = useDriverAccount();
@@ -497,6 +505,15 @@ export default function SchoolTripForm() {
       </View>
 
       <View style={styles.card}>
+        {headerTitle ? (
+          <>
+            <Text style={styles.title}>{headerTitle}</Text>
+            {headerSubtitle ? (
+              <Text style={[styles.subtitle, { marginBottom: 16 }]}>{headerSubtitle}</Text>
+            ) : null}
+          </>
+        ) : null}
+
         <View style={localStyles.sectionHeader}>
           <Ionicons
             name={isReturnOnly ? "arrow-down-circle-outline" : "arrow-up-circle-outline"}

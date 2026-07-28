@@ -6,6 +6,7 @@ import {
   Alert,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -13,6 +14,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
+import { getCategoryMeta } from "../../booking/bookingsLib";
 import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
@@ -21,6 +23,7 @@ import AutocompleteTextField from "../../components/AutocompleteTextField";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import { fetchDriverEligibility } from "../driverEligibility";
 import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
+import { translateCategoryLabel } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { backIconName } from "../../i18n/rtl";
 import DateInput, { TimeInput } from "./DateInput";
@@ -36,6 +39,8 @@ import {
   validateAccountInfo,
   validateDateAndTimeNotPassed,
 } from "./driverHelpers";
+
+const errandCategoryMeta = getCategoryMeta("errands");
 
 export default function ErrandJobScreen() {
   const { t } = useTranslation();
@@ -244,27 +249,29 @@ export default function ErrandJobScreen() {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
-        </Pressable>
+        <View style={localStyles.topRow}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
+          </Pressable>
+
+          <View
+            style={[
+              localStyles.categoryBadge,
+              { backgroundColor: `${errandCategoryMeta.color}18` },
+            ]}
+          >
+            <Ionicons name={errandCategoryMeta.icon} size={18} color={errandCategoryMeta.color} />
+            <Text style={[localStyles.categoryBadgeText, { color: errandCategoryMeta.color }]}>
+              {translateCategoryLabel("errands", errandCategoryMeta.label, t)}
+            </Text>
+          </View>
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.title}>{t("driverCreate.newErrandTitle")}</Text>
           <Text style={styles.subtitle}>
             {t("driverCreate.newErrandSubtitle")}
           </Text>
-
-          <YesNoField
-            label={t("driverCreate.canTakeKids")}
-            value={canTakeKids}
-            onValueChange={setCanTakeKids}
-          />
-
-          <YesNoField
-            label={t("driverCreate.allowsPets")}
-            value={allowsPets}
-            onValueChange={setAllowsPets}
-          />
 
           <Text style={styles.label}>{t("driverCreate.errandTitleLabel")}</Text>
           <TextInput
@@ -373,6 +380,18 @@ export default function ErrandJobScreen() {
             </View>
           </View>
 
+          <YesNoField
+            label={t("driverCreate.canTakeKids")}
+            value={canTakeKids}
+            onValueChange={setCanTakeKids}
+          />
+
+          <YesNoField
+            label={t("driverCreate.allowsPets")}
+            value={allowsPets}
+            onValueChange={setAllowsPets}
+          />
+
           <Pressable
             style={[
               styles.submitButton,
@@ -391,3 +410,29 @@ export default function ErrandJobScreen() {
     </DirectionalScreen>
   );
 }
+
+// Same shape/values as RideForm.tsx's categoryStyles (topRow/categoryBadge/
+// categoryBadgeText) — this screen only ever posts one category ("errands"),
+// so the badge is fixed rather than driven by a prop, but it should still
+// look identical to every other create-trip screen's badge.
+const localStyles = StyleSheet.create({
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 12,
+  },
+  categoryBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  categoryBadgeText: {
+    fontWeight: "900",
+    fontSize: 15,
+  },
+});

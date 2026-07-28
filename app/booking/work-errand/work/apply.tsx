@@ -19,11 +19,7 @@ import { useLanguage } from "../../../i18n/LanguageProvider";
 import { paddingEnd } from "../../../i18n/rtl";
 import IsraelLocationAutocomplete from "../../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../israelLocations";
-import {
-  createApplication,
-  detectCurrentLocation,
-  GeoPoint,
-} from "../workErrandLib";
+import { createApplication } from "../workErrandLib";
 
 type JobListing = {
   id: string;
@@ -96,25 +92,8 @@ export default function WorkApplyScreen() {
 
   const [neighborhood, setNeighborhood] = useState("");
   const [notes, setNotes] = useState("");
-  const [location, setLocation] = useState<GeoPoint | null>(null);
-  const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
-
-  const detectLocation = async () => {
-    try {
-      setLocating(true);
-      const loc = await detectCurrentLocation();
-      setLocation(loc);
-    } catch (error: any) {
-      Alert.alert(
-        t("workErrand.locationTitle"),
-        error?.message || t("workErrand.couldNotDetectLocation"),
-      );
-    } finally {
-      setLocating(false);
-    }
-  };
 
   const handleSubmit = async () => {
     const cleanCity = city.trim();
@@ -127,14 +106,6 @@ export default function WorkApplyScreen() {
 
     if (!cityPlace) {
       setCityError(t("validation.selectLocationFromList"));
-      return;
-    }
-
-    if (!location || location.latitude === null || location.longitude === null) {
-      Alert.alert(
-        t("workErrand.locationNeededTitle"),
-        t("workErrand.detectLocationMessage"),
-      );
       return;
     }
 
@@ -164,7 +135,14 @@ export default function WorkApplyScreen() {
           },
           neighborhood: cleanNeighborhood,
           notes: notes.trim(),
-          location,
+          // The picked City/Village autocomplete result already carries
+          // coordinates — no need for a separate GPS "detect my location"
+          // step just to satisfy CustomerDetails.location's GeoPoint shape.
+          location: {
+            latitude: cityPlace.latitude ?? null,
+            longitude: cityPlace.longitude ?? null,
+            address: cleanCity,
+          },
         },
       );
 
@@ -299,29 +277,6 @@ export default function WorkApplyScreen() {
           <Text style={styles.sectionTitle}>{t("workErrand.yourDetails")}</Text>
 
           <Text style={styles.hint}>{t("workErrand.autoProfileHint")}</Text>
-
-          <Text style={styles.label}>{t("workErrand.yourLocation")}</Text>
-          <Pressable
-            style={styles.locationBox}
-            onPress={detectLocation}
-            disabled={locating}
-          >
-            <Ionicons
-              name={location ? "location" : "locate-outline"}
-              size={20}
-              color="#F58220"
-            />
-            <Text style={styles.locationText} numberOfLines={2}>
-              {locating
-                ? t("booking.findingLocation")
-                : location
-                  ? location.address || t("workErrand.currentLocationDetected")
-                  : t("workErrand.tapToDetectLocation")}
-            </Text>
-            {location ? (
-              <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
-            ) : null}
-          </Pressable>
 
           <View style={styles.row}>
             <View style={styles.halfField}>
@@ -478,24 +433,6 @@ const styles = StyleSheet.create({
     color: "#7A5C4B",
     marginBottom: 14,
     lineHeight: 18,
-  },
-  locationBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "#FFF8F2",
-    borderWidth: 1.5,
-    borderColor: "#FFE2C5",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    marginBottom: 6,
-  },
-  locationText: {
-    flex: 1,
-    color: "#3C2319",
-    fontSize: 14,
-    fontWeight: "700",
   },
   row: {
     flexDirection: "row",

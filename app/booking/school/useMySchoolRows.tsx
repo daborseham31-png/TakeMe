@@ -67,8 +67,10 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
-import { db } from "../../../firebase";
+import { auth, db } from "../../../firebase";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
+import { validateDateAndTimeNotPassed } from "../../driver/create/driverHelpers";
+import DateInput, { TimeInput } from "../../driver/create/DateInput";
 import {
   BookingBucket,
   buildSearchText,
@@ -97,6 +99,8 @@ import {
   cancelRideRequest,
   cancelSchoolBooking,
   cancelSchoolTrip,
+  createSchoolOutboundTrip,
+  createSchoolReturnOnlyTrip,
   getSchoolCancelBlockedReason,
   hideRideRequest,
   hideSchoolBooking,
@@ -140,6 +144,12 @@ export type SchoolPassengerRow =
       status: SchoolBookingStatus;
       tripStatus: string;
       searchText: string;
+      // Structured fields for My Bookings' filter bar (driver-name/location
+      // filters) — kept alongside searchText rather than making the filter
+      // logic re-parse that flattened string.
+      driverName: string;
+      fromLabel: string;
+      toLabel: string;
       render: () => React.ReactNode;
     }
   | {
@@ -149,6 +159,10 @@ export type SchoolPassengerRow =
       time: string;
       status: string;
       searchText: string;
+      // No driver is assigned yet for a still-waiting request.
+      driverName: string;
+      fromLabel: string;
+      toLabel: string;
       render: () => React.ReactNode;
     };
 
@@ -202,10 +216,57 @@ export default function useMySchoolRows({
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Driver "Republish Trip" — a compact confirmation MODAL (same pattern as
+  // bookings.tsx's own rebook/republish modals), never a full-page
+  // navigation. `republish` is built once, synchronously, from the
+  // completed trip's own already-loaded fields when the button is pressed
+  // (see openRepublishSchoolTrip) — route/school/vehicle are reused
+  // unchanged; only date/time/price/seats are ever edited here, and
+  // publishing always goes through the SAME createSchoolOutboundTrip/
+  // createSchoolReturnOnlyTrip functions SchoolTripForm.tsx itself calls,
+  // so the new document is indistinguishable from one created normally.
+  const [republish, setRepublish] = useState<{
+    sourceTripId: string;
+    direction: SchoolTrip["direction"];
+    fromArea: string;
+    fromAddress: string;
+    fromLocation: SchoolTrip["fromLocation"];
+    toArea: string;
+    toAddress: string;
+    toLocation: SchoolTrip["toLocation"];
+    schoolId: string;
+    schoolName: string;
+    schoolAddress: string;
+    schoolLocation: SchoolTrip["schoolLocation"];
+    car: string;
+    carColor: string;
+    carPlate: string;
+  } | null>(null);
+  const [republishDate, setRepublishDate] = useState("");
+  const [republishTime, setRepublishTime] = useState("");
+  const [showRepublishDatePicker, setShowRepublishDatePicker] = useState(false);
+  const [showRepublishTimePicker, setShowRepublishTimePicker] = useState(false);
+  const [republishPrice, setRepublishPrice] = useState("");
+  const [republishSeats, setRepublishSeats] = useState("");
+  const [republishSubmitting, setRepublishSubmitting] = useState(false);
+
   const [ratingBooking, setRatingBooking] = useState<SchoolBooking | null>(null);
   const [ratingStars, setRatingStars] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
+
+  // Passenger "Book Again" — same pattern/route as bookings.tsx's own
+  // openRebook/submitRebook (a small modal collecting a new date/time, then
+  // router.push to the existing driver-search screen) — appears once a
+  // completed school booking has actually been rated, exactly like the
+  // Personal Ride / roadside "Book Again" button already does.
+  const [bookAgain, setBookAgain] = useState<{ from: string; to: string; seats: number } | null>(
+    null,
+  );
+  const [bookAgainDate, setBookAgainDate] = useState("");
+  const [bookAgainTime, setBookAgainTime] = useState("");
+  const [showBookAgainDatePicker, setShowBookAgainDatePicker] = useState(false);
+  const [showBookAgainTimePicker, setShowBookAgainTimePicker] = useState(false);
 
   const [cancelTripTarget, setCancelTripTarget] = useState<SchoolTrip | null>(null);
   const [cancelReasonInput, setCancelReasonInput] = useState("");
@@ -546,6 +607,140 @@ export default function useMySchoolRows({
     );
   };
 
+  // "Republish Trip" (driver only) — opens the compact confirmation modal
+  // below, never a full-page navigation to SchoolTripForm. A completed
+  // one-time school trip CAN carry real finished bookings (unlike a legacy
+  // driverRoutes/errandJobs "trip" row in bookings.tsx), but none of that is
+  // ever read here: only the route/school/direction/vehicle the driver
+  // originally set are reused (all straight off this already-loaded `trip`
+  // object, never re-fetched), and only date/time/price/seats are editable
+  // before publishing.
+  const openRepublishSchoolTrip = (trip: SchoolTrip) => {
+    if (republishSubmitting) return;
+
+    setRepublish({
+      sourceTripId: trip.id,
+      direction: trip.direction,
+      fromArea: trip.fromArea,
+      fromAddress: trip.fromAddress,
+      fromLocation: trip.fromLocation,
+      toArea: trip.toArea,
+      toAddress: trip.toAddress,
+      toLocation: trip.toLocation,
+      schoolId: trip.schoolId,
+      schoolName: trip.schoolName,
+      schoolAddress: trip.schoolAddress,
+      schoolLocation: trip.schoolLocation,
+      car: trip.car,
+      carColor: trip.carColor,
+      carPlate: trip.carPlate,
+    });
+    setRepublishDate("");
+    setRepublishTime("");
+    setRepublishPrice(
+      typeof trip.pricePerSeat === "number" ? String(trip.pricePerSeat) : "",
+    );
+    setRepublishSeats(typeof trip.totalSeats === "number" ? String(trip.totalSeats) : "1");
+  };
+
+  const closeRepublishModal = () => {
+    setRepublish(null);
+    setRepublishDate("");
+    setRepublishTime("");
+    setRepublishPrice("");
+    setRepublishSeats("");
+    setShowRepublishDatePicker(false);
+    setShowRepublishTimePicker(false);
+  };
+
+  // Publishes the modal's current New Date/New Time/New Price/New Seats as
+  // a COMPLETELY NEW schoolTrips document, through the exact same
+  // createSchoolOutboundTrip/createSchoolReturnOnlyTrip functions
+  // SchoolTripForm.tsx itself calls — so the result is indistinguishable
+  // from a trip created the normal way: a brand-new id, zero bookings, the
+  // same default status fields. The driver identity comes from the trip's
+  // OWN stored driverName/driverPhone (the same driver, unchanged), never
+  // re-collected here.
+  const submitRepublishSchoolTrip = async () => {
+    if (!republish || republishSubmitting) return;
+
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert(t("auth.loginRequiredTitle"), t("auth.pleaseLoginFirst"));
+      return;
+    }
+
+    const dateTimeValidation = validateDateAndTimeNotPassed(republishDate, republishTime, {
+      dateLabelKey: "driverCreate.travelDate",
+      timeLabelKey: "driverCreate.departureTime",
+    });
+    if (!dateTimeValidation) return;
+
+    const cleanPrice = Number(republishPrice);
+    if (!republishPrice || Number.isNaN(cleanPrice) || cleanPrice <= 0) {
+      Alert.alert(t("validation.invalidPriceTitle"), t("validation.invalidPrice"));
+      return;
+    }
+
+    const cleanSeats = Number(republishSeats);
+    if (!republishSeats || Number.isNaN(cleanSeats) || cleanSeats < 1) {
+      Alert.alert(t("validation.invalidSeatsTitle"), t("validation.invalidSeats"));
+      return;
+    }
+
+    setRepublishSubmitting(true);
+
+    try {
+      const suspensionBlocked = await getDriverSuspensionBlockedReason(user.uid);
+      if (suspensionBlocked) {
+        Alert.alert(t("driver.accountSuspendedTitle"), suspensionBlocked);
+        return;
+      }
+
+      const originalTrip = trips.find((t2) => t2.id === republish.sourceTripId);
+
+      const input = {
+        fromArea: republish.fromArea,
+        fromAddress: republish.fromAddress,
+        fromLocation: republish.fromLocation,
+        toArea: republish.toArea,
+        toAddress: republish.toAddress,
+        toLocation: republish.toLocation,
+        schoolId: republish.schoolId,
+        schoolName: republish.schoolName,
+        schoolAddress: republish.schoolAddress,
+        schoolLocation: republish.schoolLocation,
+        date: dateTimeValidation.cleanDate,
+        departureTime: dateTimeValidation.cleanTime,
+        pricePerSeat: cleanPrice,
+        totalSeats: cleanSeats,
+        car: republish.car,
+        carColor: republish.carColor,
+        carPlate: republish.carPlate,
+      };
+
+      const driver = {
+        driverId: user.uid,
+        driverName: originalTrip?.driverName || "",
+        driverPhone: originalTrip?.driverPhone || "",
+      };
+
+      if (republish.direction === "from_school") {
+        await createSchoolReturnOnlyTrip(input, driver);
+      } else {
+        await createSchoolOutboundTrip(input, driver);
+      }
+
+      Alert.alert(t("common.success"), t("driver.tripCreated"));
+      closeRepublishModal();
+    } catch (error: any) {
+      console.log("REPUBLISH SCHOOL TRIP ERROR:", error);
+      Alert.alert(t("common.error"), error?.message || t("booking.republishUnavailable"));
+    } finally {
+      setRepublishSubmitting(false);
+    }
+  };
+
   const handleStartOrContinueTrip = async (trip: SchoolTrip) => {
     if (trip.tripStatus === "booked") {
       if (!canStartTrip(trip)) {
@@ -601,6 +796,52 @@ export default function useMySchoolRows({
     } finally {
       setRatingSubmitting(false);
     }
+  };
+
+  // Opens once a completed booking has already been rated (see the
+  // legNeedsRating(booking)===false && typeof booking.rating==="number"
+  // guard in renderLegActions below) — prefills the new date/time from the
+  // ORIGINAL booking's own date/time (same as bookings.tsx's openRebook/
+  // openRideRebook), fully editable before searching again.
+  const openSchoolBookAgain = (booking: SchoolBooking) => {
+    setBookAgain({ from: booking.fromAddress, to: booking.toAddress, seats: booking.seats });
+    setBookAgainDate(booking.date || "");
+    setBookAgainTime(booking.departureTime || "");
+  };
+
+  const closeBookAgainModal = () => {
+    setBookAgain(null);
+    setBookAgainDate("");
+    setBookAgainTime("");
+    setShowBookAgainDatePicker(false);
+    setShowBookAgainTimePicker(false);
+  };
+
+  // Same target screen/params shape as bookings.tsx's own submitRebook —
+  // never a second search screen, never a raw booking object in the URL.
+  const submitSchoolBookAgain = () => {
+    if (!bookAgain) return;
+
+    if (!bookAgainDate || !bookAgainTime) {
+      Alert.alert(t("auth.missingDetails"), t("booking.chooseNewDateTimeMessage"));
+      return;
+    }
+
+    router.push({
+      pathname: "/booking/driverresults",
+      params: {
+        from: bookAgain.from,
+        to: bookAgain.to,
+        category: "school",
+        seats: String(bookAgain.seats || 1),
+        tripDate: bookAgainDate,
+        time: bookAgainTime,
+        bookingType: "quick",
+        bookForWholeWeek: "false",
+      },
+    } as any);
+
+    closeBookAgainModal();
   };
 
   const schoolMeta = getCategoryMeta("school");
@@ -740,9 +981,22 @@ export default function useMySchoolRows({
         ) : null}
 
         {legNeedsRating(booking) ? (
-          <Pressable style={styles.rateButton} onPress={() => openRatingModal(booking)}>
-            <Ionicons name="star-outline" size={14} color="#F58220" />
-            <Text style={styles.rateButtonText}>{t("schoolTrip.rateDriverButton")}</Text>
+          <>
+            <Pressable style={styles.rateButton} onPress={() => openRatingModal(booking)}>
+              <Ionicons name="star-outline" size={14} color="#F58220" />
+              <Text style={styles.rateButtonText}>{t("schoolTrip.rateDriverButton")}</Text>
+            </Pressable>
+
+            <Text style={styles.rateDriverHint}>{t("schoolTrip.rateDriverRebookHint")}</Text>
+          </>
+        ) : null}
+
+        {booking.status === "completed" &&
+        !legNeedsRating(booking) &&
+        typeof booking.rating === "number" ? (
+          <Pressable style={styles.startButton} onPress={() => openSchoolBookAgain(booking)}>
+            <Ionicons name="refresh" size={14} color="#FFFFFF" />
+            <Text style={styles.startButtonText}>{t("booking.bookAgainTitle")}</Text>
           </Pressable>
         ) : null}
 
@@ -770,11 +1024,10 @@ export default function useMySchoolRows({
 
   // OUTBOUND card — a fully independent, top-level My Bookings card. Every
   // child riding together, one shared verification code, blue accent.
-  // Slightly dimmed once THIS exact booking is completed (a purely
-  // cosmetic, per-card cue — never dependent on any return booking's own
-  // status, since there is no round-trip grouping anymore).
+  // Completed status is conveyed only by the status pill above — the card
+  // itself stays fully opaque/readable (never dimmed), matching every other
+  // completed booking card in My Bookings.
   const renderOutboundLegCard = (booking: SchoolBooking) => {
-    const dimmed = booking.status === "completed";
     const childNames = (booking.childEntries || [])
       .map((c) => c.childName)
       .filter((name): name is string => Boolean(name));
@@ -800,7 +1053,7 @@ export default function useMySchoolRows({
     return (
       <View
         key={booking.id}
-        style={[styles.legCard, accentBorderStart(4, "#2563EB", isRTL), dimmed && styles.legCardDimmed]}
+        style={[styles.legCard, accentBorderStart(4, "#2563EB", isRTL)]}
       >
         <View style={[styles.catChip, { backgroundColor: `${schoolMeta.color}18` }]}>
           <Ionicons name={schoolMeta.icon} size={13} color={schoolMeta.color} />
@@ -877,7 +1130,6 @@ export default function useMySchoolRows({
   // React sees the SAME card transform from "searching" to "booked" instead
   // of mounting a second one (see this file's passengerRows comment).
   const renderReturnLegCard = (booking: SchoolBooking, stableKey: string) => {
-    const dimmed = booking.status === "completed";
     const childLabel = booking.childName || t("schoolTrip.childNumber", { number: 1 });
     // The booking's OWN exact return date — never the outbound leg's date,
     // never derived from any sibling return booking. `.date` is already the
@@ -889,7 +1141,7 @@ export default function useMySchoolRows({
     return (
       <View
         key={stableKey}
-        style={[styles.legCard, accentBorderStart(4, "#16A34A", isRTL), dimmed && styles.legCardDimmed]}
+        style={[styles.legCard, accentBorderStart(4, "#16A34A", isRTL)]}
       >
         <View style={[styles.catChip, { backgroundColor: `${schoolMeta.color}18` }]}>
           <Ionicons name={schoolMeta.icon} size={13} color={schoolMeta.color} />
@@ -1053,6 +1305,17 @@ export default function useMySchoolRows({
               <Text style={styles.noReturnRowText}>{cancelBlockedReason}</Text>
             ) : null}
           </>
+        ) : null}
+
+        {trip.status === "completed" ? (
+          <Pressable
+            style={[styles.republishButton, republishSubmitting && { opacity: 0.6 }]}
+            onPress={() => openRepublishSchoolTrip(trip)}
+            disabled={republishSubmitting}
+          >
+            <Ionicons name="refresh" size={14} color="#F58220" />
+            <Text style={styles.republishButtonText}>{t("booking.republishTripButton")}</Text>
+          </Pressable>
         ) : null}
       </View>
     );
@@ -1227,6 +1490,9 @@ export default function useMySchoolRows({
           booking.childName,
           ...(booking.childEntries || []).map((c) => c.childName),
         ]),
+        driverName: booking.driverName,
+        fromLabel: booking.fromAddress,
+        toLabel: booking.toAddress,
         render: () =>
           booking.bookingDirection === "to_school"
             ? renderOutboundLegCard(booking)
@@ -1260,6 +1526,9 @@ export default function useMySchoolRows({
           request.requestedTime,
           request.childName,
         ]),
+        driverName: "",
+        fromLabel: request.fromArea,
+        toLabel: request.toArea,
         render: () => renderWaitingCard(request, `school-return-request-${request.id}`),
       }));
 
@@ -1489,6 +1758,127 @@ export default function useMySchoolRows({
           </DirectionalCard>
         </KeyboardAvoidingWrapper>
       </Modal>
+
+      <Modal visible={!!bookAgain} animationType="fade" transparent onRequestClose={closeBookAgainModal}>
+        <KeyboardAvoidingWrapper style={styles.ratingOverlay}>
+          <DirectionalCard style={styles.ratingSheet}>
+            <Text style={styles.ratingTitle}>{t("booking.bookAgainTitle")}</Text>
+            <Text style={styles.ratingSubtitle}>{t("booking.bookAgainSubtitle")}</Text>
+
+            {bookAgain ? (
+              <View style={styles.republishSummary}>
+                <View style={[styles.catChip, { backgroundColor: `${schoolMeta.color}18`, alignSelf: "flex-start" }]}>
+                  <Ionicons name={schoolMeta.icon} size={13} color={schoolMeta.color} />
+                  <Text style={[styles.catChipText, { color: schoolMeta.color }]}>
+                    {translateCategoryLabel("school", schoolMeta.label, t)}
+                  </Text>
+                </View>
+                <Text style={styles.routeText}>
+                  {bookAgain.from} → {bookAgain.to}
+                </Text>
+                <Text style={styles.metaText}>
+                  {t("booking.seatsCount", { count: bookAgain.seats })}
+                </Text>
+              </View>
+            ) : null}
+
+            <DateInput
+              label={t("booking.newDateLabel")}
+              value={bookAgainDate}
+              onChange={setBookAgainDate}
+              showPicker={showBookAgainDatePicker}
+              setShowPicker={setShowBookAgainDatePicker}
+            />
+
+            <TimeInput
+              label={t("booking.newTimeLabel")}
+              value={bookAgainTime}
+              onChange={setBookAgainTime}
+              showPicker={showBookAgainTimePicker}
+              setShowPicker={setShowBookAgainTimePicker}
+            />
+
+            <Pressable style={styles.ratingSubmitButton} onPress={submitSchoolBookAgain}>
+              <Ionicons name="search-outline" size={16} color="#FFFFFF" />
+              <Text style={styles.ratingSubmitText}>{t("booking.searchDrivers")}</Text>
+            </Pressable>
+
+            <Pressable style={styles.ratingCancelButton} onPress={closeBookAgainModal}>
+              <Text style={styles.ratingCancelText}>{t("common.cancel")}</Text>
+            </Pressable>
+          </DirectionalCard>
+        </KeyboardAvoidingWrapper>
+      </Modal>
+
+      <Modal visible={!!republish} animationType="fade" transparent onRequestClose={closeRepublishModal}>
+        <KeyboardAvoidingWrapper style={styles.ratingOverlay}>
+          <DirectionalCard style={styles.ratingSheet}>
+            <Text style={styles.ratingTitle}>{t("booking.republishTripButton")}</Text>
+            <Text style={styles.ratingSubtitle}>{t("booking.republishModalSubtitle")}</Text>
+
+            {republish ? (
+              <View style={styles.republishSummary}>
+                <Text style={styles.routeText}>
+                  {republish.fromAddress} → {republish.toAddress}
+                </Text>
+                <Text style={styles.metaText}>{republish.schoolName}</Text>
+              </View>
+            ) : null}
+
+            <DateInput
+              label={t("booking.newDateLabel")}
+              value={republishDate}
+              onChange={setRepublishDate}
+              showPicker={showRepublishDatePicker}
+              setShowPicker={setShowRepublishDatePicker}
+            />
+
+            <TimeInput
+              label={t("booking.newTimeLabel")}
+              value={republishTime}
+              onChange={setRepublishTime}
+              showPicker={showRepublishTimePicker}
+              setShowPicker={setShowRepublishTimePicker}
+            />
+
+            <Text style={styles.republishFieldLabel}>{t("booking.newPriceLabel")}</Text>
+            <TextInput
+              style={styles.commentInput}
+              keyboardType="numeric"
+              value={republishPrice}
+              onChangeText={(text) => setRepublishPrice(text.replace(/[^0-9]/g, ""))}
+              placeholder={t("booking.newPriceLabel")}
+              placeholderTextColor="#8B7B6B"
+            />
+
+            <Text style={styles.republishFieldLabel}>{t("booking.newSeatsLabel")}</Text>
+            <TextInput
+              style={styles.commentInput}
+              keyboardType="numeric"
+              value={republishSeats}
+              onChangeText={(text) => setRepublishSeats(text.replace(/[^0-9]/g, ""))}
+              placeholder={t("booking.newSeatsLabel")}
+              placeholderTextColor="#8B7B6B"
+            />
+
+            <Pressable
+              style={[styles.ratingSubmitButton, republishSubmitting && { opacity: 0.5 }]}
+              onPress={submitRepublishSchoolTrip}
+              disabled={republishSubmitting}
+            >
+              {republishSubmitting ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.ratingSubmitText}>{t("booking.republishTripButton")}</Text>
+              )}
+            </Pressable>
+
+            <Pressable style={styles.ratingCancelButton} onPress={closeRepublishModal}>
+              <Text style={styles.ratingCancelText}>{t("common.cancel")}</Text>
+            </Pressable>
+          </DirectionalCard>
+        </KeyboardAvoidingWrapper>
+      </Modal>
     </>
   );
 
@@ -1524,11 +1914,6 @@ const styles = StyleSheet.create({
   // Actual border side applied inline via accentBorderStart(4, color, isRTL)
   // at each usage site below (this file's own centralized RTL helper) so it
   // sits on the correct edge in RTL, not just always on the left.
-  // Any card (outbound or return) once THAT exact booking is completed —
-  // a purely cosmetic per-card cue, never dependent on any other booking.
-  legCardDimmed: {
-    opacity: 0.55,
-  },
   legHeader: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1593,6 +1978,33 @@ const styles = StyleSheet.create({
   childSummaryText: { fontSize: 12.5, color: "#F58220", fontWeight: "800", marginTop: 2 },
   cancelButton: { marginTop: 8, alignSelf: "flex-start" },
   cancelButtonText: { color: "#B91C1C", fontWeight: "800", fontSize: 12.5 },
+  republishButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 10,
+    borderWidth: 1.5,
+    borderColor: "#F58220",
+    backgroundColor: "#FFF3E9",
+    borderRadius: 10,
+    paddingVertical: 9,
+  },
+  republishButtonText: { color: "#F58220", fontWeight: "900", fontSize: 13 },
+  republishSummary: {
+    backgroundColor: "#FBF7F1",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+    gap: 4,
+  },
+  republishFieldLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 6,
+    marginTop: 2,
+  },
   // Small hint text under a blocked cancel/start action (e.g. "you can no
   // longer cancel — the driver is already on the way").
   noReturnRowText: { fontSize: 12, color: "#7C5F46", fontWeight: "700" },
@@ -1621,6 +2033,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   rateButtonText: { color: "#F58220", fontWeight: "900", fontSize: 12.5 },
+  rateDriverHint: { fontSize: 12, color: "#F58220", fontWeight: "600", marginTop: 6 },
   startButton: {
     flexDirection: "row",
     alignItems: "center",

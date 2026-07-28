@@ -31,21 +31,27 @@ export default function SchoolRideScreen() {
   return (
     <DirectionalScreen style={styles.page}>
       <View style={{ paddingHorizontal: 16, paddingTop: 45 }}>
-        <View style={modeStyles.headerRow}>
-          <Pressable style={modeStyles.headerBackButton} onPress={() => router.back()}>
-            <Ionicons
-              name={isRTL ? "arrow-forward" : "arrow-back"}
-              size={24}
-              color="#7C5F46"
-            />
-          </Pressable>
+        <Pressable style={modeStyles.headerBackButton} onPress={() => router.back()}>
+          <Ionicons
+            name={isRTL ? "arrow-forward" : "arrow-back"}
+            size={24}
+            color="#7C5F46"
+          />
+        </Pressable>
 
-          <Text style={modeStyles.headerTitle}>{t("schoolTrip.createScreenTitle")}</Text>
-
-          <View style={modeStyles.headerSpacer} />
-        </View>
-
-        <Text style={styles.subtitle}>{t("schoolTrip.createScreenSubtitle")}</Text>
+        {/* One-time mode: SchoolTripForm renders this same title/subtitle
+            itself, inside ITS OWN card (above "Outbound trip") — rather than
+            a separate card sitting on top of it. "Weekly recurring" mode
+            renders RideForm instead (embedded, no header of its own), so it
+            still needs this fallback card here. */}
+        {tripFrequency === "weekly" ? (
+          <View style={styles.card}>
+            <Text style={styles.title}>{t("schoolTrip.createScreenTitle")}</Text>
+            <Text style={[styles.subtitle, { marginBottom: 0 }]}>
+              {t("schoolTrip.createScreenSubtitle")}
+            </Text>
+          </View>
+        ) : null}
 
         <View style={modeStyles.tabRow}>
           <Pressable
@@ -83,7 +89,10 @@ export default function SchoolRideScreen() {
             so each keeps whatever the driver already entered when the
             selector flips back and forth. */}
         <View style={{ flex: 1, display: tripFrequency === "oneTime" ? "flex" : "none" }}>
-          <SchoolTripForm />
+          <SchoolTripForm
+            headerTitle={t("schoolTrip.createScreenTitle")}
+            headerSubtitle={t("schoolTrip.createScreenSubtitle")}
+          />
         </View>
         <View style={{ flex: 1, display: tripFrequency === "weekly" ? "flex" : "none" }}>
           <RideForm category="school" embedded forceRecurring />
@@ -94,28 +103,11 @@ export default function SchoolRideScreen() {
 }
 
 const modeStyles = {
-  headerRow: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    justifyContent: "space-between" as const,
-  },
   headerBackButton: {
     width: 42,
     height: 42,
     justifyContent: "center" as const,
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: 22,
-    fontWeight: "900" as const,
-    color: "#111827",
-    textAlign: "center" as const,
-  },
-  // Same width as headerBackButton, invisible — keeps headerTitle
-  // mathematically centered on the row instead of just centered in the
-  // leftover space next to the back button.
-  headerSpacer: {
-    width: 42,
+    marginBottom: 8,
   },
   tabRow: {
     flexDirection: "row" as const,

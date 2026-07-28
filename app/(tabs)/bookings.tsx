@@ -1,7 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { router, useLocalSearchParams } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
+  addDoc,
   collection,
   doc,
   getDoc,
@@ -17,15 +19,20 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
+  Keyboard,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth, db } from "../../firebase";
 import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
@@ -42,6 +49,7 @@ import {
   DRIVER_CANCEL_LOCK_HOURS,
   DriverCollection,
   DriverTripItem,
+  getBookingDateYMD,
   getCategoryMeta,
   getDriverTripBucket,
   getDriverTripStatus,
@@ -113,10 +121,34 @@ import {
 import { openBitPayment } from "../booking/bitPayment";
 import { createReport } from "../admin/adminReportsLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
+import {
+  formatDateToYMD,
+  getDayFromDateText,
+  normalize,
+  parseDateInput,
+  useDriverAccount,
+  validateAccountInfo,
+  validateDateAndTimeNotPassed,
+} from "../driver/create/driverHelpers";
+import { fetchDriverEligibility } from "../driver/driverEligibility";
+import {
+  DriverTripCategory,
+  RepublishTripPrefill,
+  resolveIsraelLocationForText,
+} from "../driver/create/republishLib";
+import { recordUsedFormValues, useSavedFormValues } from "../driver/create/savedFormValuesLib";
+import {
+  getLocalizedLocationName,
+  normalizeLocationText,
+  resolveIsraelLocationId,
+  resolveLocationCoordinates,
+  searchIsraelLocationsMultilingual,
+} from "../booking/locationSearch";
+import { IsraelLocation } from "../booking/israelLocations";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
-import { translateCategoryLabel, translateProblemType, translateStatus, translateStoredDayName } from "../i18n/formatters";
+import { formatLocalizedDateFromYMD, translateCategoryLabel, translateProblemType, translateStatus, translateStoredDayName } from "../i18n/formatters";
 import { DirectionalCard, DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { accentBorderStart, ltrContentStyle, marginEnd } from "../i18n/rtl";
@@ -260,6 +292,139 @@ const tagApplication = (a: NormalizedApplication): TaggedApplication => ({
 });
 
 // ---------------------------------------------------------------------------
+// My Bookings filter bar — one place every row kind's category/driver-name/
+// location values are resolved from, instead of re-deriving them inside each
+// render function. "Personal" folds together "personal" (legacy BookingItem
+// category) and "personal_ride" (RIDE_CATEGORY) — same user-facing category,
+// two different underlying booking mechanisms. Roadside bookings have no
+// dedicated filter option (per spec) — they simply never match a specific
+// category filter, but remain visible under "All Categories".
+// ---------------------------------------------------------------------------
+
+type CategoryFilterValue = "all" | "school" | "personal" | "workErrands" | "errands";
+
+const CATEGORY_FILTER_OPTIONS: CategoryFilterValue[] = [
+  "all",
+  "school",
+  "personal",
+  "workErrands",
+  "errands",
+];
+
+// The real category string CATEGORY_META/translateCategoryLabel expect for
+// each filter option (distinct from the filter's own "personal" value, which
+// must match either "personal" or "personal_ride" on the row itself).
+const CATEGORY_FILTER_META_KEY: Record<Exclude<CategoryFilterValue, "all">, string> = {
+  school: "school",
+  personal: "personal",
+  workErrands: "workErrands",
+  errands: "errands",
+};
+
+const getRowCategoryFilterValue = (row: CombinedRow): CategoryFilterValue | "" => {
+  switch (row._kind) {
+    case "ride":
+      return "personal";
+    case "booking":
+      if (row.category === "school") return "school";
+      if (row.category === "personal" || row.category === "personal_ride") return "personal";
+      return "";
+    case "trip":
+      if (row.category === "school") return "school";
+      if (row.category === "personal" || row.category === "personal_ride") return "personal";
+      if (row.category === "workErrands") return "workErrands";
+      if (row.category === "errands") return "errands";
+      return "";
+    case "application":
+      return row.category === "workErrands" ? "workErrands" : "errands";
+    case "schoolBooking":
+    case "schoolWaiting":
+    case "schoolTrip":
+      return "school";
+    default:
+      return "";
+  }
+};
+
+// The "other side"'s name — always the assigned/accepted DRIVER, regardless
+// of which tab (passenger/driver) is currently active, resolved from
+// whichever real field each source actually stores it in (never invented).
+// TaggedTrip (a driver's own not-yet-booked driverRoutes/workJobs/errandJobs
+// listing) has no driver-name field at all — there is no "other side" yet —
+// so it never matches a non-empty driver-name search, which is correct.
+const getRowDriverName = (row: CombinedRow): string => {
+  switch (row._kind) {
+    case "ride":
+      return row.driverName || "";
+    case "booking":
+      return row.driverName || "";
+    case "application":
+      return row.providerName || "";
+    case "schoolBooking":
+    case "schoolWaiting":
+    case "schoolTrip":
+      return row.driverName || "";
+    default:
+      return "";
+  }
+};
+
+// Every origin/destination-ish label a row carries, combined into one flat
+// list — used both to build the location filter's suggestion pool (from
+// already-loaded bookings, never a Firestore/external query) and to test a
+// selected location against "either side" of the trip.
+const getRowLocationLabels = (row: CombinedRow): string[] => {
+  switch (row._kind) {
+    case "ride":
+      return [row.from, row.to, row.schoolName, row.destinationDetails].filter(Boolean) as string[];
+    case "booking":
+      return [row.from, row.to, row.address].filter(Boolean) as string[];
+    case "trip":
+      return [row.from, row.to, row.location].filter(Boolean) as string[];
+    case "application":
+      return [row.city, row.neighborhood].filter(Boolean) as string[];
+    case "schoolBooking":
+    case "schoolWaiting":
+      return [row.fromLabel, row.toLabel].filter(Boolean) as string[];
+    case "schoolTrip":
+      return [row.fromArea, row.fromAddress, row.toArea, row.toAddress, row.schoolName].filter(
+        Boolean,
+      ) as string[];
+    default:
+      return [];
+  }
+};
+
+// The location filter's selected value — stores the resolved canonical
+// dataset id (see israelLocations.ts/locationSearch.ts) alongside the label
+// actually shown in the chip, per the requirement that filtering must never
+// depend only on the currently displayed/translated label. `canonicalId` is
+// null when the picked suggestion isn't in the curated dataset (falls back
+// to plain substring text matching — see locationRowMatches below).
+type SelectedLocationFilter = { canonicalId: string | null; label: string };
+
+// Whether ANY of a row's own location labels relate to the selected filter
+// location. Canonical match first (resolves each label to a dataset id and
+// compares ids — this is what makes "Nazareth" typed by one person match
+// "الناصرة" stored on someone else's booking), then a raw substring
+// fallback (also the ONLY path for a location the curated dataset doesn't
+// know about at all).
+const locationRowMatches = (filter: SelectedLocationFilter, row: CombinedRow): boolean => {
+  const labels = getRowLocationLabels(row);
+  if (labels.length === 0) return false;
+
+  if (filter.canonicalId) {
+    const matchesCanonical = labels.some(
+      (label) => resolveIsraelLocationId(label) === filter.canonicalId,
+    );
+    if (matchesCanonical) return true;
+  }
+
+  const normalizedFilterLabel = normalizeLocationText(filter.label);
+  return labels.some((label) => normalizeLocationText(label).includes(normalizedFilterLabel));
+};
+
+// ---------------------------------------------------------------------------
 // Driver tab ONLY: a "trip" row (the driver's own driverRoutes/workJobs/
 // errandJobs listing) is the only kind that can ever be "waiting for
 // booking" — ride/booking/application rows only ever exist because someone
@@ -289,7 +454,37 @@ const tagApplication = (a: NormalizedApplication): TaggedApplication => ({
 
 export default function BookingsScreen() {
   const { t } = useTranslation();
-  const { isRTL } = useLanguage();
+  const { isRTL, language } = useLanguage();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeAreaInsets = useSafeAreaInsets();
+
+  // Real, live keyboard height — NOT a guess — so the location modal's sheet
+  // can be shrunk AND lifted to sit directly above the keyboard instead of
+  // staying pinned to the physical screen bottom, where the keyboard (an OS
+  // overlay the Modal itself knows nothing about) would otherwise just
+  // cover its lower portion — title and search field included.
+  //
+  // iOS only: Android already resizes the whole window itself for the
+  // keyboard (app.json's android.softwareKeyboardLayoutMode: "resize" — see
+  // the same convention/reasoning in components/KeyboardAvoidingWrapper.tsx),
+  // so useWindowDimensions()'s windowHeight there already excludes the
+  // keyboard. Also applying this iOS-only keyboardHeight offset on Android
+  // would subtract the keyboard's height a second time and shrink/lift the
+  // sheet far more than necessary.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+
+    const showSub = Keyboard.addListener("keyboardWillShow", (e) => {
+      setKeyboardHeight(e.endCoordinates?.height || 0);
+    });
+    const hideSub = Keyboard.addListener("keyboardWillHide", () => setKeyboardHeight(0));
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   const params = useLocalSearchParams<{
     tab?: string | string[];
     bookingId?: string | string[];
@@ -304,8 +499,22 @@ export default function BookingsScreen() {
   // Shared by both Passenger and Driver — one Upcoming/In Progress/Completed
   // tab row above the single merged list (see getBookingBucket).
   const [bucketTab, setBucketTab] = useState<BookingBucket>("upcoming");
+  // The search bar now searches ONLY by driver name (see getRowDriverName) —
+  // kept as `search`/`setSearch` since it's the same existing field/state,
+  // just narrowed in scope; the variable name is unchanged to minimize the
+  // diff against the rest of the file.
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+
+  // New filter-bar state (category/date/location) — Clear Filters resets
+  // exactly these four, plus `search` above. Never touches Firestore.
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilterValue>("all");
+  const [dateFilter, setDateFilter] = useState<string | null>(null);
+  const [locationFilter, setLocationFilter] = useState<SelectedLocationFilter | null>(null);
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [dateMenuOpen, setDateMenuOpen] = useState(false);
+  const [locationMenuOpen, setLocationMenuOpen] = useState(false);
+  const [locationQuery, setLocationQuery] = useState("");
 
   // Ticks once a minute purely to force a Waiting-for-booking trip whose
   // departure time has just passed out of that section and into Expired —
@@ -407,6 +616,25 @@ export default function BookingsScreen() {
   const [rebookTime, setRebookTime] = useState("");
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+
+  // Driver "Republish Trip" — a compact confirmation MODAL (mirrors the
+  // rebook state/modal directly above), never a full-page navigation. Only
+  // the fields below are ever changed by the driver; everything else about
+  // the new trip comes straight from `republish` (built once, synchronously,
+  // when the button is pressed — see openRepublishDriverTrip/
+  // openRepublishRideDriverTrip). Closing/cancelling the modal or a
+  // successful publish both simply reset `republish` to null — there is no
+  // other temporary state to clean up.
+  const [republish, setRepublish] = useState<RepublishTripPrefill | null>(null);
+  const [republishDate, setRepublishDate] = useState("");
+  const [republishTime, setRepublishTime] = useState("");
+  const [republishPrice, setRepublishPrice] = useState("");
+  const [republishSeats, setRepublishSeats] = useState("");
+  const [showRepublishDatePicker, setShowRepublishDatePicker] = useState(false);
+  const [showRepublishTimePicker, setShowRepublishTimePicker] = useState(false);
+  const [republishSubmitting, setRepublishSubmitting] = useState(false);
+  const { driverName, phone, driverAge, languages } = useDriverAccount();
+  const savedVehicleValues = useSavedFormValues();
 
   const school = useMySchoolRows({
     tab,
@@ -886,23 +1114,73 @@ const bookedRouteIds = useMemo(() => {
     return map;
   }, [driverRoadsideRequests]);
 
-  const q = search.trim().toLowerCase();
+  // Driver-name search (see getRowDriverName) — normalizeLocationText handles
+  // case-insensitivity, trimming, and the Arabic/Hebrew diacritic/final-
+  // letter folding a plain .toLowerCase() would miss.
+  const driverNameQuery = normalizeLocationText(search.trim());
+  const hasActiveFilters =
+    !!search.trim() || categoryFilter !== "all" || !!dateFilter || !!locationFilter;
+
+  // All four filters combine with AND logic — a row must pass every active
+  // one. Order doesn't affect the result (all are simple boolean checks),
+  // only that they all run before the Upcoming/In Progress/Completed bucket
+  // split below, so tab counts and bucket contents both reflect the same
+  // filtered set.
+  const matchesFilters = (row: CombinedRow): boolean => {
+    if (driverNameQuery && !normalizeLocationText(getRowDriverName(row)).includes(driverNameQuery)) {
+      return false;
+    }
+
+    if (categoryFilter !== "all" && getRowCategoryFilterValue(row) !== categoryFilter) {
+      return false;
+    }
+
+    if (dateFilter && getBookingDateYMD(row) !== dateFilter) {
+      return false;
+    }
+
+    if (locationFilter && !locationRowMatches(locationFilter, row)) {
+      return false;
+    }
+
+    return true;
+  };
 
   const filteredPassengerRows = useMemo(
-    () =>
-      q
-        ? combinedPassengerRows.filter((r) => r.searchText.includes(q))
-        : combinedPassengerRows,
-    [combinedPassengerRows, q],
+    () => combinedPassengerRows.filter(matchesFilters),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [combinedPassengerRows, driverNameQuery, categoryFilter, dateFilter, locationFilter],
   );
 
   const filteredDriverRows = useMemo(
-    () =>
-      q
-        ? combinedDriverRows.filter((r) => r.searchText.includes(q))
-        : combinedDriverRows,
-    [combinedDriverRows, q],
+    () => combinedDriverRows.filter(matchesFilters),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [combinedDriverRows, driverNameQuery, categoryFilter, dateFilter, locationFilter],
   );
+
+  // Location filter suggestions — sourced from the full, comprehensive
+  // Israel locality dataset (israelLocations.ts), NEVER from the user's own
+  // loaded bookings and NEVER a Firestore/external places query. This lets a
+  // user filter by a locality that doesn't currently appear in any of their
+  // bookings. Booking RESULTS still only ever come from combinedPassengerRows/
+  // combinedDriverRows above — picking a suggestion here never creates a
+  // booking or reads another user's data. Multilingual: searches english/
+  // arabic/hebrew/russian/aliases/id together (see
+  // searchIsraelLocationsMultilingual), so "Nazareth"/"الناصرة"/"נצרת"/
+  // "Назарет" all surface the same entry regardless of typed script.
+  // Capped and memoized — never re-searches on anything but the query/
+  // language actually changing, never renders the whole ~130-entry dataset.
+  const locationSuggestions = useMemo(
+    () => searchIsraelLocationsMultilingual(locationQuery, language, 12),
+    [locationQuery, language],
+  );
+
+  const handleClearFilters = () => {
+    setSearch("");
+    setCategoryFilter("all");
+    setDateFilter(null);
+    setLocationFilter(null);
+  };
 
   // One shared Upcoming/In Progress/Completed(/Unbooked Trips) split, used
   // by both Passenger and Driver tabs — never a per-category split. Already
@@ -1590,6 +1868,325 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         onPress: () => runApp(trip.id, () => deleteTrip(trip)),
       },
     ]);
+  };
+
+  // "Republish Trip" (driver only) — opens the compact confirmation modal
+  // below (New Date/New Time/New Price/New Seats over a read-only summary),
+  // never a full-page navigation to the original creation screen. `republish`
+  // is built once, synchronously, right here — never a raw Firestore
+  // document, never written anywhere, never reused as the new trip's id
+  // (see republishLib.ts's header comment). Opening always resets date/time
+  // to blank (the driver must pick a fresh, valid future value — see
+  // submitRepublish) and seeds price/seats only as an editable suggestion.
+  const openRepublishModal = (prefill: RepublishTripPrefill) => {
+    if (republishSubmitting) return;
+
+    setRepublish(prefill);
+    setRepublishDate("");
+    setRepublishTime("");
+    setRepublishPrice(
+      typeof prefill.suggestedPrice === "number" ? String(prefill.suggestedPrice) : "",
+    );
+    setRepublishSeats(
+      typeof prefill.suggestedSeats === "number" ? String(prefill.suggestedSeats) : "1",
+    );
+  };
+
+  const closeRepublishModal = () => {
+    setRepublish(null);
+    setRepublishDate("");
+    setRepublishTime("");
+    setRepublishPrice("");
+    setRepublishSeats("");
+    setShowRepublishDatePicker(false);
+    setShowRepublishTimePicker(false);
+  };
+
+  // Driver's own not-yet-booked (or workJobs-with-workers) listing —
+  // driverRoutes/workJobs/errandJobs, category is always one of the four
+  // real driver-publishable values (never "roadside", never invented).
+  const openRepublishDriverTrip = (trip: TaggedTrip) => {
+    const category = trip.category as DriverTripCategory;
+
+    if (
+      category !== "personal" &&
+      category !== "school" &&
+      category !== "workErrands" &&
+      category !== "errands"
+    ) {
+      Alert.alert(t("common.error"), t("booking.republishUnavailable"));
+      return;
+    }
+
+    openRepublishModal({
+      sourceTripId: trip.id,
+      sourceCategory: category,
+      from: trip.from || undefined,
+      to: trip.to || undefined,
+      fromPlace: resolveIsraelLocationForText(trip.from),
+      toPlace: resolveIsraelLocationForText(trip.to),
+      location: trip.location || undefined,
+      locationPlace: resolveIsraelLocationForText(trip.location),
+      title: trip.title || undefined,
+      suggestedPrice: typeof trip.price === "number" ? trip.price : undefined,
+      suggestedSeats:
+        typeof (category === "workErrands" ? trip.totalSeats : trip.seats) === "number"
+          ? (category === "workErrands" ? trip.totalSeats : trip.seats) ?? undefined
+          : undefined,
+    });
+  };
+
+  // A completed, real personal_ride booking (driver view) — the route/
+  // price/seats the driver actually offered, never the passenger's own
+  // identity/rating/payment info (RideBooking carries none of that into
+  // RepublishTripPrefill above).
+  const openRepublishRideDriverTrip = (ride: RideBooking) => {
+    openRepublishModal({
+      sourceTripId: ride.id,
+      sourceCategory: "personal",
+      from: ride.from || undefined,
+      to: ride.to || undefined,
+      fromPlace: resolveIsraelLocationForText(ride.from),
+      toPlace: resolveIsraelLocationForText(ride.to),
+      destinationDetails: ride.destinationDetails || undefined,
+      suggestedPrice: typeof ride.price === "number" ? ride.price : undefined,
+      suggestedSeats: typeof ride.seats === "number" ? ride.seats : undefined,
+    });
+  };
+
+  // Publishes the modal's current New Date/New Time/New Price/New Seats as a
+  // COMPLETELY NEW trip — reuses the exact same validators the full
+  // creation screens use, and writes the exact same Firestore document
+  // shape those screens do (see RideForm.tsx/work.tsx/errand.tsx), so the
+  // new document is indistinguishable from one created the normal way: a
+  // brand-new id, zero passengers/bookings, the same default status fields.
+  // Vehicle info comes from the driver's own most-recently-used values
+  // (useSavedFormValues — the same source every creation screen already
+  // prefills from), never from the old completed trip's document.
+  const submitRepublish = async () => {
+    if (!republish || republishSubmitting) return;
+
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert(t("auth.loginRequiredTitle"), t("auth.pleaseLoginFirst"));
+      return;
+    }
+
+    const accountInfo = validateAccountInfo(driverName, phone, driverAge);
+    if (!accountInfo) return;
+
+    const dateTimeValidation = validateDateAndTimeNotPassed(republishDate, republishTime, {
+      dateLabelKey: "driverCreate.travelDate",
+      timeLabelKey: "driverCreate.departureTime",
+    });
+    if (!dateTimeValidation) return;
+
+    const cleanPrice = Number(republishPrice);
+    if (!republishPrice || Number.isNaN(cleanPrice) || cleanPrice <= 0) {
+      Alert.alert(t("validation.invalidPriceTitle"), t("validation.invalidPrice"));
+      return;
+    }
+
+    const cleanSeats = Number(republishSeats);
+    if (!republishSeats || Number.isNaN(cleanSeats) || cleanSeats < 1) {
+      Alert.alert(t("validation.invalidSeatsTitle"), t("validation.invalidSeats"));
+      return;
+    }
+
+    setRepublishSubmitting(true);
+
+    try {
+      const eligibility = await fetchDriverEligibility(user.uid);
+      if (!eligibility.eligible) {
+        Alert.alert(t("driver.verificationRequired"), t("driver.mustVerifyLicense"));
+        return;
+      }
+
+      const suspensionBlocked = await getDriverSuspensionBlockedReason(user.uid);
+      if (suspensionBlocked) {
+        Alert.alert(t("driver.accountSuspendedTitle"), suspensionBlocked);
+        return;
+      }
+
+      const car = savedVehicleValues.carModels[0] || "";
+      const carColor = savedVehicleValues.carColors[0] || "";
+      const carPlate = savedVehicleValues.plateNumbers[0] || "";
+      const { cleanDate, cleanTime, day } = dateTimeValidation;
+      const category = republish.sourceCategory;
+
+      if (category === "personal" || category === "school") {
+        const fromCoords = await resolveLocationCoordinates(
+          republish.fromPlace || null,
+          republish.from || "",
+        );
+        const toCoords = await resolveLocationCoordinates(
+          republish.toPlace || null,
+          republish.to || "",
+        );
+        const routeCoords: Record<string, number> = {};
+        if (fromCoords) {
+          routeCoords.fromLat = fromCoords.latitude;
+          routeCoords.fromLng = fromCoords.longitude;
+        }
+        if (toCoords) {
+          routeCoords.toLat = toCoords.latitude;
+          routeCoords.toLng = toCoords.longitude;
+        }
+
+        await addDoc(collection(db, "driverRoutes"), {
+          driverId: user.uid,
+          driverName,
+          phone: accountInfo.cleanPhone,
+          driverAge: accountInfo.cleanDriverAge,
+          languages,
+          category,
+          car,
+          carColor,
+          carPlate,
+          allowsPets: false,
+          from: republish.from || "",
+          to: republish.to || "",
+          schoolName: category === "school" ? republish.schoolName || "" : null,
+          destinationDetails:
+            category === "personal" ? republish.destinationDetails || null : null,
+          fromNormalized: normalize(republish.from || ""),
+          toNormalized: normalize(republish.to || ""),
+          fromLocationId: republish.fromPlace?.id || null,
+          toLocationId: republish.toPlace?.id || null,
+          fromLocationNames: republish.fromPlace
+            ? {
+                english: republish.fromPlace.english,
+                arabic: republish.fromPlace.arabic,
+                hebrew: republish.fromPlace.hebrew,
+              }
+            : null,
+          toLocationNames: republish.toPlace
+            ? {
+                english: republish.toPlace.english,
+                arabic: republish.toPlace.arabic,
+                hebrew: republish.toPlace.hebrew,
+              }
+            : null,
+          ...routeCoords,
+          tripDate: cleanDate,
+          startDate: cleanDate,
+          day,
+          isRecurring: false,
+          bookingType: "quick",
+          repeatDays: [day],
+          availableDays: [day],
+          weeklyTrips: [],
+          time: cleanTime,
+          price: cleanPrice,
+          seats: cleanSeats,
+          rating: 4.8,
+          reviews: 0,
+          eta: 10,
+          active: true,
+          createdAt: serverTimestamp(),
+        });
+
+        recordUsedFormValues({ price: String(cleanPrice) });
+      } else if (category === "workErrands") {
+        const locationCoords = await resolveLocationCoordinates(
+          republish.locationPlace || null,
+          republish.location || "",
+        );
+
+        await addDoc(collection(db, "workJobs"), {
+          employerId: user.uid,
+          employerName: driverName,
+          phone: accountInfo.cleanPhone,
+          driverAge: accountInfo.cleanDriverAge,
+          languages,
+          jobTitle: republish.title || "",
+          jobTitleNormalized: normalize(republish.title || ""),
+          description: "",
+          location: republish.location || "",
+          locationNormalized: normalize(republish.location || ""),
+          locationId: republish.locationPlace?.id || null,
+          locationNames: republish.locationPlace
+            ? {
+                english: republish.locationPlace.english,
+                arabic: republish.locationPlace.arabic,
+                hebrew: republish.locationPlace.hebrew,
+              }
+            : null,
+          locationLat: locationCoords?.latitude ?? null,
+          locationLng: locationCoords?.longitude ?? null,
+          date: cleanDate,
+          day,
+          startTime: cleanTime,
+          endTime: cleanTime,
+          hourlyPay: cleanPrice,
+          workersNeeded: cleanSeats,
+          seats: cleanSeats,
+          totalSeats: cleanSeats,
+          remainingSeats: cleanSeats,
+          acceptedWorkersCount: 0,
+          status: "available",
+          available: true,
+          isFull: false,
+          rating: 4.8,
+          reviews: 0,
+          active: true,
+          category: "workErrands",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const locationCoords = await resolveLocationCoordinates(
+          republish.locationPlace || null,
+          republish.location || "",
+        );
+
+        await addDoc(collection(db, "errandJobs"), {
+          ownerId: user.uid,
+          ownerName: driverName,
+          phone: accountInfo.cleanPhone,
+          driverAge: accountInfo.cleanDriverAge,
+          languages,
+          canTakeKids: !!republish.canTakeKids,
+          allowsPets: !!republish.allowsPets,
+          errandTitle: republish.title || "",
+          errandTitleNormalized: normalize(republish.title || ""),
+          description: "",
+          location: republish.location || "",
+          locationNormalized: normalize(republish.location || ""),
+          locationId: republish.locationPlace?.id || null,
+          locationNames: republish.locationPlace
+            ? {
+                english: republish.locationPlace.english,
+                arabic: republish.locationPlace.arabic,
+                hebrew: republish.locationPlace.hebrew,
+              }
+            : null,
+          locationLat: locationCoords?.latitude ?? null,
+          locationLng: locationCoords?.longitude ?? null,
+          date: cleanDate,
+          day,
+          startTime: cleanTime,
+          endTime: cleanTime,
+          price: cleanPrice,
+          seats: cleanSeats,
+          rating: 4.8,
+          reviews: 0,
+          active: true,
+          category: "errands",
+          createdAt: serverTimestamp(),
+        });
+
+        recordUsedFormValues({ price: String(cleanPrice) });
+      }
+
+      Alert.alert(t("common.success"), t("driver.tripCreated"));
+      closeRepublishModal();
+    } catch (error: any) {
+      console.log("REPUBLISH TRIP ERROR:", error);
+      Alert.alert(t("common.error"), error?.message || t("booking.republishUnavailable"));
+    } finally {
+      setRepublishSubmitting(false);
+    }
   };
 
   // "Cancel Trip" on a driver's own NOT-YET-completed listing (driverRoutes/
@@ -2811,13 +3408,17 @@ useEffect(() => {
               ) : null}
 
               {r.status === "completed" && bookingNeedsRating(r) ? (
-                <Pressable
-                  style={styles.primaryButton}
-                  onPress={() => openRatingModal(r)}
-                >
-                  <Ionicons name="star-outline" size={17} color="#FFFFFF" />
-                  <Text style={styles.primaryButtonText}>{t("passenger.rateDriver")}</Text>
-                </Pressable>
+                <>
+                  <Pressable
+                    style={styles.primaryButton}
+                    onPress={() => openRatingModal(r)}
+                  >
+                    <Ionicons name="star-outline" size={17} color="#FFFFFF" />
+                    <Text style={styles.primaryButtonText}>{t("passenger.rateDriver")}</Text>
+                  </Pressable>
+
+                  <Text style={styles.rateDriverHint}>{t("booking.rateToBookAgainHint")}</Text>
+                </>
               ) : null}
 
             {r.status === "completed" &&
@@ -2900,6 +3501,17 @@ useEffect(() => {
               >
                 <Ionicons name="checkmark-done" size={17} color="#FFFFFF" />
                 <Text style={styles.primaryButtonText}>{t("booking.finishTripButton")}</Text>
+              </Pressable>
+            ) : null}
+
+            {r.status === "completed" ? (
+              <Pressable
+                style={[styles.republishButton, republishSubmitting && styles.republishButtonDisabled]}
+                onPress={() => openRepublishRideDriverTrip(r)}
+                disabled={republishSubmitting}
+              >
+                <Ionicons name="refresh" size={16} color="#F58220" />
+                <Text style={styles.republishButtonText}>{t("booking.republishTripButton")}</Text>
               </Pressable>
             ) : null}
           </>
@@ -3296,6 +3908,17 @@ useEffect(() => {
             </View>
           ) : null}
         </View>
+
+{done ? (
+  <Pressable
+    style={[styles.republishButton, republishSubmitting && styles.republishButtonDisabled]}
+    onPress={() => openRepublishDriverTrip(trip)}
+    disabled={republishSubmitting}
+  >
+    <Ionicons name="refresh" size={16} color="#F58220" />
+    <Text style={styles.republishButtonText}>{t("booking.republishTripButton")}</Text>
+  </Pressable>
+) : null}
 
 {!done &&
 !waitingForBooking &&
@@ -4166,6 +4789,24 @@ useEffect(() => {
 
   const isEmpty = rowsForTab.length === 0;
 
+  // Reused by every per-bucket "nothing here" text (completed, unbooked
+  // trips, upcoming/in-progress) — never touches the OUTER isEmpty card
+  // below, which gets its own distinct icon/title treatment. When filters
+  // are active, swaps the normal bucket-specific message for a shared
+  // "no match" one with its own Clear Filters action; otherwise renders the
+  // original bucket-specific text unchanged.
+  const renderBucketEmptyText = (normalKey: string) =>
+    hasActiveFilters ? (
+      <View style={styles.filteredEmptyBox}>
+        <Text style={styles.sectionEmptyText}>{t("booking.noBookingsMatchFilters")}</Text>
+        <Pressable onPress={handleClearFilters} hitSlop={8}>
+          <Text style={styles.filterClearInlineText}>{t("booking.clearFiltersButton")}</Text>
+        </Pressable>
+      </View>
+    ) : (
+      <Text style={styles.sectionEmptyText}>{t(normalKey)}</Text>
+    );
+
   return (
     <DirectionalScreen style={styles.page}>
       <KeyboardAvoidingWrapper>
@@ -4248,11 +4889,7 @@ useEffect(() => {
           <Ionicons name="search-outline" size={18} color="#8B7B6B" />
           <TextInput
             style={styles.searchInput}
-            placeholder={
-              tab === "passenger"
-                ? t("booking.searchPassengerPlaceholder")
-                : t("booking.searchDriverPlaceholder")
-            }
+            placeholder={t("booking.searchByDriverNamePlaceholder")}
             placeholderTextColor="#8B7B6B"
             value={search}
             onChangeText={setSearch}
@@ -4263,6 +4900,131 @@ useEffect(() => {
               <Ionicons name="close-circle" size={18} color="#8B7B6B" />
             </Pressable>
           ) : null}
+        </View>
+
+        <View style={styles.filterRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRowContent}
+          >
+            <View style={[styles.filterChip, categoryFilter !== "all" && styles.filterChipActive]}>
+              <Pressable
+                style={styles.filterChipBody}
+                onPress={() => setCategoryMenuOpen(true)}
+              >
+                <Ionicons
+                  name="pricetag-outline"
+                  size={14}
+                  color={categoryFilter !== "all" ? "#FFFFFF" : "#7C5F46"}
+                />
+                <Text
+                  style={[
+                    styles.filterButtonText,
+                    categoryFilter !== "all" && styles.filterButtonTextActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {categoryFilter === "all"
+                    ? t("booking.filterCategoryButton")
+                    : translateCategoryLabel(
+                        CATEGORY_FILTER_META_KEY[categoryFilter],
+                        getCategoryMeta(CATEGORY_FILTER_META_KEY[categoryFilter]).label,
+                        t,
+                      )}
+                </Text>
+              </Pressable>
+
+              {categoryFilter !== "all" ? (
+                <Pressable
+                  style={styles.filterChipClear}
+                  hitSlop={10}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    setCategoryFilter("all");
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("booking.clearCategoryFilterA11y")}
+                >
+                  <Ionicons name="close" size={12} color="#FFFFFF" />
+                </Pressable>
+              ) : null}
+            </View>
+
+            <View style={[styles.filterChip, !!dateFilter && styles.filterChipActive]}>
+              <Pressable
+                style={styles.filterChipBody}
+                onPress={() => setDateMenuOpen(true)}
+              >
+                <Ionicons
+                  name="calendar-outline"
+                  size={14}
+                  color={dateFilter ? "#FFFFFF" : "#7C5F46"}
+                />
+                <Text
+                  style={[styles.filterButtonText, !!dateFilter && styles.filterButtonTextActive]}
+                  numberOfLines={1}
+                >
+                  {dateFilter ? formatLocalizedDateFromYMD(dateFilter, language) : t("booking.filterDateButton")}
+                </Text>
+              </Pressable>
+
+              {dateFilter ? (
+                <Pressable
+                  style={styles.filterChipClear}
+                  hitSlop={10}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    setDateFilter(null);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("booking.clearDateFilterA11y")}
+                >
+                  <Ionicons name="close" size={12} color="#FFFFFF" />
+                </Pressable>
+              ) : null}
+            </View>
+
+            <View style={[styles.filterChip, !!locationFilter && styles.filterChipActive]}>
+              <Pressable
+                style={styles.filterChipBody}
+                onPress={() => {
+                  setLocationQuery("");
+                  setLocationMenuOpen(true);
+                }}
+              >
+                <Ionicons
+                  name="location-outline"
+                  size={14}
+                  color={locationFilter ? "#FFFFFF" : "#7C5F46"}
+                />
+                <Text
+                  style={[
+                    styles.filterButtonText,
+                    !!locationFilter && styles.filterButtonTextActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {locationFilter ? locationFilter.label : t("booking.filterLocationButton")}
+                </Text>
+              </Pressable>
+
+              {locationFilter ? (
+                <Pressable
+                  style={styles.filterChipClear}
+                  hitSlop={10}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    setLocationFilter(null);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("booking.clearLocationFilterA11y")}
+                >
+                  <Ionicons name="close" size={12} color="#FFFFFF" />
+                </Pressable>
+              ) : null}
+            </View>
+          </ScrollView>
         </View>
 
         {/* One shared Upcoming/In Progress/Completed tab row, above every
@@ -4350,22 +5112,34 @@ useEffect(() => {
         ) : isEmpty ? (
           <View style={styles.emptyCard}>
             <Ionicons
-              name={tab === "passenger" ? "bag-handle-outline" : "car-outline"}
+              name={hasActiveFilters ? "filter-outline" : tab === "passenger" ? "bag-handle-outline" : "car-outline"}
               size={40}
               color="#8B7B6B"
             />
             <Text style={styles.emptyTitle}>
-              {search
-                ? t("booking.noMatches")
+              {hasActiveFilters
+                ? t("booking.noBookingsMatchFilters")
                 : tab === "passenger"
                   ? t("booking.noBookingsYet")
                   : t("booking.noTripsYet")}
             </Text>
             <Text style={styles.emptyText}>
-              {tab === "passenger"
-                ? t("booking.bookingsEmptyHintPassenger")
-                : t("booking.bookingsEmptyHintDriver")}
+              {hasActiveFilters
+                ? t("booking.noBookingsMatchFiltersHint")
+                : tab === "passenger"
+                  ? t("booking.bookingsEmptyHintPassenger")
+                  : t("booking.bookingsEmptyHintDriver")}
             </Text>
+
+            {hasActiveFilters ? (
+              <Pressable
+                style={[styles.filterClearButton, { marginTop: 14 }]}
+                onPress={handleClearFilters}
+              >
+                <Ionicons name="close-outline" size={14} color="#F58220" />
+                <Text style={styles.filterClearButtonText}>{t("booking.clearFiltersButton")}</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : bucketTab === "completed" ? (
           (() => {
@@ -4379,7 +5153,7 @@ useEffect(() => {
             const cancelledRows = cancelledHistoryRows;
 
             if (primaryRows.length === 0 && cancelledRows.length === 0) {
-              return <Text style={styles.sectionEmptyText}>{t("booking.noCompletedTrips")}</Text>;
+              return renderBucketEmptyText("booking.noCompletedTrips");
             }
 
             return (
@@ -4415,7 +5189,7 @@ useEffect(() => {
             // to label, so an all-expired or all-waiting tab never shows an
             // empty/redundant heading.
             if (waitingForBookingRows.length === 0 && expiredNoBookingsRows.length === 0) {
-              return <Text style={styles.sectionEmptyText}>{t("booking.noUnbookedTrips")}</Text>;
+              return renderBucketEmptyText("booking.noUnbookedTrips");
             }
 
             return (
@@ -4456,7 +5230,7 @@ useEffect(() => {
               bucketTab === "upcoming" ? "booking.noBookedActiveTrips" : "booking.noTripsInProgress";
 
             return bucketRows.length === 0 ? (
-              <Text style={styles.sectionEmptyText}>{t(bucketEmptyKey)}</Text>
+              renderBucketEmptyText(bucketEmptyKey)
             ) : (
               <View style={styles.list}>{renderCombinedRows(bucketRows, tab)}</View>
             );
@@ -4556,6 +5330,356 @@ useEffect(() => {
       </Modal>
 
       <Modal
+        visible={!!republish}
+        transparent
+        animationType="slide"
+        onRequestClose={closeRepublishModal}
+      >
+        <KeyboardAvoidingWrapper style={styles.ratingBackdrop}>
+          <Pressable style={{ flex: 1 }} onPress={closeRepublishModal} />
+
+          <DirectionalCard style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{t("booking.republishTripButton")}</Text>
+            <Text style={styles.modalSub}>{t("booking.republishModalSubtitle")}</Text>
+
+            {republish ? (
+              <View style={styles.modalSummary}>
+                {(() => {
+                  const meta = getCategoryMeta(republish.sourceCategory);
+
+                  return (
+                    <View
+                      style={[
+                        styles.catChip,
+                        { backgroundColor: `${meta.color}18`, alignSelf: "flex-start" },
+                      ]}
+                    >
+                      <Ionicons name={meta.icon} size={15} color={meta.color} />
+                      <Text style={[styles.catText, { color: meta.color }]}>
+                        {translateCategoryLabel(republish.sourceCategory, meta.label, t)}
+                      </Text>
+                    </View>
+                  );
+                })()}
+
+                {republish.from || republish.to ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="location-outline" size={15} color="#7C5F46" />
+                    <Text style={styles.infoText}>
+                      {republish.from || "?"} → {republish.to || "?"}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {republish.title ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="briefcase-outline" size={15} color="#7C5F46" />
+                    <Text style={styles.infoText}>{republish.title}</Text>
+                  </View>
+                ) : null}
+
+                {republish.location ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="location-outline" size={15} color="#7C5F46" />
+                    <Text style={styles.infoText}>{republish.location}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            <DateInput
+              label={t("booking.newDateLabel")}
+              value={republishDate}
+              onChange={setRepublishDate}
+              showPicker={showRepublishDatePicker}
+              setShowPicker={setShowRepublishDatePicker}
+            />
+
+            <TimeInput
+              label={t("booking.newTimeLabel")}
+              value={republishTime}
+              onChange={setRepublishTime}
+              showPicker={showRepublishTimePicker}
+              setShowPicker={setShowRepublishTimePicker}
+            />
+
+            <Text style={styles.republishFieldLabel}>{t("booking.newPriceLabel")}</Text>
+            <View style={styles.searchRow}>
+              <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
+              <TextInput
+                style={styles.searchInput}
+                keyboardType="numeric"
+                value={republishPrice}
+                onChangeText={(text) => setRepublishPrice(text.replace(/[^0-9]/g, ""))}
+                placeholder={t("booking.newPriceLabel")}
+                placeholderTextColor="#8B7B6B"
+              />
+            </View>
+
+            <Text style={styles.republishFieldLabel}>{t("booking.newSeatsLabel")}</Text>
+            <View style={styles.searchRow}>
+              <Ionicons name="people-outline" size={18} color="#8B7B6B" />
+              <TextInput
+                style={styles.searchInput}
+                keyboardType="numeric"
+                value={republishSeats}
+                onChangeText={(text) => setRepublishSeats(text.replace(/[^0-9]/g, ""))}
+                placeholder={t("booking.newSeatsLabel")}
+                placeholderTextColor="#8B7B6B"
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalCancel} onPress={closeRepublishModal}>
+                <Text style={styles.modalCancelText}>{t("common.cancel")}</Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.modalSearch, republishSubmitting && styles.republishButtonDisabled]}
+                onPress={submitRepublish}
+                disabled={republishSubmitting}
+              >
+                {republishSubmitting ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="refresh" size={18} color="#FFFFFF" />
+                    <Text style={styles.modalSearchText}>{t("booking.republishTripButton")}</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </DirectionalCard>
+        </KeyboardAvoidingWrapper>
+      </Modal>
+
+      <Modal
+        visible={categoryMenuOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCategoryMenuOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <Pressable style={{ flex: 1 }} onPress={() => setCategoryMenuOpen(false)} />
+
+          <DirectionalCard style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{t("booking.filterCategoryButton")}</Text>
+
+            {CATEGORY_FILTER_OPTIONS.map((option) => {
+              const isActive = categoryFilter === option;
+              const label =
+                option === "all"
+                  ? t("booking.filterAllCategories")
+                  : translateCategoryLabel(
+                      CATEGORY_FILTER_META_KEY[option],
+                      getCategoryMeta(CATEGORY_FILTER_META_KEY[option]).label,
+                      t,
+                    );
+
+              return (
+                <Pressable
+                  key={option}
+                  style={styles.filterOptionRow}
+                  onPress={() => {
+                    setCategoryFilter(option);
+                    setCategoryMenuOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.filterOptionText,
+                      isActive && styles.filterOptionTextActive,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                  {isActive ? (
+                    <Ionicons name="checkmark" size={18} color="#F58220" />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </DirectionalCard>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={dateMenuOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setDateMenuOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <Pressable style={{ flex: 1 }} onPress={() => setDateMenuOpen(false)} />
+
+          <DirectionalCard style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalTitle}>{t("booking.filterDateButton")}</Text>
+
+              {Platform.OS === "ios" ? (
+                <Pressable
+                  style={styles.modalDoneCircle}
+                  onPress={() => setDateMenuOpen(false)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("common.done")}
+                >
+                  <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+                </Pressable>
+              ) : null}
+            </View>
+
+            <DateTimePicker
+              value={(dateFilter && parseDateInput(dateFilter)) || new Date()}
+              mode="date"
+              display={Platform.OS === "ios" ? "inline" : "calendar"}
+              // Deliberately far in the past (not "today or later" like
+              // DateInput's default) — the date filter must match any
+              // already-happened trip, never just future ones.
+              minimumDate={new Date(2000, 0, 1)}
+              onChange={(_event: any, selectedDate?: Date) => {
+                if (Platform.OS === "android") {
+                  setDateMenuOpen(false);
+                }
+
+                if (selectedDate) {
+                  setDateFilter(formatDateToYMD(selectedDate));
+                }
+              }}
+            />
+          </DirectionalCard>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={locationMenuOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setLocationMenuOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <Pressable style={{ flex: 1 }} onPress={() => setLocationMenuOpen(false)} />
+
+          {/* The Modal itself is NOT keyboard-aware — the software keyboard
+              is an OS overlay that simply covers whatever sits at the
+              bottom of the screen underneath it. Shrinking the sheet's
+              height alone (previous attempt) left it still anchored to the
+              very bottom of the FULL screen, so the keyboard just covered
+              its lower portion — title and search field included — leaving
+              only a sliver of the list peeking above the keyboard, which is
+              exactly the broken state reported. Fixing this needs BOTH:
+              (1) shrink the sheet so sheet height + keyboard height fits
+              within the screen (never pushes the top off-screen), AND
+              (2) marginBottom: keyboardHeight, so the flex-end-anchored
+              sheet is actually LIFTED to sit directly above the keyboard
+              instead of staying pinned to the physical screen bottom where
+              the keyboard renders. */}
+          <DirectionalCard
+            style={[
+              styles.modalSheet,
+              styles.locationModalSheet,
+              {
+                height: Math.max(
+                  240,
+                  Math.min(
+                    windowHeight * 0.85,
+                    windowHeight - keyboardHeight - safeAreaInsets.top - 12,
+                  ),
+                ),
+                marginBottom: keyboardHeight,
+                paddingBottom: keyboardHeight > 0 ? 12 : Math.max(safeAreaInsets.bottom, 16),
+              },
+            ]}
+          >
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{t("booking.filterLocationButton")}</Text>
+
+            <View style={styles.searchRow}>
+              <Ionicons name="search-outline" size={18} color="#8B7B6B" />
+              <TextInput
+                style={styles.searchInput}
+                placeholder={t("booking.searchLocationPlaceholder")}
+                placeholderTextColor="#8B7B6B"
+                value={locationQuery}
+                onChangeText={setLocationQuery}
+                autoFocus
+              />
+
+              {locationQuery ? (
+                <Pressable onPress={() => setLocationQuery("")} hitSlop={8}>
+                  <Ionicons name="close-circle" size={18} color="#8B7B6B" />
+                </Pressable>
+              ) : null}
+            </View>
+
+            <FlatList
+              style={styles.locationSuggestionList}
+              keyboardShouldPersistTaps="handled"
+              keyExtractor={(item) => item.id}
+              data={locationSuggestions}
+              ListHeaderComponent={
+                <Pressable
+                  style={styles.filterOptionRow}
+                  onPress={() => {
+                    setLocationFilter(null);
+                    setLocationQuery("");
+                    setLocationMenuOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.filterOptionText,
+                      !locationFilter && styles.filterOptionTextActive,
+                    ]}
+                  >
+                    {t("booking.filterAllLocations")}
+                  </Text>
+                  {!locationFilter ? (
+                    <Ionicons name="checkmark" size={18} color="#F58220" />
+                  ) : null}
+                </Pressable>
+              }
+              ListEmptyComponent={
+                <Text style={styles.sectionEmptyText}>{t("booking.noMatchingLocations")}</Text>
+              }
+              renderItem={({ item }: { item: IsraelLocation }) => {
+                const displayLabel = getLocalizedLocationName(item, language);
+                const isActive = locationFilter?.canonicalId === item.id;
+
+                return (
+                  <Pressable
+                    style={styles.filterOptionRow}
+                    onPress={() => {
+                      setLocationFilter({ canonicalId: item.id, label: displayLabel });
+                      setLocationQuery(displayLabel);
+                      setLocationMenuOpen(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.filterOptionText,
+                        isActive && styles.filterOptionTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {displayLabel}
+                    </Text>
+                    {isActive ? (
+                      <Ionicons name="checkmark" size={18} color="#F58220" />
+                    ) : null}
+                  </Pressable>
+                );
+              }}
+            />
+          </DirectionalCard>
+        </View>
+      </Modal>
+
+      <Modal
         visible={
           !!ratingBooking ||
           !!schoolRatingBooking ||
@@ -4598,6 +5722,7 @@ useEffect(() => {
               <>
                 <Text style={styles.ratingTitle}>{t("booking.arrivedSafelyTitle")}</Text>
                 <Text style={styles.ratingSubtitle}>{t("booking.rateYourDriverSubtitle")}</Text>
+                <Text style={styles.ratingRebookHint}>{t("booking.rateToBookAgainHint")}</Text>
               </>
             )}
 
@@ -4889,6 +6014,108 @@ const styles = StyleSheet.create({
   driverBucketButtonTextActive: {
     color: "#FFFFFF",
   },
+  filterRow: {
+    marginBottom: 16,
+  },
+  filterRowContent: {
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 2,
+  },
+  filterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    maxWidth: 190,
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  filterChipActive: {
+    backgroundColor: "#F58220",
+    borderColor: "#F58220",
+  },
+  filterChipBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  filterChipClear: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.35)",
+  },
+  filterButtonText: {
+    flexShrink: 1,
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  filterButtonTextActive: {
+    color: "#FFFFFF",
+  },
+  filterClearButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#F58220",
+    backgroundColor: "#FFF3E9",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  filterClearButtonText: {
+    color: "#F58220",
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  filterOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EFE7DE",
+  },
+  filterOptionText: {
+    flex: 1,
+    color: "#111827",
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  filterOptionTextActive: {
+    color: "#F58220",
+  },
+  locationModalSheet: {
+    flexShrink: 0,
+    paddingBottom: 0,
+  },
+  locationSuggestionList: {
+    flex: 1,
+    marginTop: 4,
+  },
+  filteredEmptyBox: {
+    gap: 6,
+    marginBottom: 8,
+  },
+  filterClearInlineText: {
+    color: "#F58220",
+    fontWeight: "800",
+    fontSize: 13,
+    textDecorationLine: "underline",
+  },
   card: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
@@ -5056,6 +6283,26 @@ const styles = StyleSheet.create({
   },
   completeButtonText: {
     color: "#166534",
+    fontWeight: "900",
+    fontSize: 15,
+  },
+  republishButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#F58220",
+    backgroundColor: "#FFF3E9",
+    borderRadius: 14,
+    paddingVertical: 13,
+    marginBottom: 10,
+  },
+  republishButtonDisabled: {
+    opacity: 0.6,
+  },
+  republishButtonText: {
+    color: "#F58220",
     fontWeight: "900",
     fontSize: 15,
   },
@@ -5242,6 +6489,13 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 8,
   },
+  rateDriverHint: {
+    color: "#F58220",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 8,
+  },
   appActionsRow: {
     flexDirection: "row",
     gap: 12,
@@ -5309,11 +6563,31 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#111827",
   },
+  modalHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  modalDoneCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#F58220",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   modalSub: {
     color: "#7C5F46",
     fontSize: 14,
     marginTop: 4,
     marginBottom: 16,
+  },
+  republishFieldLabel: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 8,
+    marginTop: 4,
   },
   modalSummary: {
     backgroundColor: "#FFFFFF",
@@ -5417,6 +6691,14 @@ const styles = StyleSheet.create({
     color: "#7C5F46",
     textAlign: "center",
     marginBottom: 18,
+  },
+  ratingRebookHint: {
+    fontSize: 12.5,
+    fontWeight: "500",
+    color: "#9B7A68",
+    textAlign: "center",
+    marginTop: -12,
+    marginBottom: 16,
   },
   ratingStarsRow: {
     flexDirection: "row",
