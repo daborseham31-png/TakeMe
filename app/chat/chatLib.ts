@@ -1,16 +1,11 @@
 // ---------------------------------------------------------------------------
 // Real user-to-user chat (WhatsApp-style)
 //
-// This is SEPARATE from notifications. Notifications = system/request updates;
-// chat = free-text conversations between two users.
-//
-// Collections:
-//   - conversations                       (one doc per pair of users)
-//   - conversations/{id}/messages         (subcollection of chat messages)
-//   - users                               (read for search + names)
-//
-// The conversation id is deterministic (`${uidA}_${uidB}` sorted), so opening a
-// chat is a direct doc read/write – no query or composite index needed.
+// Chat messages stay in Firestore exactly as before. After a message is saved,
+// the app sends only conversationId + messageId to the Cloudflare Worker.
+// The Worker verifies the Firebase user, re-reads the exact conversation and
+// message, confirms the caller is the sender and both users are participants,
+// then sends OneSignal web push to the receiver's linked iPhone.
 // ---------------------------------------------------------------------------
 
 import {
@@ -36,8 +31,46 @@ export type ChatUser = {
   role: string;
 };
 
-export const conversationId = (a: string, b: string) =>
-  [a, b].sort().join("_");
+const NOTIFICATION_WORKER_URL =
+  "https://takeme-notifications.yvcstudent4.workers.dev";
+
+export const conversationId = (a: string, b: string) => [a, b].sort().join("_");
+
+const sendExternalChatPush = async (
+  convId: string,
+  messageId: string,
+): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user || !convId || !messageId) return;
+
+  try {
+    const idToken = await user.getIdToken(true);
+
+    const response = await fetch(
+      `${NOTIFICATION_WORKER_URL}/send-chat-message`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          conversationId: convId,
+          messageId,
+        }),
+      },
+    );
+
+    if (!response.ok && response.status !== 404) {
+      const details = await response.text().catch(() => "");
+      console.warn("Chat external push failed", response.status, details);
+    }
+  } catch (error) {
+    // The Firestore message already exists. Push failure must not delete it
+    // or make the Send button look unsuccessful.
+    console.warn("Chat external push failed", error);
+  }
+};
 
 // Search users by name (excluding yourself). Case-insensitive contains match,
 // done client-side to avoid extra indexes.
@@ -51,6 +84,7 @@ export const searchUsers = async (term: string): Promise<ChatUser[]> => {
   return snap.docs
     .map((d) => {
       const data = d.data();
+
       return {
         id: d.id,
         name: data.name || i18n.t("common.user"),
@@ -65,17 +99,23 @@ export const searchUsers = async (term: string): Promise<ChatUser[]> => {
 // Get or create the conversation between the current user and `other`.
 export const openConversation = async (other: ChatUser): Promise<string> => {
   const me = auth.currentUser;
-  if (!me) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
+
+  if (!me) {
+    throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
+  }
 
   const id = conversationId(me.uid, other.id);
   const ref = doc(db, "conversations", id);
   const snap = await getDoc(ref);
 
-  // My own display name (from the users doc, falling back to auth).
   let myName = me.displayName || "You";
+
   try {
     const meSnap = await getDoc(doc(db, "users", me.uid));
-    if (meSnap.exists()) myName = meSnap.data().name || myName;
+
+    if (meSnap.exists()) {
+      myName = meSnap.data().name || myName;
+    }
   } catch {
     // Keep fallback.
   }
@@ -83,21 +123,28 @@ export const openConversation = async (other: ChatUser): Promise<string> => {
   if (!snap.exists()) {
     await setDoc(ref, {
       participants: [me.uid, other.id],
-      participantNames: { [me.uid]: myName, [other.id]: other.name },
+      participantNames: {
+        [me.uid]: myName,
+        [other.id]: other.name,
+      },
       lastMessage: "",
       lastMessageAt: serverTimestamp(),
       lastMessageSenderId: null,
-      unreadCount: { [me.uid]: 0, [other.id]: 0 },
+      unreadCount: {
+        [me.uid]: 0,
+        [other.id]: 0,
+      },
       hiddenFor: [],
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
   } else {
-    // Make sure I'm no longer hiding it (re-open) and names are fresh.
     const data = snap.data();
+
     const hiddenFor: string[] = Array.isArray(data.hiddenFor)
       ? data.hiddenFor.filter((x: string) => x !== me.uid)
       : [];
+
     await updateDoc(ref, {
       hiddenFor,
       [`participantNames.${me.uid}`]: myName,
@@ -115,18 +162,24 @@ export const sendMessage = async (
   receiverId: string,
 ) => {
   const me = auth.currentUser;
-  if (!me) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
+
+  if (!me) {
+    throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
+  }
 
   const clean = text.trim();
   if (!clean) return;
 
-  await addDoc(collection(db, "conversations", convId, "messages"), {
-    senderId: me.uid,
-    receiverId,
-    text: clean,
-    read: false,
-    createdAt: serverTimestamp(),
-  });
+  const messageRef = await addDoc(
+    collection(db, "conversations", convId, "messages"),
+    {
+      senderId: me.uid,
+      receiverId,
+      text: clean,
+      read: false,
+      createdAt: serverTimestamp(),
+    },
+  );
 
   await updateDoc(doc(db, "conversations", convId), {
     lastMessage: clean,
@@ -135,12 +188,15 @@ export const sendMessage = async (
     updatedAt: serverTimestamp(),
     [`unreadCount.${receiverId}`]: increment(1),
   });
+
+  await sendExternalChatPush(convId, messageRef.id);
 };
 
 // Mark the current user's unread count to 0 when they open a conversation.
 export const markConversationRead = async (convId: string) => {
   const me = auth.currentUser;
   if (!me) return;
+
   try {
     await updateDoc(doc(db, "conversations", convId), {
       [`unreadCount.${me.uid}`]: 0,
@@ -150,8 +206,7 @@ export const markConversationRead = async (convId: string) => {
   }
 };
 
-// Hide a conversation from the current user's list only (does not delete
-// messages, and never affects the other participant's own list).
+// Hide a conversation from the current user's list only.
 export const hideConversation = async (convId: string) => {
   const me = auth.currentUser;
   if (!me) return;
@@ -161,14 +216,11 @@ export const hideConversation = async (convId: string) => {
   });
 };
 
-// "Clear All" — hide every currently-visible conversation for the current
-// user in one go. Still per-user (hiddenFor), never deletes the
-// conversation/messages, and never touches the other participant's list.
+// Hide every currently-visible conversation for the current user.
 export const clearAllConversations = async (conversationIds: string[]) => {
   const me = auth.currentUser;
   if (!me || conversationIds.length === 0) return;
 
-  // Firestore batched writes cap at 500 operations — chunk defensively.
   for (let i = 0; i < conversationIds.length; i += 450) {
     const batch = writeBatch(db);
 

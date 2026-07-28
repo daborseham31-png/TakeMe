@@ -1,17 +1,13 @@
 // ---------------------------------------------------------------------------
-// Admin-sent notifications. Reuses the exact `notifications` collection
-// field shape written by notify() (app/booking/work-errand/workErrandLib.ts)
-// so recipients see these in the SAME in-app notifications screen
-// (app/notifications.tsx) with no changes needed there. Single-user sends
-// go through notify() directly; broadcasts batch-write the identical shape
-// (chunked at 450 docs per commit, same limit the app's own "clear all"
-// uses) since notify() only handles one receiver at a time.
+// Admin-sent notifications.
 //
-// This does NOT send a push notification — no Expo push token registration
-// exists anywhere in this project yet, so pretending push delivery works
-// would be exactly the kind of fake behavior we were told not to build.
-// Recipients see these the next time they open the in-app notifications
-// screen, which is the real, working delivery mechanism today.
+// Single-recipient sends use the shared notify() helper, so they create the
+// normal in-app notification and request the matching OneSignal web push.
+//
+// Broadcasts keep the efficient Firestore batch write. After each batch is
+// committed, the app asks the Cloudflare Worker to deliver every newly-created
+// notification outside the app. Push delivery is best-effort and never rolls
+// back the real in-app notification.
 // ---------------------------------------------------------------------------
 
 import {
@@ -25,8 +21,8 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../firebase";
-import i18n from "../i18n";
 import { notify } from "../booking/work-errand/workErrandLib";
+import i18n from "../i18n";
 import { writeAuditLog } from "./adminAuditLib";
 import { NotificationAudience } from "./adminTypes";
 
@@ -38,17 +34,83 @@ export type SendNotificationInput = {
 };
 
 const BATCH_CHUNK_SIZE = 450;
+const PUSH_REQUEST_CHUNK_SIZE = 12;
 
-const broadcastTo = async (userIds: string[], title: string, message: string) => {
-  const senderId = auth.currentUser?.uid || null;
+const NOTIFICATION_WORKER_URL =
+  "https://takeme-notifications.yvcstudent4.workers.dev";
+
+const sendExternalPushForNotification = async (
+  notificationId: string,
+  idToken: string,
+): Promise<void> => {
+  try {
+    const response = await fetch(
+      `${NOTIFICATION_WORKER_URL}/send-notification`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ notificationId }),
+      },
+    );
+
+    if (!response.ok && response.status !== 404) {
+      const details = await response.text().catch(() => "");
+      console.warn(
+        "Admin external push failed",
+        notificationId,
+        response.status,
+        details,
+      );
+    }
+  } catch (error) {
+    console.warn("Admin external push failed", notificationId, error);
+  }
+};
+
+const deliverBroadcastPushes = async (
+  notificationIds: string[],
+  idToken: string,
+): Promise<void> => {
+  for (
+    let start = 0;
+    start < notificationIds.length;
+    start += PUSH_REQUEST_CHUNK_SIZE
+  ) {
+    const chunk = notificationIds.slice(start, start + PUSH_REQUEST_CHUNK_SIZE);
+
+    await Promise.allSettled(
+      chunk.map((notificationId) =>
+        sendExternalPushForNotification(notificationId, idToken),
+      ),
+    );
+  }
+};
+
+const broadcastTo = async (
+  userIds: string[],
+  title: string,
+  message: string,
+) => {
+  const sender = auth.currentUser;
+
+  if (!sender) {
+    throw new Error(i18n.t("auth.pleaseLoginFirst"));
+  }
+
+  const senderId = sender.uid;
+  const idToken = await sender.getIdToken(true);
 
   for (let start = 0; start < userIds.length; start += BATCH_CHUNK_SIZE) {
     const batch = writeBatch(db);
     const chunk = userIds.slice(start, start + BATCH_CHUNK_SIZE);
+    const notificationIds: string[] = [];
 
     chunk.forEach((userId) => {
-      const ref = collection(db, "notifications");
-      const docRef = doc(ref);
+      const docRef = doc(collection(db, "notifications"));
+      notificationIds.push(docRef.id);
 
       batch.set(docRef, {
         userId,
@@ -80,10 +142,15 @@ const broadcastTo = async (userIds: string[], title: string, message: string) =>
     });
 
     await batch.commit();
+
+    // Best-effort: the in-app notifications are already saved.
+    await deliverBroadcastPushes(notificationIds, idToken);
   }
 };
 
-export const sendAdminNotification = async (input: SendNotificationInput): Promise<number> => {
+export const sendAdminNotification = async (
+  input: SendNotificationInput,
+): Promise<number> => {
   if (!input.title.trim() || !input.message.trim()) {
     throw new Error(i18n.t("admin.enterTitleAndMessage"));
   }
@@ -114,7 +181,9 @@ export const sendAdminNotification = async (input: SendNotificationInput): Promi
     );
 
     const userIds = usersSnap.docs.map((d) => d.id);
+
     await broadcastTo(userIds, input.title.trim(), input.message.trim());
+
     recipientCount = userIds.length;
   }
 
@@ -122,7 +191,9 @@ export const sendAdminNotification = async (input: SendNotificationInput): Promi
     action: "notification_sent",
     targetType: "notification",
     targetId: input.targetUserId || input.audience,
-    reason: `${input.audience} (${recipientCount} recipient${recipientCount === 1 ? "" : "s"})`,
+    reason: `${input.audience} (${recipientCount} recipient${
+      recipientCount === 1 ? "" : "s"
+    })`,
   });
 
   return recipientCount;
