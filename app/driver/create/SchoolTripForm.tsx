@@ -509,7 +509,7 @@ export default function SchoolTripForm({ headerTitle, headerSubtitle }: Props) {
           <>
             <Text style={styles.title}>{headerTitle}</Text>
             {headerSubtitle ? (
-              <Text style={[styles.subtitle, { marginBottom: 16 }]}>{headerSubtitle}</Text>
+              <Text style={styles.subtitle}>{headerSubtitle}</Text>
             ) : null}
           </>
         ) : null}

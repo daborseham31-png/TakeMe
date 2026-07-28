@@ -71,6 +71,7 @@ import { auth, db } from "../../../firebase";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import { validateDateAndTimeNotPassed } from "../../driver/create/driverHelpers";
 import DateInput, { TimeInput } from "../../driver/create/DateInput";
+import RepublishTripModal from "../../driver/create/RepublishTripModal";
 import {
   BookingBucket,
   buildSearchText,
@@ -994,9 +995,9 @@ export default function useMySchoolRows({
         {booking.status === "completed" &&
         !legNeedsRating(booking) &&
         typeof booking.rating === "number" ? (
-          <Pressable style={styles.startButton} onPress={() => openSchoolBookAgain(booking)}>
-            <Ionicons name="refresh" size={14} color="#FFFFFF" />
-            <Text style={styles.startButtonText}>{t("booking.bookAgainTitle")}</Text>
+          <Pressable style={styles.bookAgainButton} onPress={() => openSchoolBookAgain(booking)}>
+            <Ionicons name="refresh" size={17} color="#FFFFFF" />
+            <Text style={styles.bookAgainButtonText}>{t("booking.bookAgainTitle")}</Text>
           </Pressable>
         ) : null}
 
@@ -1004,13 +1005,17 @@ export default function useMySchoolRows({
           <>
             <Pressable
               style={[
-                styles.cancelButton,
-                (busyId === booking.id || !!cancelBlockedReason) && { opacity: 0.5 },
+                styles.cancelBookingBoxButton,
+                (busyId === booking.id || !!cancelBlockedReason) &&
+                  styles.cancelBookingBoxButtonDisabled,
               ]}
               onPress={() => handleCancelBooking(booking)}
               disabled={busyId === booking.id || !!cancelBlockedReason}
             >
-              <Text style={styles.cancelButtonText}>{t("booking.cancelBookingLink")}</Text>
+              <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+              <Text style={styles.cancelBookingBoxButtonText}>
+                {t("booking.cancelBookingLink")}
+              </Text>
             </Pressable>
 
             {cancelBlockedReason ? (
@@ -1257,24 +1262,70 @@ export default function useMySchoolRows({
           </View>
         </View>
 
-        <Text style={styles.routeText}>
-          {trip.fromAddress} → {trip.toAddress}
-        </Text>
-        <Text style={styles.metaText}>
-          {trip.date} · {trip.departureTime} · {trip.schoolName}
-        </Text>
-        <Text style={styles.metaText}>
-          {trip.availableSeats}/{trip.totalSeats} {t("schoolTrip.seatsLeft")} ·{" "}
-          {trip.pricePerSeat} ₪
-        </Text>
+        <View style={styles.infoRow}>
+          <Ionicons name="location-outline" size={15} color="#7C5F46" />
+          <Text style={styles.infoText}>
+            {trip.fromAddress || "?"} → {trip.toAddress || "?"}
+          </Text>
+        </View>
+
+        {trip.schoolName ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="school-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>{trip.schoolName}</Text>
+          </View>
+        ) : null}
+
+        {trip.date ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="calendar-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>{trip.date}</Text>
+          </View>
+        ) : null}
+
+        {trip.departureTime ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="time-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>{trip.departureTime}</Text>
+          </View>
+        ) : null}
+
+        {/* Real booked-passenger count (activeBookingCount — the same live
+            schoolBookings-derived number this card's own waitingForBooking/
+            status logic already relies on), never remainingSeats — showing
+            "1/1 seats left" after the trip is done would misleadingly read
+            as an open seat rather than the one passenger who actually rode. */}
+        <View style={styles.infoRow}>
+          <Ionicons name="person-outline" size={15} color="#7C5F46" />
+          <Text style={styles.infoText}>
+            {t("schoolTrip.passengersCount", { count: activeBookingCount })}
+          </Text>
+        </View>
+
+        <View style={styles.metaRow}>
+          <View style={styles.metaItem}>
+            <Ionicons name="cash-outline" size={15} color="#F58220" />
+            <Text style={styles.metaValueText}>{trip.pricePerSeat} ₪</Text>
+          </View>
+
+          <View style={styles.metaItem}>
+            <Ionicons name="people-outline" size={15} color="#F58220" />
+            <Text style={styles.metaValueText}>
+              {t("booking.seatsCount", { count: trip.totalSeats })}
+            </Text>
+          </View>
+        </View>
 
         {showLifecycleButton ? (
           <>
             <Pressable
-              style={[styles.startButton, trip.tripStatus === "booked" && !canStart && { opacity: 0.5 }]}
+              style={[
+                styles.startButton,
+                trip.tripStatus === "booked" && !canStart && styles.startButtonDisabled,
+              ]}
               onPress={() => handleStartOrContinueTrip(trip)}
             >
-              <Ionicons name="navigate-outline" size={14} color="#FFFFFF" />
+              <Ionicons name="navigate-outline" size={16} color="#FFFFFF" />
               <Text style={styles.startButtonText}>
                 {trip.tripStatus === "booked"
                   ? t("schoolTrip.startTripButton")
@@ -1292,13 +1343,17 @@ export default function useMySchoolRows({
           <>
             <Pressable
               style={[
-                styles.cancelButton,
-                (busyId === trip.id || !!cancelBlockedReason) && { opacity: 0.5 },
+                styles.cancelBookingBoxButton,
+                (busyId === trip.id || !!cancelBlockedReason) &&
+                  styles.cancelBookingBoxButtonDisabled,
               ]}
               onPress={() => handleCancelTrip(trip)}
               disabled={busyId === trip.id || !!cancelBlockedReason}
             >
-              <Text style={styles.cancelButtonText}>{t("schoolTrip.cancelTripButton")}</Text>
+              <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+              <Text style={styles.cancelBookingBoxButtonText}>
+                {t("schoolTrip.cancelTripButton")}
+              </Text>
             </Pressable>
 
             {cancelBlockedReason ? (
@@ -1798,7 +1853,10 @@ export default function useMySchoolRows({
               setShowPicker={setShowBookAgainTimePicker}
             />
 
-            <Pressable style={styles.ratingSubmitButton} onPress={submitSchoolBookAgain}>
+            <Pressable
+              style={[styles.ratingSubmitButton, { marginTop: 16 }]}
+              onPress={submitSchoolBookAgain}
+            >
               <Ionicons name="search-outline" size={16} color="#FFFFFF" />
               <Text style={styles.ratingSubmitText}>{t("booking.searchDrivers")}</Text>
             </Pressable>
@@ -1810,75 +1868,34 @@ export default function useMySchoolRows({
         </KeyboardAvoidingWrapper>
       </Modal>
 
-      <Modal visible={!!republish} animationType="fade" transparent onRequestClose={closeRepublishModal}>
-        <KeyboardAvoidingWrapper style={styles.ratingOverlay}>
-          <DirectionalCard style={styles.ratingSheet}>
-            <Text style={styles.ratingTitle}>{t("booking.republishTripButton")}</Text>
-            <Text style={styles.ratingSubtitle}>{t("booking.republishModalSubtitle")}</Text>
-
-            {republish ? (
-              <View style={styles.republishSummary}>
-                <Text style={styles.routeText}>
-                  {republish.fromAddress} → {republish.toAddress}
-                </Text>
-                <Text style={styles.metaText}>{republish.schoolName}</Text>
-              </View>
-            ) : null}
-
-            <DateInput
-              label={t("booking.newDateLabel")}
-              value={republishDate}
-              onChange={setRepublishDate}
-              showPicker={showRepublishDatePicker}
-              setShowPicker={setShowRepublishDatePicker}
-            />
-
-            <TimeInput
-              label={t("booking.newTimeLabel")}
-              value={republishTime}
-              onChange={setRepublishTime}
-              showPicker={showRepublishTimePicker}
-              setShowPicker={setShowRepublishTimePicker}
-            />
-
-            <Text style={styles.republishFieldLabel}>{t("booking.newPriceLabel")}</Text>
-            <TextInput
-              style={styles.commentInput}
-              keyboardType="numeric"
-              value={republishPrice}
-              onChangeText={(text) => setRepublishPrice(text.replace(/[^0-9]/g, ""))}
-              placeholder={t("booking.newPriceLabel")}
-              placeholderTextColor="#8B7B6B"
-            />
-
-            <Text style={styles.republishFieldLabel}>{t("booking.newSeatsLabel")}</Text>
-            <TextInput
-              style={styles.commentInput}
-              keyboardType="numeric"
-              value={republishSeats}
-              onChangeText={(text) => setRepublishSeats(text.replace(/[^0-9]/g, ""))}
-              placeholder={t("booking.newSeatsLabel")}
-              placeholderTextColor="#8B7B6B"
-            />
-
-            <Pressable
-              style={[styles.ratingSubmitButton, republishSubmitting && { opacity: 0.5 }]}
-              onPress={submitRepublishSchoolTrip}
-              disabled={republishSubmitting}
-            >
-              {republishSubmitting ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.ratingSubmitText}>{t("booking.republishTripButton")}</Text>
-              )}
-            </Pressable>
-
-            <Pressable style={styles.ratingCancelButton} onPress={closeRepublishModal}>
-              <Text style={styles.ratingCancelText}>{t("common.cancel")}</Text>
-            </Pressable>
-          </DirectionalCard>
-        </KeyboardAvoidingWrapper>
-      </Modal>
+      <RepublishTripModal
+        visible={!!republish}
+        title={t("booking.republishTripButton")}
+        subtitle={t("booking.republishModalSubtitle")}
+        routeLabel={republish ? `${republish.fromAddress} → ${republish.toAddress}` : ""}
+        subLabel={republish?.schoolName}
+        dateLabel={t("booking.newDateLabel")}
+        date={republishDate}
+        onChangeDate={setRepublishDate}
+        showDatePicker={showRepublishDatePicker}
+        setShowDatePicker={setShowRepublishDatePicker}
+        timeLabel={t("booking.newTimeLabel")}
+        time={republishTime}
+        onChangeTime={setRepublishTime}
+        showTimePicker={showRepublishTimePicker}
+        setShowTimePicker={setShowRepublishTimePicker}
+        priceLabel={t("booking.newPriceLabel")}
+        price={republishPrice}
+        onChangePrice={setRepublishPrice}
+        seatsLabel={t("booking.newSeatsLabel")}
+        seats={republishSeats}
+        onChangeSeats={setRepublishSeats}
+        submitLabel={t("booking.republishTripButton")}
+        cancelLabel={t("common.cancel")}
+        onSubmit={submitRepublishSchoolTrip}
+        onCancel={closeRepublishModal}
+        submitting={republishSubmitting}
+      />
     </>
   );
 
@@ -1902,13 +1919,21 @@ const styles = StyleSheet.create({
   },
   catChipText: { fontWeight: "800", fontSize: 11.5 },
   deleteButton: { padding: 2 },
+  // Same shape as bookings.tsx's own "trip" card (Personal Ride, ...) —
+  // radius/padding/shadow all match, so every driver-completed card in My
+  // Bookings looks the same size/depth regardless of category.
   legCard: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E7DCD1",
-    borderRadius: 14,
-    padding: 14,
+    borderRadius: 20,
+    padding: 16,
     marginBottom: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 14,
+    elevation: 2,
   },
   // Blue accent — outbound (shared leg, all children riding together).
   // Actual border side applied inline via accentBorderStart(4, color, isRTL)
@@ -1974,36 +1999,89 @@ const styles = StyleSheet.create({
   statusPillTextDead: { color: "#B91C1C" },
   routeText: { fontWeight: "800", color: "#111827", fontSize: 14, marginBottom: 4 },
   metaText: { fontSize: 12.5, color: "#7C5F46", fontWeight: "600", marginBottom: 2 },
+  // Same icon-row layout as bookings.tsx's own Personal Ride card
+  // (infoRow/infoText/metaRow/metaItem) — used only by the driver's
+  // completed School trip card so its details read the same way (one
+  // clear value per row) instead of several values compressed into one
+  // line. Named distinctly from the metaText/routeText above (which other
+  // School cards in this file still use) to avoid touching them.
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  infoText: {
+    color: "#3C2319",
+    fontSize: 14,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  metaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    rowGap: 8,
+    columnGap: 16,
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  metaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: "100%",
+  },
+  metaValueText: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#111827",
+    flexShrink: 1,
+  },
   ltrText: { writingDirection: "ltr" },
   childSummaryText: { fontSize: 12.5, color: "#F58220", fontWeight: "800", marginTop: 2 },
   cancelButton: { marginTop: 8, alignSelf: "flex-start" },
   cancelButtonText: { color: "#B91C1C", fontWeight: "800", fontSize: 12.5 },
+  // Passenger "Cancel booking" for a real booked school ride — same size/
+  // shape as bookings.tsx's own cancelBookingButton (Personal Ride's
+  // passenger cancel), so both look identical. Deliberately NOT the compact
+  // cancelButton above, which is the DRIVER's own "cancel my listing"
+  // action — a different, lower-stakes action that stays small.
+  cancelBookingBoxButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#F5C2C2",
+    backgroundColor: "#FEF2F2",
+    borderRadius: 14,
+    paddingVertical: 13,
+    marginTop: 8,
+  },
+  cancelBookingBoxButtonText: { color: "#B91C1C", fontWeight: "900", fontSize: 15 },
+  cancelBookingBoxButtonDisabled: { opacity: 0.5 },
+  // Same size/shape as bookings.tsx's own republishButton — radius/padding/
+  // font/gap all match, so "Republish Trip" looks identical on School and
+  // Personal Ride cards.
   republishButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: 8,
     marginTop: 10,
     borderWidth: 1.5,
     borderColor: "#F58220",
     backgroundColor: "#FFF3E9",
-    borderRadius: 10,
-    paddingVertical: 9,
+    borderRadius: 14,
+    paddingVertical: 13,
   },
-  republishButtonText: { color: "#F58220", fontWeight: "900", fontSize: 13 },
+  republishButtonText: { color: "#F58220", fontWeight: "900", fontSize: 15 },
   republishSummary: {
     backgroundColor: "#FBF7F1",
     borderRadius: 12,
     padding: 12,
     marginBottom: 14,
     gap: 4,
-  },
-  republishFieldLabel: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#111827",
-    marginBottom: 6,
-    marginTop: 2,
   },
   // Small hint text under a blocked cancel/start action (e.g. "you can no
   // longer cancel — the driver is already on the way").
@@ -2034,18 +2112,38 @@ const styles = StyleSheet.create({
   },
   rateButtonText: { color: "#F58220", fontWeight: "900", fontSize: 12.5 },
   rateDriverHint: { fontSize: 12, color: "#F58220", fontWeight: "600", marginTop: 6 },
+  // Same size/shape as bookings.tsx's own driver "Start Ride" button —
+  // full-width, same radius/padding/font/disabled-gray — so "Start/Continue
+  // Trip" looks identical to Personal Ride's "Start Ride".
   startButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
+    gap: 8,
     backgroundColor: "#F58220",
-    borderRadius: 10,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    alignSelf: "flex-start",
+    borderRadius: 14,
+    paddingVertical: 14,
     marginTop: 8,
   },
-  startButtonText: { color: "#FFFFFF", fontWeight: "900", fontSize: 12.5 },
+  startButtonDisabled: {
+    backgroundColor: "#D8C9BC",
+  },
+  startButtonText: { color: "#FFFFFF", fontWeight: "900", fontSize: 15 },
+  // Same size/shape as bookings.tsx's own primaryButton — full-width,
+  // same radius/padding/font — so "Book Again" looks identical across
+  // every category (Personal Ride, School, ...) instead of this card's
+  // otherwise-compact action-button sizing.
+  bookAgainButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#F58220",
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginTop: 8,
+  },
+  bookAgainButtonText: { color: "#FFFFFF", fontWeight: "900", fontSize: 15 },
   replacementBanner: {
     flexDirection: "row",
     alignItems: "center",

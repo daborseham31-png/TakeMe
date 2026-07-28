@@ -121,9 +121,9 @@ import {
 import { openBitPayment } from "../booking/bitPayment";
 import { createReport } from "../admin/adminReportsLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
+import RepublishTripModal from "../driver/create/RepublishTripModal";
 import {
   formatDateToYMD,
-  getDayFromDateText,
   normalize,
   parseDateInput,
   useDriverAccount,
@@ -3940,13 +3940,15 @@ useEffect(() => {
     booking count (never "Delete Trip" wording); only whether it ALSO
     records a driver cancellation violation depends on activeBookingCount
     (see cancelDriverTrip above) — a zero-booking listing never does.
-    Personal Ride uses the small, compact style (matching the School Ride
-    card in useMySchoolRows.tsx's own renderTripCard — same
-    marginTop/alignSelf/fontSize/color) instead of the large full-width
-    button every other category here still uses — a UI-only distinction,
-    the underlying eligibility/press handler is identical either way. */}
+    Personal Ride and (legacy weekly) School both use the small, compact
+    style (matching the one-time School Ride card in useMySchoolRows.tsx's
+    own renderTripCard — same marginTop/alignSelf/fontSize/color), so every
+    School card looks identical regardless of which flow created it;
+    Work/Errand still use the large full-width button — a UI-only
+    distinction, the underlying eligibility/press handler is identical
+    either way. */}
 {!done ? (
-  trip.category === "personal" ? (
+  trip.category === "personal" || trip.category === "school" ? (
     <>
       <Pressable
         style={[
@@ -5329,130 +5331,38 @@ useEffect(() => {
         </View>
       </Modal>
 
-      <Modal
+      <RepublishTripModal
         visible={!!republish}
-        transparent
-        animationType="slide"
-        onRequestClose={closeRepublishModal}
-      >
-        <KeyboardAvoidingWrapper style={styles.ratingBackdrop}>
-          <Pressable style={{ flex: 1 }} onPress={closeRepublishModal} />
-
-          <DirectionalCard style={styles.modalSheet}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>{t("booking.republishTripButton")}</Text>
-            <Text style={styles.modalSub}>{t("booking.republishModalSubtitle")}</Text>
-
-            {republish ? (
-              <View style={styles.modalSummary}>
-                {(() => {
-                  const meta = getCategoryMeta(republish.sourceCategory);
-
-                  return (
-                    <View
-                      style={[
-                        styles.catChip,
-                        { backgroundColor: `${meta.color}18`, alignSelf: "flex-start" },
-                      ]}
-                    >
-                      <Ionicons name={meta.icon} size={15} color={meta.color} />
-                      <Text style={[styles.catText, { color: meta.color }]}>
-                        {translateCategoryLabel(republish.sourceCategory, meta.label, t)}
-                      </Text>
-                    </View>
-                  );
-                })()}
-
-                {republish.from || republish.to ? (
-                  <View style={styles.infoRow}>
-                    <Ionicons name="location-outline" size={15} color="#7C5F46" />
-                    <Text style={styles.infoText}>
-                      {republish.from || "?"} → {republish.to || "?"}
-                    </Text>
-                  </View>
-                ) : null}
-
-                {republish.title ? (
-                  <View style={styles.infoRow}>
-                    <Ionicons name="briefcase-outline" size={15} color="#7C5F46" />
-                    <Text style={styles.infoText}>{republish.title}</Text>
-                  </View>
-                ) : null}
-
-                {republish.location ? (
-                  <View style={styles.infoRow}>
-                    <Ionicons name="location-outline" size={15} color="#7C5F46" />
-                    <Text style={styles.infoText}>{republish.location}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-
-            <DateInput
-              label={t("booking.newDateLabel")}
-              value={republishDate}
-              onChange={setRepublishDate}
-              showPicker={showRepublishDatePicker}
-              setShowPicker={setShowRepublishDatePicker}
-            />
-
-            <TimeInput
-              label={t("booking.newTimeLabel")}
-              value={republishTime}
-              onChange={setRepublishTime}
-              showPicker={showRepublishTimePicker}
-              setShowPicker={setShowRepublishTimePicker}
-            />
-
-            <Text style={styles.republishFieldLabel}>{t("booking.newPriceLabel")}</Text>
-            <View style={styles.searchRow}>
-              <Ionicons name="cash-outline" size={18} color="#8B7B6B" />
-              <TextInput
-                style={styles.searchInput}
-                keyboardType="numeric"
-                value={republishPrice}
-                onChangeText={(text) => setRepublishPrice(text.replace(/[^0-9]/g, ""))}
-                placeholder={t("booking.newPriceLabel")}
-                placeholderTextColor="#8B7B6B"
-              />
-            </View>
-
-            <Text style={styles.republishFieldLabel}>{t("booking.newSeatsLabel")}</Text>
-            <View style={styles.searchRow}>
-              <Ionicons name="people-outline" size={18} color="#8B7B6B" />
-              <TextInput
-                style={styles.searchInput}
-                keyboardType="numeric"
-                value={republishSeats}
-                onChangeText={(text) => setRepublishSeats(text.replace(/[^0-9]/g, ""))}
-                placeholder={t("booking.newSeatsLabel")}
-                placeholderTextColor="#8B7B6B"
-              />
-            </View>
-
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancel} onPress={closeRepublishModal}>
-                <Text style={styles.modalCancelText}>{t("common.cancel")}</Text>
-              </Pressable>
-
-              <Pressable
-                style={[styles.modalSearch, republishSubmitting && styles.republishButtonDisabled]}
-                onPress={submitRepublish}
-                disabled={republishSubmitting}
-              >
-                {republishSubmitting ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name="refresh" size={18} color="#FFFFFF" />
-                    <Text style={styles.modalSearchText}>{t("booking.republishTripButton")}</Text>
-                  </>
-                )}
-              </Pressable>
-            </View>
-          </DirectionalCard>
-        </KeyboardAvoidingWrapper>
-      </Modal>
+        title={t("booking.republishTripButton")}
+        subtitle={t("booking.republishModalSubtitle")}
+        routeLabel={
+          republish?.from || republish?.to
+            ? `${republish?.from || "?"} → ${republish?.to || "?"}`
+            : republish?.title || ""
+        }
+        subLabel={republish?.location || undefined}
+        dateLabel={t("booking.newDateLabel")}
+        date={republishDate}
+        onChangeDate={setRepublishDate}
+        showDatePicker={showRepublishDatePicker}
+        setShowDatePicker={setShowRepublishDatePicker}
+        timeLabel={t("booking.newTimeLabel")}
+        time={republishTime}
+        onChangeTime={setRepublishTime}
+        showTimePicker={showRepublishTimePicker}
+        setShowTimePicker={setShowRepublishTimePicker}
+        priceLabel={t("booking.newPriceLabel")}
+        price={republishPrice}
+        onChangePrice={setRepublishPrice}
+        seatsLabel={t("booking.newSeatsLabel")}
+        seats={republishSeats}
+        onChangeSeats={setRepublishSeats}
+        submitLabel={t("booking.republishTripButton")}
+        cancelLabel={t("common.cancel")}
+        onSubmit={submitRepublish}
+        onCancel={closeRepublishModal}
+        submitting={republishSubmitting}
+      />
 
       <Modal
         visible={categoryMenuOpen}
@@ -6581,13 +6491,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 4,
     marginBottom: 16,
-  },
-  republishFieldLabel: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#111827",
-    marginBottom: 8,
-    marginTop: 4,
   },
   modalSummary: {
     backgroundColor: "#FFFFFF",

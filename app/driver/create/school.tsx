@@ -15,8 +15,11 @@ import React, { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { getCategoryMeta } from "../../booking/bookingsLib";
 import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
+import { translateCategoryLabel } from "../../i18n/formatters";
+import { backIconName } from "../../i18n/rtl";
 import { styles } from "./driverHelpers";
 import RideForm from "./RideForm";
 import SchoolTripForm from "./SchoolTripForm";
@@ -27,31 +30,32 @@ export default function SchoolRideScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
   const [tripFrequency, setTripFrequency] = useState<TripFrequency>("oneTime");
+  const meta = getCategoryMeta("school");
+
+  const categoryBadge = (
+    <View
+      style={[
+        modeStyles.categoryBadge,
+        { backgroundColor: `${meta.color}18` },
+      ]}
+    >
+      <Ionicons name={meta.icon} size={18} color={meta.color} />
+      <Text style={[modeStyles.categoryBadgeText, { color: meta.color }]}>
+        {translateCategoryLabel("school", meta.label, t)}
+      </Text>
+    </View>
+  );
 
   return (
     <DirectionalScreen style={styles.page}>
       <View style={{ paddingHorizontal: 16, paddingTop: 45 }}>
-        <Pressable style={modeStyles.headerBackButton} onPress={() => router.back()}>
-          <Ionicons
-            name={isRTL ? "arrow-forward" : "arrow-back"}
-            size={24}
-            color="#7C5F46"
-          />
-        </Pressable>
+        <View style={modeStyles.topRow}>
+          <Pressable style={modeStyles.headerBackButton} onPress={() => router.back()}>
+            <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
+          </Pressable>
 
-        {/* One-time mode: SchoolTripForm renders this same title/subtitle
-            itself, inside ITS OWN card (above "Outbound trip") — rather than
-            a separate card sitting on top of it. "Weekly recurring" mode
-            renders RideForm instead (embedded, no header of its own), so it
-            still needs this fallback card here. */}
-        {tripFrequency === "weekly" ? (
-          <View style={styles.card}>
-            <Text style={styles.title}>{t("schoolTrip.createScreenTitle")}</Text>
-            <Text style={[styles.subtitle, { marginBottom: 0 }]}>
-              {t("schoolTrip.createScreenSubtitle")}
-            </Text>
-          </View>
-        ) : null}
+          {categoryBadge}
+        </View>
 
         <View style={modeStyles.tabRow}>
           <Pressable
@@ -95,7 +99,13 @@ export default function SchoolRideScreen() {
           />
         </View>
         <View style={{ flex: 1, display: tripFrequency === "weekly" ? "flex" : "none" }}>
-          <RideForm category="school" embedded forceRecurring />
+          <RideForm
+            category="school"
+            embedded
+            forceRecurring
+            headerTitle={t("schoolTrip.createScreenTitle")}
+            headerSubtitle={t("schoolTrip.createScreenSubtitle")}
+          />
         </View>
       </View>
     </DirectionalScreen>
@@ -103,11 +113,29 @@ export default function SchoolRideScreen() {
 }
 
 const modeStyles = {
+  topRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    marginBottom: 8,
+  },
   headerBackButton: {
     width: 42,
     height: 42,
     justifyContent: "center" as const,
-    marginBottom: 8,
+  },
+  categoryBadge: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 7,
+    alignSelf: "flex-start" as const,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  categoryBadgeText: {
+    fontWeight: "900" as const,
+    fontSize: 15,
   },
   tabRow: {
     flexDirection: "row" as const,

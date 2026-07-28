@@ -192,7 +192,7 @@ export default function FindWorkScreen() {
     return (
       <DirectionalScreen style={styles.safe}>
         <View style={styles.loadingBox}>
-          <ActivityIndicator size="large" color="#F58220" />
+          <ActivityIndicator size="large" color="#22C55E" />
           <Text style={styles.loadingText}>{t("workErrand.loadingWorkJobs")}</Text>
         </View>
       </DirectionalScreen>
@@ -239,7 +239,7 @@ export default function FindWorkScreen() {
                   </View>
 
                   <View style={styles.ratingBox}>
-                    <Ionicons name="star" size={16} color="#F58220" />
+                    <Ionicons name="star" size={16} color="#22C55E" />
                     {listing.ratingCount > 0 ? (
                       <>
                         <Text style={styles.ratingNumber}>
@@ -490,7 +490,7 @@ const styles = StyleSheet.create({
   },
   price: {
     fontSize: 14,
-    color: "#F58220",
+    color: "#22C55E",
     fontWeight: "900",
   },
   languagesRow: {
@@ -518,7 +518,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   applyButton: {
-    backgroundColor: "#F58220",
+    backgroundColor: "#22C55E",
     borderRadius: 9,
     paddingVertical: 13,
     alignItems: "center",

@@ -1220,6 +1220,7 @@
     "schoolAreaLabel": "منطقة / مدينة المدرسة",
     "morningRideTime": "وقت رحلة الصباح",
     "seatsLeft": "مقاعد متبقية",
+    "passengersCount": "{{count}} ركاب",
     "viewDetails": "عرض التفاصيل",
     "selectRide": "اختيار الرحلة",
     "waitingRequestCreatedTitle": "تم حفظ الطلب",

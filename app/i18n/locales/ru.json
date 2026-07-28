@@ -1213,6 +1213,7 @@
     "schoolAreaLabel": "Район / город школы",
     "morningRideTime": "Время утренней поездки",
     "seatsLeft": "мест осталось",
+    "passengersCount": "{{count}} пассажиров",
     "viewDetails": "Подробнее",
     "selectRide": "Выбрать поездку",
     "waitingRequestCreatedTitle": "Запрос сохранён",

@@ -158,7 +158,7 @@ export default function WorkApplyScreen() {
     return (
       <DirectionalScreen style={styles.safe}>
         <View style={styles.successContainer}>
-          <Ionicons name="checkmark-circle-outline" size={96} color="#F58220" />
+          <Ionicons name="checkmark-circle-outline" size={96} color="#22C55E" />
 
           <Text style={styles.successTitle}>{t("workErrand.requestSentTitle")}</Text>
 
@@ -206,7 +206,7 @@ export default function WorkApplyScreen() {
               </View>
 
               <View style={styles.ratingBox}>
-                <Ionicons name="star" size={17} color="#F58220" />
+                <Ionicons name="star" size={17} color="#22C55E" />
                 {job.ratingCount > 0 ? (
                   <>
                     <Text style={styles.ratingText}>
@@ -294,7 +294,9 @@ export default function WorkApplyScreen() {
             </View>
 
             <View style={styles.halfField}>
-              <Text style={styles.label}>{t("workErrand.neighborhoodLabel")}</Text>
+              <Text style={[styles.label, { marginTop: 0 }]}>
+                {t("workErrand.neighborhoodLabel")}
+              </Text>
               <TextInput
                 style={styles.input}
                 value={neighborhood}
@@ -305,7 +307,7 @@ export default function WorkApplyScreen() {
             </View>
           </View>
 
-          <Text style={styles.label}>{t("workErrand.notesLabel")}</Text>
+          <Text style={styles.label}>{t("common.notes")}</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             value={notes}
@@ -419,7 +421,7 @@ const styles = StyleSheet.create({
   },
   price: {
     fontSize: 16,
-    color: "#F58220",
+    color: "#22C55E",
     fontWeight: "900",
   },
   sectionTitle: {
@@ -465,7 +467,7 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   submitButton: {
-    backgroundColor: "#F58220",
+    backgroundColor: "#22C55E",
     borderRadius: 10,
     paddingVertical: 15,
     alignItems: "center",
@@ -500,7 +502,7 @@ const styles = StyleSheet.create({
     marginBottom: 26,
   },
   successButton: {
-    backgroundColor: "#F58220",
+    backgroundColor: "#22C55E",
     borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 28,

@@ -87,13 +87,12 @@ const findActivePassengerLocationTarget = (
   return { targetId: active.id, passengerId: uid, driverId: active.driverId };
 };
 
-// Small green dot shown over the My Bookings tab icon while the passenger has an
-// active (unfinished) personal-ride booking.
+// My Bookings tab icon — deliberately no green "active ride" dot anymore
+// (removed per request); `hasActive`/`isRTL` stay accepted so the caller
+// doesn't need changing, they're just no longer drawn.
 function BookingsTabIcon({
   color,
   size,
-  hasActive,
-  isRTL,
 }: {
   color: string;
   size: number;
@@ -103,21 +102,6 @@ function BookingsTabIcon({
   return (
     <View>
       <Ionicons name="car" size={size} color={color} />
-      {hasActive ? (
-        <View
-          style={{
-            position: "absolute",
-            top: -2,
-            ...positionEnd(-3, isRTL),
-            width: 11,
-            height: 11,
-            borderRadius: 6,
-            backgroundColor: "#22C55E",
-            borderWidth: 1.5,
-            borderColor: "#FFFFFF",
-          }}
-        />
-      ) : null}
     </View>
   );
 }

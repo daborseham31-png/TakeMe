@@ -396,7 +396,7 @@ export default function PersonalRideScreen() {
             <Ionicons
               name={weeklyBooking ? "checkbox" : "square-outline"}
               size={20}
-              color={weeklyBooking ? "#F58220" : "#8B7B6B"}
+              color={weeklyBooking ? "#EC4899" : "#8B7B6B"}
             />
             <Ionicons name="calendar-outline" size={16} color="#7C5F46" />
             <Text style={styles.weeklyText}>{t("booking.bookForWholeWeek")}</Text>
@@ -416,7 +416,7 @@ export default function PersonalRideScreen() {
 
         <View style={styles.card}>
           <View style={styles.prefTitleRow}>
-            <Ionicons name="person-outline" size={18} color="#F58220" />
+            <Ionicons name="person-outline" size={18} color="#EC4899" />
             <Text style={styles.sectionTitle}>{t("booking.driverPreferences")}</Text>
           </View>
 
@@ -657,8 +657,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   optionButtonActive: {
-    backgroundColor: "#F58220",
-    borderColor: "#F58220",
+    backgroundColor: "#EC4899",
+    borderColor: "#EC4899",
   },
   optionText: {
     fontWeight: "800",
@@ -682,8 +682,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   languageButtonActive: {
-    backgroundColor: "#F58220",
-    borderColor: "#F58220",
+    backgroundColor: "#EC4899",
+    borderColor: "#EC4899",
   },
   languageText: {
     color: "#7C5F46",
@@ -693,7 +693,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   searchButton: {
-    backgroundColor: "#F58220",
+    backgroundColor: "#EC4899",
     borderRadius: 12,
     padding: 16,
     flexDirection: "row",

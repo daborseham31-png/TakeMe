@@ -1209,6 +1209,7 @@
     "schoolAreaLabel": "אזור / עיר בית הספר",
     "morningRideTime": "שעת נסיעת הבוקר",
     "seatsLeft": "מקומות פנויים",
+    "passengersCount": "{{count}} נוסעים",
     "viewDetails": "הצג פרטים",
     "selectRide": "בחר נסיעה",
     "waitingRequestCreatedTitle": "הבקשה נשמרה",

@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -110,6 +111,13 @@ export default function AppStartScreen() {
   if (loading) {
     return (
       <DirectionalScreen style={styles.splash}>
+        <View style={styles.logoBadge}>
+          <Image
+            source={require("../assets/images/logo.jpeg")}
+            style={styles.logoImage}
+            resizeMode="cover"
+          />
+        </View>
         <Text style={styles.logo}>{t("common.appName")}</Text>
         <Text style={styles.tagline}>{t("auth.tagline")}</Text>
         <ActivityIndicator size="large" color="#ffffff" style={styles.loader} />
@@ -248,6 +256,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#F28C28",
     justifyContent: "center",
     alignItems: "center",
+  },
+  logoBadge: {
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    overflow: "hidden",
+    backgroundColor: "#FFFFFF",
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  logoImage: {
+    width: "100%",
+    height: "100%",
   },
   logo: {
     fontSize: 48,

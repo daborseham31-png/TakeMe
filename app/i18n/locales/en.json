@@ -1205,6 +1205,7 @@
     "schoolAreaLabel": "School area / city",
     "morningRideTime": "Morning ride time",
     "seatsLeft": "seats left",
+    "passengersCount": "{{count}} passengers",
     "viewDetails": "View details",
     "selectRide": "Select ride",
     "waitingRequestCreatedTitle": "Request saved",

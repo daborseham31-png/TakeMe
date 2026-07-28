@@ -64,6 +64,12 @@ type Props = {
   // skips this form's internal repeat-toggle and always shows the weekly
   // days card, never the one-time date/time/price/seats fields.
   forceRecurring?: boolean;
+  // Embedded mode only: renders the embedding screen's own title/subtitle
+  // (centered) at the top of THIS form's card, above the category badge,
+  // instead of the embedding screen showing them in a separate card of its
+  // own above the mode selector — see app/driver/create/school.tsx.
+  headerTitle?: string;
+  headerSubtitle?: string;
 };
 
 export default function RideForm({
@@ -72,6 +78,8 @@ export default function RideForm({
   onBack,
   embedded,
   forceRecurring,
+  headerTitle,
+  headerSubtitle,
 }: Props) {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
@@ -396,11 +404,18 @@ export default function RideForm({
 
   const content = (
     <>
-      {/* Standalone (non-embedded) mode renders the badge in the same row
-          as the back button instead — see the two returns below. */}
-      {embedded ? <View style={categoryStyles.embeddedBadgeWrap}>{categoryBadge}</View> : null}
-
       <View style={styles.card}>
+      {embedded && headerTitle ? (
+        <>
+          <Text style={[styles.title, categoryStyles.smallerTitle]}>
+            {headerTitle}
+          </Text>
+          {headerSubtitle ? (
+            <Text style={styles.subtitle}>{headerSubtitle}</Text>
+          ) : null}
+        </>
+      ) : null}
+
       {!embedded ? (
         <>
           <Text style={[styles.title, categoryStyles.smallerTitle]}>
@@ -622,9 +637,6 @@ const categoryStyles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    marginBottom: 12,
-  },
-  embeddedBadgeWrap: {
     marginBottom: 12,
   },
   categoryBadge: {
