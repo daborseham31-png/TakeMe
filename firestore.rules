@@ -47,6 +47,24 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
+    // A driver suspended for repeated booked-trip cancellations (see
+    // app/booking/driverViolationsLib.ts's cancellationStanding — a
+    // completely separate flag from driverVerificationStatus/accountStatus,
+    // an unrelated admin-suspension system) may never publish/create new
+    // driver work while suspended. This is deliberately a resilient OR-style
+    // check (same reasoning as isAdmin()'s own get() above): if the caller's
+    // own users/{uid} doc doesn't exist for some reason, this evaluates to
+    // false rather than throwing, since a nonexistent standing can never be
+    // "suspended". Applied to CREATE only below — narrow, well-understood
+    // field shapes (driverId/employerId always equal request.auth.uid on a
+    // legitimate create) rather than every existing update path on these
+    // collections, which stays exactly as broad/unaudited as it already was.
+    function isDriverSuspended() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid))
+          .data.get("cancellationStanding", {}).get("suspensionActive", false) == true;
+    }
+
     function unchanged(field) {
       return !(field in request.resource.data) ||
         !(field in resource.data) ||
@@ -85,8 +103,20 @@ service cloud.firestore {
     // ---------------------------------------------------------------
     function isValidDriverReview(reviewId) {
       let data = request.resource.data;
-      return data.bookingId == reviewId &&
-        data.category in ["personal_ride", "school", "roadside", "work", "errands"] &&
+      // "personal" (as opposed to "personal_ride") IS a real, intentional
+      // category value here — NOT a typo to "fix" elsewhere. Weekly
+      // Personal Ride occurrences are created by createWeeklyBookings
+      // (weeklyBookingLib.ts) with category "personal" and rated through
+      // bookings.tsx's submitSchoolRating (the same generic BookingItem
+      // rating path School uses — see that function's own comment and
+      // bookings.tsx's renderBookingCard: "School and (weekly) personal
+      // bookings both drive through the ride navigation screen"). Only
+      // ONE-TIME Personal Ride bookings use "personal_ride" (rideBookingLib.ts's
+      // submitRideRating). Omitting "personal" here is exactly what made
+      // every weekly Personal Ride rating fail with "Missing or
+      // insufficient permissions" while one-time ratings kept working.
+      return data.category in ["personal_ride", "personal", "school", "roadside", "work", "errands"] &&
+        data.bookingId == reviewId &&
         data.passengerId == request.auth.uid &&
         data.driverId is string && data.driverId != "" &&
         data.driverId != request.auth.uid &&
@@ -108,6 +138,59 @@ service cloud.firestore {
         newData.ratingAverage >= 0 && newData.ratingAverage <= 5;
     }
 
+    // Whether THIS bookings/{bookingId} write touches any of the fields a
+    // passenger's post-trip rating submission ever sets — see
+    // submitRideRating (rideBookingLib.ts) and submitSchoolRating
+    // (bookings.tsx), which write this exact field set as one step of the
+    // same transaction that creates the matching driverReviews/{bookingId}
+    // doc (see isValidDriverReview above). Used below to require every
+    // rating-SHAPED write to be a fully valid one, without touching the
+    // broad allowance every OTHER personal_ride/school write on this
+    // collection still relies on (trip lifecycle, cancellation, etc. — see
+    // the "Everything else" comment on match /bookings/{bookingId}).
+    function isRatingLikeBookingUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(["rating", "reviewComment", "ratingSubmitted", "ratedAt"]);
+    }
+
+    // Personal Ride (rideBookingLib.ts's submitRideRating), legacy School
+    // (bookings.tsx's submitSchoolRating), AND Roadside Help
+    // (roadside-help/roadsideLib.ts's submitRoadsideRating) all submit
+    // their post-trip rating as a plain update on THIS SAME
+    // bookings/{bookingId} doc (never a separate collection) — Work/Errand
+    // are the only ones that rate on a different collection instead
+    // (workApplications/errandApplications — see those match blocks
+    // below). Roadside Help ALSO still passes isValidRoadsideBookingUpdate
+    // above unchanged (its own rating branch there requires the same
+    // shape); this function is layered on in ADDITION, not instead of
+    // that, so it must accept the exact same write Roadside already
+    // performs. Only the booking's own passenger, only once, only after
+    // real completion, and only the rating fields themselves —
+    // driverId/passengerId/every other field on the booking stay exactly
+    // as they were.
+    //
+    // "personal" is WEEKLY Personal Ride's real category value (see
+    // isValidDriverReview's own comment above) — each day of a weekly
+    // booking is its own bookings/{bookingId} doc (a distinct auto-id from
+    // createWeeklyBookings, never the shared bookingGroupId), so this
+    // already naturally gates per OCCURRENCE, not per weekly series.
+    function isValidPassengerBookingRatingUpdate() {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      return oldData.category in ["personal_ride", "personal", "school", "roadside"] &&
+        oldData.passengerId == request.auth.uid &&
+        newData.passengerId == oldData.passengerId &&
+        newData.driverId == oldData.driverId &&
+        (oldData.status == "completed" || oldData.tripStatus == "completed") &&
+        oldData.get("ratingSubmitted", false) != true &&
+        newData.diff(oldData).affectedKeys().hasOnly([
+          "rating", "reviewComment", "ratingSubmitted", "needsPassengerRating",
+          "ratedAt", "updatedAt",
+        ]) &&
+        newData.ratingSubmitted == true &&
+        newData.rating is int && newData.rating >= 1 && newData.rating <= 5;
+    }
+
     // Lets a driver's own client (recordDriverCancellationViolation) flip
     // their own cancellationStanding.suspensionActive from false to true
     // when a 5th qualifying cancellation fires — but never the other way,
@@ -123,6 +206,185 @@ service cloud.firestore {
           newStanding.suspensionActive == true) &&
         oldStanding.get("lastSuspensionLiftedAt", null) ==
           newStanding.get("lastSuspensionLiftedAt", null);
+    }
+
+    // ---------------------------------------------------------------
+    // Roadside Help — helper stage machine (Start Driving -> I've Arrived ->
+    // Start Help -> Finish Help -> customer Confirm Completion -> cash-only
+    // Confirm Cash Received) plus offer acceptance and cancellation sync.
+    // See app/booking/roadside-help/roadsideLib.ts, which is the ONLY
+    // client code that ever writes these three collections' post-creation
+    // fields — every branch below matches ONE of its transaction write
+    // shapes exactly (field-for-field, via hasOnly()), which is what makes
+    // "the accepted helper, price, and payment method cannot be changed
+    // after acceptance" a real guarantee: those fields simply never appear
+    // in any allowed key list once the accept-transition itself has run.
+    // ---------------------------------------------------------------
+    function isValidRoadsideRequestUpdate() {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      return (
+        // Accept — the request owner only, exactly once (oldData.status
+        // must still be "open"), choosing exactly one helper + payment
+        // method for the rest of this request's life.
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status == "open" &&
+          newData.status == "helper_assigned" &&
+          newData.selectedDriverId is string && newData.selectedDriverId != "" &&
+          newData.paymentMethod in ["cash", "bit"] &&
+          newData.diff(oldData).affectedKeys().hasOnly([
+            "status", "selectedOfferId", "selectedDriverId", "selectedDriverName",
+            "selectedDriverPhone", "passengerId", "passengerName", "passengerPhone",
+            "serviceType", "address", "latitude", "longitude", "agreedPrice",
+            "etaMinutes", "estimatedArrivalMinutes", "paymentMethod", "paymentStatus",
+            "bookingId", "acceptedAt", "updatedAt",
+          ])) ||
+
+        // Helper stage transitions — the accepted helper only, exactly one
+        // step forward at a time.
+        (oldData.get("selectedDriverId", null) == request.auth.uid &&
+          (
+            (oldData.status == "helper_assigned" && newData.status == "helper_on_way") ||
+            (oldData.status == "helper_on_way" && newData.status == "arrived") ||
+            (oldData.status == "arrived" && newData.status == "in_progress") ||
+            (oldData.status == "in_progress" && newData.status == "completion_pending")
+          ) &&
+          newData.diff(oldData).affectedKeys().hasOnly(
+            ["status", "driverOnTheWayAt", "arrivedAt", "helpStartedAt", "finishedAt", "updatedAt"]
+          )) ||
+
+        // Customer confirms completion — the ONLY path to "completed".
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status == "completion_pending" &&
+          newData.status == "completed" &&
+          newData.diff(oldData).affectedKeys().hasOnly([
+            "status", "paymentStatus", "helpCompleted", "needsPassengerRating",
+            "ratingSubmitted", "completedAt", "updatedAt",
+          ])) ||
+
+        // Accepted helper confirms cash received — cash method only, only
+        // once the customer has already confirmed completion.
+        (oldData.get("selectedDriverId", null) == request.auth.uid &&
+          oldData.paymentMethod == "cash" &&
+          oldData.status == "completed" &&
+          oldData.get("paymentStatus", "") == "pending" &&
+          newData.paymentStatus == "paid" &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["paymentStatus", "paidBy", "paidTo", "paidAmount", "paidAt", "updatedAt"])) ||
+
+        // Passenger rates the helper (submitRoadsideRating) — only once,
+        // only after the service has actually reached "completed".
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status == "completed" &&
+          oldData.get("ratingSubmitted", false) == false &&
+          newData.rating is int && newData.rating >= 1 && newData.rating <= 5 &&
+          newData.diff(oldData).affectedKeys().hasOnly(
+            ["rating", "reviewComment", "ratingSubmitted", "needsPassengerRating", "ratedAt", "updatedAt"]
+          )) ||
+
+        // Customer cancels — cancelRoadsideRequestByPassenger — ONLY while
+        // still "open" or "helper_assigned", i.e. before the accepted
+        // helper has pressed Start Driving. This is the sole enforcement
+        // point that matters once the UI button is gone: even a direct
+        // client write past this point is rejected here.
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status in ["open", "helper_assigned"] &&
+          newData.status == "cancelled" &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["status", "cancelledBy", "cancelledAt", "updatedAt"])) ||
+
+        // Driver cancels — syncCancelledRoadsideRequest, run right after
+        // cancelGeneralBooking's own `bookings` write succeeds. Unrestricted
+        // by stage (unchanged from before) — this task only tightens the
+        // customer's own cancellation window, not the driver's.
+        (oldData.get("selectedDriverId", null) == request.auth.uid &&
+          newData.status == "cancelled" &&
+          newData.diff(oldData).affectedKeys().hasOnly(["status", "updatedAt"]))
+      );
+    }
+
+    function isValidRoadsideOfferUpdate() {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      return (
+        // The request owner accepts/rejects offers on their own request
+        // (acceptOffer, rejectOffer) and later marks the accepted offer
+        // completed once they confirm completion — every offer carries its
+        // own passengerId (copied at creation), so this needs no
+        // cross-collection get().
+        (oldData.passengerId == request.auth.uid &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["status", "paymentStatus", "acceptedAt", "completedAt", "updatedAt"]) &&
+          (
+            (oldData.status == "pending" && newData.status in ["accepted", "not_selected"]) ||
+            (oldData.status == "accepted" && newData.status in ["not_selected", "completed"])
+          )) ||
+        // The accepted helper confirms cash received on their own offer.
+        (oldData.driverId == request.auth.uid &&
+          oldData.status == "completed" &&
+          oldData.get("paymentStatus", "") == "pending" &&
+          newData.paymentStatus == "paid" &&
+          newData.diff(oldData).affectedKeys().hasOnly(["paymentStatus", "paidAt", "updatedAt"]))
+      );
+    }
+
+    function isValidRoadsideBookingUpdate() {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      return (
+        // Helper stage transitions.
+        (oldData.driverId == request.auth.uid &&
+          (
+            (oldData.tripStatus == "booked" && newData.tripStatus == "driver_on_way") ||
+            (oldData.tripStatus == "driver_on_way" && newData.tripStatus == "arrived_pickup") ||
+            (oldData.tripStatus == "arrived_pickup" && newData.tripStatus == "in_progress") ||
+            (oldData.tripStatus == "in_progress" && newData.tripStatus == "completion_pending")
+          ) &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["tripStatus", "trackingEnabled", "updatedAt"])) ||
+
+        // Customer confirms completion.
+        (oldData.passengerId == request.auth.uid &&
+          oldData.tripStatus == "completion_pending" &&
+          newData.tripStatus == "completed" &&
+          newData.diff(oldData).affectedKeys().hasOnly([
+            "status", "tripStatus", "paymentStatus", "helpCompleted",
+            "needsPassengerRating", "ratingSubmitted", "completedAt", "updatedAt",
+          ])) ||
+
+        // Accepted helper confirms cash received.
+        (oldData.driverId == request.auth.uid &&
+          oldData.paymentMethod == "cash" &&
+          oldData.status == "completed" &&
+          oldData.get("paymentStatus", "") == "pending" &&
+          newData.paymentStatus == "paid" &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["paymentStatus", "paidAmount", "paidAt", "updatedAt"])) ||
+
+        // Passenger rates the helper (submitRoadsideRating).
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status == "completed" &&
+          oldData.get("ratingSubmitted", false) == false &&
+          newData.rating is int && newData.rating >= 1 && newData.rating <= 5 &&
+          newData.diff(oldData).affectedKeys().hasOnly(
+            ["rating", "reviewComment", "ratingSubmitted", "needsPassengerRating", "ratedAt", "updatedAt"]
+          )) ||
+
+        // Customer cancels — cancelRoadsideRequestByPassenger — ONLY while
+        // tripStatus is still "booked" (before Start Driving). Same cutoff
+        // as isValidRoadsideRequestUpdate's matching branch above.
+        (oldData.passengerId == request.auth.uid &&
+          oldData.tripStatus == "booked" &&
+          newData.status == "cancelled" &&
+          newData.diff(oldData).affectedKeys().hasOnly(["status", "updatedAt"])) ||
+
+        // Driver cancels (cancelGeneralBooking — shared across every
+        // category, see the `bookings` match block's own comment below).
+        // Unrestricted by stage, unchanged from before.
+        (oldData.driverId == request.auth.uid &&
+          newData.status == "cancelled" &&
+          newData.diff(oldData).affectedKeys().hasOnly(["status", "updatedAt"]))
+      );
     }
 
     // ---------------------------------------------------------------
@@ -253,19 +515,63 @@ service cloud.firestore {
     // re-read the current document fresh before acting on it.
     // ---------------------------------------------------------------
     match /bookings/{bookingId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+
+      // Creation stays broad for every category (see the comment above) —
+      // acceptOffer's own transaction (the passenger's client) creates the
+      // roadside booking doc this way too.
+      allow create: if isSignedIn();
+
+      // Roadside Help (category == "roadside") is the one category with a
+      // real, audited field-transition shape post-creation — see
+      // isValidRoadsideBookingUpdate above. Every other category keeps
+      // today's broad behavior unchanged (see the comment above on why).
+      // Admin overrides (adminBookingsLib.ts's cancelBooking, etc.) keep
+      // working exactly as before, for every category including roadside.
+      //
+      // ADDITIONALLY (regardless of category): any write that touches a
+      // rating field (isRatingLikeBookingUpdate) must ALSO be a fully valid
+      // passenger rating update (isValidPassengerBookingRatingUpdate) — see
+      // that function's own comment. This is layered on with `&&`, not
+      // folded into the broad OR above, specifically so it can never be
+      // satisfied merely by "category != roadside": a passenger can submit
+      // their OWN rating on a completed Personal Ride/School booking, but
+      // can never use a rating-shaped write to change driverId/passengerId
+      // or any other field, rate a booking they don't own, rate one that
+      // isn't completed, or rate the same booking twice. Admin never needs
+      // to touch these fields (confirmed: adminBookingsLib.ts never writes
+      // rating/reviewComment/ratingSubmitted/ratedAt), so this applies to
+      // isAdmin() too, with no known write path affected.
+      allow update: if isSignedIn() &&
+        (isAdmin() || resource.data.get("category", "") != "roadside" || isValidRoadsideBookingUpdate()) &&
+        (!isRatingLikeBookingUpdate() || isValidPassengerBookingRatingUpdate());
+
+      // Nothing in this app ever deletes a booking doc (cancellation is a
+      // status update, never a delete) — denying it here is a pure
+      // tightening with no known write path affected.
+      allow delete: if false;
     }
 
     match /driverRoutes/{routeId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      // A suspended driver may not publish a new ride/weekly trip listing —
+      // see isDriverSuspended() above. update/delete stay exactly as broad
+      // as before (see the comment above on why — cancellation flows
+      // restore seats on routes the calling passenger doesn't own).
+      allow create: if isSignedIn() && !isDriverSuspended();
+      allow update, delete: if isSignedIn();
     }
 
     match /workJobs/{jobId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && !isDriverSuspended();
+      allow update, delete: if isSignedIn();
     }
 
     match /errandJobs/{errandId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && !isDriverSuspended();
+      allow update, delete: if isSignedIn();
     }
 
     // workApplications/errandApplications, unlike the four collections
@@ -314,11 +620,32 @@ service cloud.firestore {
     }
 
     match /roadsideRequests/{requestId} {
-      allow read, write: if isSignedIn();
+      // Broad authenticated read: nearby drivers browse open requests
+      // (Help Requests screen), and sendDriverOffer reads a request that
+      // doesn't belong to the calling driver to copy its passenger info
+      // onto a new offer.
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() && request.resource.data.passengerId == request.auth.uid;
+
+      allow update: if isSignedIn() && (isAdmin() || isValidRoadsideRequestUpdate());
+
+      allow delete: if false;
     }
 
     match /roadsideOffers/{offerId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+
+      // A suspended driver may not send a new Roadside Help offer — see
+      // isDriverSuspended() above.
+      allow create: if isSignedIn() &&
+        !isDriverSuspended() &&
+        request.resource.data.driverId == request.auth.uid &&
+        request.resource.data.status == "pending";
+
+      allow update: if isSignedIn() && (isAdmin() || isValidRoadsideOfferUpdate());
+
+      allow delete: if false;
     }
 
     // See isValidDriverReview above — reviewId must equal the bookingId
@@ -379,7 +706,10 @@ service cloud.firestore {
       // security-sensitive field on this document.
       allow read: if isSignedIn();
 
+      // A suspended driver may not create a new School Trip listing — see
+      // isDriverSuspended() above.
       allow create: if isSignedIn() &&
+        !isDriverSuspended() &&
         request.resource.data.driverId == request.auth.uid &&
         request.resource.data.availableSeats == request.resource.data.totalSeats;
 
@@ -453,7 +783,7 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
         request.resource.data.passengerId == request.auth.uid;
 
-      // Seven legitimate update shapes:
+      // Eight legitimate update shapes:
       //   1) The booking passenger cancels it — driver/trip/price/seat
       //      fields are immutable after creation, and this can only ever
       //      move status to "cancelled" + expire the passenger's own
@@ -595,6 +925,30 @@ service cloud.firestore {
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(["deletedForDriver", "updatedAt"]) &&
             request.resource.data.deletedForDriver == true
           )
+        ) ||
+        (
+          // 8) The owning driver cancels the ENTIRE trip (cancelSchoolTrip)
+          //    — this booking is one of possibly several affected by the
+          //    same trip cancellation, all updated in the same transaction.
+          //    Never restores/reopens anything (there is nothing left to
+          //    rebook once the trip itself is cancelled) — only moves
+          //    status to "cancelled" and expires the passenger's own
+          //    verification code, exactly like the passenger's own
+          //    cancellation (shape 1), but tagged cancelledBy "driver" with
+          //    the driver's own stated reason preserved for history/the
+          //    replacement-offer flow. driver/passenger/trip identity is
+          //    frozen, same as every other driver-side shape above.
+          resource.data.driverId == request.auth.uid &&
+          request.resource.data.driverId == resource.data.driverId &&
+          request.resource.data.passengerId == resource.data.passengerId &&
+          request.resource.data.tripId == resource.data.tripId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "status", "verificationStatus", "bookingStatus", "cancelledBy",
+            "cancellationReason", "cancelledAt", "originalTripId", "updatedAt"
+          ]) &&
+          request.resource.data.status == "cancelled" &&
+          request.resource.data.verificationStatus == "expired" &&
+          request.resource.data.cancelledBy == "driver"
         )
       );
 
@@ -691,6 +1045,42 @@ service cloud.firestore {
             resource.data.get("authorizedPassengerIds", []).size() + 1
         )
       );
+
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------------------
+    // passengerLocations/{targetId} — the passenger's own live GPS while
+    // waiting for their assigned driver, in the opposite direction of
+    // tripLocations above (see app/passengerLocationTask.ts). targetId is
+    // the same bookingId tripLocations uses for Personal Ride/legacy
+    // School, so both collections key off the same document identity for a
+    // given ride. Replaces the old manually-saved pickup-coordinate fields
+    // on the booking doc itself, which are read-only backward-compat now
+    // (see bookingsLib.ts's pickupCoords normalization) and never written
+    // by any current screen.
+    // -----------------------------------------------------------------
+    match /passengerLocations/{targetId} {
+      // Same not-yet-created reasoning as tripLocations above — both
+      // ride-navigation.tsx and the passenger's own starter effect
+      // (app/(tabs)/bookings.tsx) subscribe to / may create this path the
+      // moment their screen opens, before any fix has ever been written.
+      allow read: if isSignedIn() && (
+        resource == null ||
+        resource.data.passengerId == request.auth.uid ||
+        resource.data.get("driverId", null) == request.auth.uid
+      );
+
+      // Only the passenger themselves ever creates/updates this doc — the
+      // assigned driver only ever reads it, never writes it.
+      allow create: if isSignedIn() &&
+        request.resource.data.passengerId == request.auth.uid;
+
+      allow update: if isSignedIn() &&
+        resource.data.passengerId == request.auth.uid &&
+        request.resource.data.passengerId == resource.data.passengerId &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["driverId", "latitude", "longitude", "heading", "speed", "accuracy", "updatedAt"]);
 
       allow delete: if false;
     }

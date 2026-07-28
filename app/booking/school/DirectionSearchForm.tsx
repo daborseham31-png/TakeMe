@@ -36,6 +36,7 @@ import {
 } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { ltrContentStyle } from "../../i18n/rtl";
+import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import DateInput, { TimeInput } from "../../driver/create/DateInput";
 import { normalizeDateToYMD, styles } from "../../driver/create/driverHelpers";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
@@ -486,7 +487,7 @@ export default function DirectionSearchForm() {
         <Ionicons
           name="person-circle-outline"
           size={18}
-          color={child.childId ? "#F58220" : "#8B7B6B"}
+          color={child.childId ? "#3B82F6" : "#8B7B6B"}
         />
         <DirectionalText
           style={[localStyles.childPickerText, !child.childId && localStyles.childPickerPlaceholder]}
@@ -507,7 +508,7 @@ export default function DirectionSearchForm() {
       }}
     >
       <DirectionalRow style={localStyles.manageChildrenLinkButton}>
-        <Ionicons name="people-outline" size={15} color="#F58220" />
+        <Ionicons name="people-outline" size={15} color="#3B82F6" />
         <DirectionalText style={localStyles.manageChildrenLinkText}>
           {t("schoolChildren.manageChildrenLink")}
         </DirectionalText>
@@ -605,7 +606,7 @@ export default function DirectionSearchForm() {
             onPress={() => applySameReturnTimeToAll(children[0]?.returnTime || finishTime)}
           >
             <DirectionalRow style={localStyles.useSameButton}>
-              <Ionicons name="copy-outline" size={15} color="#F58220" />
+              <Ionicons name="copy-outline" size={15} color="#3B82F6" />
               <DirectionalText style={localStyles.useSameButtonText}>
                 {t("schoolTrip.useSameTimeForAll")}
               </DirectionalText>
@@ -617,6 +618,7 @@ export default function DirectionSearchForm() {
   };
 
   return (
+    <KeyboardAvoidingWrapper>
     <ScrollView contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
       <View
         style={[
@@ -655,7 +657,7 @@ export default function DirectionSearchForm() {
       <View style={styles.card}>
         {mode === "roundTrip" ? (
           <DirectionalRow style={localStyles.sectionHeader}>
-            <Ionicons name="arrow-up-circle-outline" size={18} color="#F58220" />
+            <Ionicons name="arrow-up-circle-outline" size={18} color="#3B82F6" />
             <PhysicalDirectionalBlockText style={[localStyles.sectionTitle, { flex: 1 }]}>
               {t("schoolTrip.outboundTrip")}
             </PhysicalDirectionalBlockText>
@@ -846,7 +848,7 @@ export default function DirectionSearchForm() {
                     }}
                   >
                     <DirectionalRow style={localStyles.modalChildRow}>
-                      <Ionicons name="person-circle-outline" size={20} color="#F58220" />
+                      <Ionicons name="person-circle-outline" size={20} color="#3B82F6" />
                       <DirectionalText style={localStyles.modalChildRowText}>
                         {profile.childName}
                       </DirectionalText>
@@ -867,6 +869,7 @@ export default function DirectionSearchForm() {
         </View>
       </Modal>
     </ScrollView>
+    </KeyboardAvoidingWrapper>
   );
 }
 
@@ -887,7 +890,7 @@ const localStyles = {
   },
   childRowTitle: {
     fontWeight: "900" as const,
-    color: "#F58220",
+    color: "#3B82F6",
     fontSize: 12.5,
     marginBottom: 8,
     textTransform: "uppercase" as const,
@@ -926,14 +929,14 @@ const localStyles = {
     gap: 6,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#F58220",
+    borderColor: "#3B82F6",
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 14,
     marginTop: 4,
   },
   manageChildrenLinkText: {
-    color: "#F58220",
+    color: "#3B82F6",
     fontWeight: "900" as const,
     fontSize: 13,
   },
@@ -994,7 +997,7 @@ const localStyles = {
     paddingVertical: 10,
   },
   useSameButtonText: {
-    color: "#F58220",
+    color: "#3B82F6",
     fontWeight: "800" as const,
     fontSize: 13,
   },
@@ -1025,7 +1028,7 @@ const localStyles = {
     fontSize: 12.5,
   },
   tabTextActive: {
-    color: "#F58220",
+    color: "#3B82F6",
   },
   sectionHeader: {
     flexDirection: "row" as const,
@@ -1091,7 +1094,7 @@ const localStyles = {
     textAlign: "center" as const,
   },
   searchButton: {
-    backgroundColor: "#F58220",
+    backgroundColor: "#3B82F6",
     borderRadius: 12,
     padding: 16,
     flexDirection: "row" as const,

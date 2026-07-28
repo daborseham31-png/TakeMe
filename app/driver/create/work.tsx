@@ -6,6 +6,7 @@ import {
   Alert,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -13,12 +14,15 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
+import { getCategoryMeta } from "../../booking/bookingsLib";
 import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
+import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import { fetchDriverEligibility } from "../driverEligibility";
 import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
+import { translateCategoryLabel } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { backIconName } from "../../i18n/rtl";
 import DateInput, { TimeInput } from "./DateInput";
@@ -33,6 +37,12 @@ import {
   validateAccountInfo,
   validateDateAndTimeNotPassed,
 } from "./driverHelpers";
+
+// Same "Work Helper" category everywhere else (My Bookings' catChip, the
+// passenger side, ...) reads from — CATEGORY_META's "workErrands" entry is
+// already green (#22C55E), so the badge matches automatically rather than
+// hardcoding a color here.
+const workCategoryMeta = getCategoryMeta("workErrands");
 
 export default function WorkJobScreen() {
   const { t } = useTranslation();
@@ -257,13 +267,28 @@ export default function WorkJobScreen() {
 
   return (
     <DirectionalScreen style={styles.page}>
+      <KeyboardAvoidingWrapper>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
-        </Pressable>
+        <View style={localStyles.topRow}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
+          </Pressable>
+
+          <View
+            style={[
+              localStyles.categoryBadge,
+              { backgroundColor: `${workCategoryMeta.color}18` },
+            ]}
+          >
+            <Ionicons name={workCategoryMeta.icon} size={18} color={workCategoryMeta.color} />
+            <Text style={[localStyles.categoryBadgeText, { color: workCategoryMeta.color }]}>
+              {translateCategoryLabel("workErrands", workCategoryMeta.label, t)}
+            </Text>
+          </View>
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.title}>{t("driverCreate.newWorkJobTitle")}</Text>
@@ -385,6 +410,7 @@ export default function WorkJobScreen() {
           <Pressable
             style={[
               styles.submitButton,
+              { backgroundColor: workCategoryMeta.color },
               loading && styles.submitButtonDisabled,
             ]}
             onPress={handleSubmit}
@@ -396,6 +422,34 @@ export default function WorkJobScreen() {
           </Pressable>
         </View>
       </ScrollView>
+      </KeyboardAvoidingWrapper>
     </DirectionalScreen>
   );
 }
+
+// Same shape/values as RideForm.tsx's categoryStyles / errand.tsx's
+// localStyles (topRow/categoryBadge/categoryBadgeText) — this screen only
+// ever posts one category ("workErrands"), so the badge is fixed rather
+// than driven by a prop, but it should still look identical to every other
+// create-trip screen's badge.
+const localStyles = StyleSheet.create({
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 12,
+  },
+  categoryBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  categoryBadgeText: {
+    fontWeight: "900",
+    fontSize: 15,
+  },
+});

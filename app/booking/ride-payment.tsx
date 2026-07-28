@@ -46,7 +46,7 @@ import {
   WeeklyDriverDay,
   WeeklyRequestDay,
 } from "./weeklyBookingLib";
-import { GeoPoint, notify } from "./work-errand/workErrandLib";
+import { notify } from "./work-errand/workErrandLib";
 
 type Method = "cash" | "bit" | null;
 
@@ -147,23 +147,6 @@ export default function RidePaymentScreen() {
 
   const [schoolAskReturn, setSchoolAskReturn] = useState(false);
   const [schoolBookedGroupId, setSchoolBookedGroupId] = useState<string | null>(null);
-
-  // "Pickup location for driver navigation" — a SEPARATE, optional GPS point
-  // from the booking form. Never used for driver matching (that already
-  // happened, using from/to text, before this screen). Only ever used to
-  // help the driver navigate to the passenger later.
-  const presetPickupLat = num(params.pickupLatitude);
-  const presetPickupLng = num(params.pickupLongitude);
-  const presetPickupAddress = String(params.pickupAddress || "");
-
-  const presetPickup: GeoPoint | null =
-    presetPickupLat !== null && presetPickupLng !== null
-      ? {
-          latitude: presetPickupLat,
-          longitude: presetPickupLng,
-          address: presetPickupAddress,
-        }
-      : null;
 
   const bookingType = String(params.bookingType || "quick");
   const isWeekly = bookingType === "weekly";
@@ -336,12 +319,6 @@ export default function RidePaymentScreen() {
     router.replace("/(tabs)/bookings" as any);
   };
 
-  // Pickup GPS is optional — if the passenger never pressed "Use my current
-  // location" on the booking form, there is no preset pickup, and none is
-  // silently captured here either. Driver navigation then falls back to the
-  // manual From address (see driver/ride-navigation.tsx).
-  const resolvePickup = async (): Promise<GeoPoint | null> => presetPickup;
-
   const getPassengerProfile = async () => {
     const user = auth.currentUser;
 
@@ -368,7 +345,6 @@ export default function RidePaymentScreen() {
   };
 
 const createBookingAfterPayment = async (
-  pickup: GeoPoint | null,
   payment: RidePayment,
 ) => {
   const { user, passengerName, passengerPhone } = await getPassengerProfile();
@@ -402,17 +378,6 @@ const createBookingAfterPayment = async (
             paymentStatus: "mock_paid",
             cardLast4: payment.cardLast4.slice(-4),
           };
-
-  const cleanPickup =
-    pickup &&
-    typeof pickup.latitude === "number" &&
-    typeof pickup.longitude === "number"
-      ? {
-          latitude: pickup.latitude,
-          longitude: pickup.longitude,
-          address: pickup.address || "",
-        }
-      : null;
 
   await runTransaction(db, async (transaction) => {
     const routeSnap = await transaction.get(routeRef);
@@ -477,28 +442,6 @@ const createBookingAfterPayment = async (
       seats: selectedSeats,
       price: totalPrice,
       pricePerSeat: unitPrice,
-
-      // Existing fields — already read by driver navigation / live tracking
-      // (app/driver/ride-navigation.tsx, app/booking/live-tracking.tsx).
-      pickup: cleanPickup,
-      pickupCoords: cleanPickup
-        ? {
-            latitude: cleanPickup.latitude,
-            longitude: cleanPickup.longitude,
-          }
-        : null,
-      passengerPickupLocation: cleanPickup,
-
-      // Same data, explicit field names. This is the SEPARATE navigation
-      // pickup point — never defaulted to `from` (the matching field): when
-      // no GPS pickup was captured, these simply stay null and driver
-      // navigation falls back to the manual From address itself.
-      pickupAddress: cleanPickup?.address || null,
-      pickupLatitude: cleanPickup?.latitude ?? null,
-      pickupLongitude: cleanPickup?.longitude ?? null,
-      pickupLocation: cleanPickup
-        ? { latitude: cleanPickup.latitude, longitude: cleanPickup.longitude }
-        : null,
 
       ...paymentFields,
 
@@ -657,7 +600,6 @@ const createBookingAfterPayment = async (
           to,
           schoolName,
           destinationDetails,
-          pickup: presetPickup,
 
           selectedDays: selectedWeeklyDays,
           payment,
@@ -703,8 +645,7 @@ const createBookingAfterPayment = async (
 
     try {
       setProcessing(true);
-      const pickup = await resolvePickup();
-      await createBookingAfterPayment(pickup, payment);
+      await createBookingAfterPayment(payment);
 
       router.replace({
         pathname: "/(tabs)/bookings",
@@ -725,12 +666,16 @@ const createBookingAfterPayment = async (
           <Text style={styles.askReturnTitle}>{t("schoolTrip.bookReturnQuestion")}</Text>
           <Text style={styles.askReturnSubtitle}>{t("schoolTrip.bookReturnQuestionHint")}</Text>
 
-          <Pressable style={styles.continueButton} onPress={handleContinueToSchoolReturn}>
-            <Text style={styles.continueText}>{t("schoolTrip.bookReturn")}</Text>
+          <Pressable style={styles.askReturnPrimaryButton} onPress={handleContinueToSchoolReturn}>
+            <Text style={styles.askReturnPrimaryText} numberOfLines={1}>
+              {t("schoolTrip.bookReturn")}
+            </Text>
           </Pressable>
 
           <Pressable style={styles.askReturnSkipButton} onPress={handleSkipSchoolReturn}>
-            <Text style={styles.askReturnSkipText}>{t("common.no")}</Text>
+            <Text style={styles.askReturnSkipText} numberOfLines={1}>
+              {t("common.no")}
+            </Text>
           </Pressable>
         </View>
       </DirectionalScreen>
@@ -1370,13 +1315,42 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 18,
   },
+  // Both buttons deliberately stretch to the full width of askReturnBox
+  // (which supplies the outer 30px horizontal margin) — askReturnBox's own
+  // `alignItems: "center"` would otherwise shrink-wrap each button to its
+  // own text, which is what made "Book a return ride" look cramped (no
+  // horizontal padding + no explicit width to center that padding within).
+  askReturnPrimaryButton: {
+    alignSelf: "stretch",
+    backgroundColor: "#F58220",
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+  },
+  askReturnPrimaryText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 16,
+    textAlign: "center",
+  },
   askReturnSkipButton: {
+    alignSelf: "stretch",
     marginTop: 12,
     borderWidth: 1,
     borderColor: "#E2D8CF",
-    borderRadius: 12,
-    padding: 15,
+    borderRadius: 14,
+    paddingVertical: 15,
+    paddingHorizontal: 24,
     alignItems: "center",
+    justifyContent: "center",
   },
-  askReturnSkipText: { color: "#7C5F46", fontWeight: "800" },
+  askReturnSkipText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 15,
+    textAlign: "center",
+  },
 });

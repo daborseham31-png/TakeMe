@@ -105,6 +105,11 @@ export type FeedItem = {
   // Only the days that still have room — used for the weekly day-picker.
   availableWeeklyDays: WeeklyDriverDay[];
 
+  // Real passenger booking count (errandApplications, excluding rejected/
+  // cancelled) — errand category only, used by isRideExpired's grace-period
+  // check below. Always 0 for every other category (irrelevant to them).
+  bookingCount: number;
+
   createdAtSeconds: number;
 
   // The exact raw listing object the existing screens already expect via
@@ -148,6 +153,54 @@ export const isDateTimeExpired = (
   return ms <= now;
 };
 
+// ---------------------------------------------------------------------------
+// Errand-only rule: an errand ride with ZERO real bookings stays visible in
+// every passenger search surface (this Errands browse screen, the Home
+// feed) for a 5-minute grace window PAST its scheduled start time — instead
+// of vanishing the instant the clock reaches it, like every other category
+// still does via isDateTimeExpired above. A ride with at least one real
+// booking is NEVER hidden by this rule; once it has a passenger, the
+// existing plain isDateTimeExpired cutoff still applies to it, unchanged.
+//
+// This is the ONE shared helper every Errands search surface calls — see
+// normalizeErrandJobItem below (Home feed) and errand/errand.tsx (the
+// dedicated browse screen) — so both always agree on exactly which rides
+// are visible.
+// ---------------------------------------------------------------------------
+
+export const ERRAND_NO_BOOKING_GRACE_MS = 5 * 60 * 1000;
+
+export const isErrandHiddenFromSearch = (
+  date: string,
+  startTime: string,
+  bookingCount: number,
+  now: number = Date.now(),
+): boolean => {
+  if (bookingCount > 0) {
+    return isDateTimeExpired(date, startTime, now);
+  }
+
+  const startMs = combineDateTimeMs(date, startTime);
+  if (startMs === null) return false;
+
+  return now >= startMs + ERRAND_NO_BOOKING_GRACE_MS;
+};
+
+// Real booking/passenger count for an errand listing — read straight off a
+// plain running counter on the errandJobs doc itself (see workErrandLib.ts's
+// createApplication/rejectRequest/cancelApplication, which increment/
+// decrement it as requests come in, get declined, or get cancelled).
+// Deliberately NOT a query against errandApplications: firestore.rules
+// restricts that collection to each document's own passenger/driver, so a
+// browsing passenger could never read another passenger's booking there —
+// errandJobs is already broadly readable, so that's where this signal
+// lives instead. Negative/missing values clamp to 0 (a legacy listing that
+// predates this counter, or a bookkeeping error, is never worse than
+// "looks unbooked" — it simply becomes eligible for the grace-period rule
+// like a genuinely unbooked one would).
+export const getErrandBookingCount = (data: any): number =>
+  Math.max(0, Number(data?.bookingCount) || 0);
+
 // FeedItem version — used by Home to re-filter already-loaded items on a
 // periodic tick (pull-to-refresh / focus / once a minute) without needing a
 // new Firestore snapshot. Weekly items expire only once every one of their
@@ -163,6 +216,15 @@ export const isRideExpired = (
         isDateTimeExpired(day.date, day.time, now),
       )
     );
+  }
+
+  // Errand: the 5-minute no-booking grace period (see
+  // isErrandHiddenFromSearch above) — item.bookingCount was captured at the
+  // last Firestore snapshot, so this stays correct between snapshots too
+  // (only real new/cancelled bookings change it, which always re-fires the
+  // snapshot listener anyway).
+  if (item.category === "errand") {
+    return isErrandHiddenFromSearch(item.date, item.startTime, item.bookingCount, now);
   }
 
   return isDateTimeExpired(item.date, item.time || item.startTime, now);
@@ -255,6 +317,7 @@ const normalizeDriverRouteItem = (id: string, data: any): FeedItem | null => {
     isWeekly,
     availableWeeklyDays,
 
+    bookingCount: 0,
     createdAtSeconds: data.createdAt?.seconds || 0,
 
     raw: { id, ...data },
@@ -319,6 +382,7 @@ const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
     isWeekly: false,
     availableWeeklyDays: [],
 
+    bookingCount: 0,
     createdAtSeconds: data.createdAt?.seconds || 0,
 
     raw: {
@@ -344,10 +408,14 @@ const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
   };
 };
 
-const normalizeErrandJobItem = (id: string, data: any): FeedItem | null => {
+const normalizeErrandJobItem = (
+  id: string,
+  data: any,
+  bookingCount: number,
+): FeedItem | null => {
   if (data.deletedForDriver === true) return null;
   if (data.status === "completed" || data.status === "cancelled") return null;
-  if (isDateTimeExpired(data.date, data.startTime)) return null;
+  if (isErrandHiddenFromSearch(data.date, data.startTime, bookingCount)) return null;
 
   return {
     id,
@@ -393,6 +461,7 @@ const normalizeErrandJobItem = (id: string, data: any): FeedItem | null => {
     isWeekly: false,
     availableWeeklyDays: [],
 
+    bookingCount,
     createdAtSeconds: data.createdAt?.seconds || 0,
 
     raw: {
@@ -479,6 +548,7 @@ const normalizeSchoolTripItem = (id: string, data: any): FeedItem | null => {
     isWeekly: false,
     availableWeeklyDays: [],
 
+    bookingCount: 0,
     createdAtSeconds: data.createdAt?.seconds || 0,
 
     // trip-confirm.tsx only needs the tripId — everything else it reads
@@ -667,7 +737,10 @@ export const subscribeHomeFeed = (
     collection(db, "errandJobs"),
     async (snap) => {
       const items = snap.docs
-        .map((d) => normalizeErrandJobItem(d.id, d.data()))
+        .map((d) => {
+          const data = d.data();
+          return normalizeErrandJobItem(d.id, data, getErrandBookingCount(data));
+        })
         .filter((item): item is FeedItem => !!item);
 
       errandItems = await attachRatings(items);

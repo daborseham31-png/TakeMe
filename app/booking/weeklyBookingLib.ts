@@ -33,7 +33,7 @@ import {
   normalizeTime,
   parseDateInput,
 } from "../driver/create/driverHelpers";
-import { GeoPoint, notify } from "./work-errand/workErrandLib";
+import { notify } from "./work-errand/workErrandLib";
 
 // ---------------------------------------------------------------------------
 // Day keys
@@ -592,9 +592,6 @@ export type CreateWeeklyBookingsInput = {
   // The exact place within the destination city (optional, Personal Ride
   // only) — informational for the driver, never used for matching.
   destinationDetails?: string;
-  // "Use my current location" on the passenger booking form — optional,
-  // same GeoPoint shape used by the quick-booking path.
-  pickup?: GeoPoint | null;
 
   selectedDays: WeeklyDriverDay[];
   payment: WeeklyPayment;
@@ -635,17 +632,6 @@ export const createWeeklyBookings = async (
   const bookingGroupId = generateBookingGroupId();
   const routeRef = doc(db, "driverRoutes", input.routeId);
   const bookingRefs = input.selectedDays.map(() => doc(collection(db, "bookings")));
-
-  const cleanPickup =
-    input.pickup &&
-    typeof input.pickup.latitude === "number" &&
-    typeof input.pickup.longitude === "number"
-      ? {
-          latitude: input.pickup.latitude,
-          longitude: input.pickup.longitude,
-          address: input.pickup.address || "",
-        }
-      : null;
 
   const paymentFields =
     input.payment.method === "cash"
@@ -766,24 +752,6 @@ export const createWeeklyBookings = async (
         to: input.to || "",
         schoolName: input.schoolName || null,
         destinationDetails: input.destinationDetails || null,
-
-        // Same shape/fields as the quick-booking path (ride-payment.tsx).
-        // Never defaulted to `from`/`to` (the matching fields) — when no GPS
-        // pickup was captured on the form, these simply stay null and
-        // driver navigation falls back to the manual From address itself.
-        // The same pickup point (if any) is reused for every selected day —
-        // it is not re-detected or altered per day.
-        pickup: cleanPickup,
-        pickupCoords: cleanPickup
-          ? { latitude: cleanPickup.latitude, longitude: cleanPickup.longitude }
-          : null,
-        passengerPickupLocation: cleanPickup,
-        pickupAddress: cleanPickup?.address || null,
-        pickupLatitude: cleanPickup?.latitude ?? null,
-        pickupLongitude: cleanPickup?.longitude ?? null,
-        pickupLocation: cleanPickup
-          ? { latitude: cleanPickup.latitude, longitude: cleanPickup.longitude }
-          : null,
 
         dayKey: day.dayKey,
         dayName: day.dayName,

@@ -211,11 +211,14 @@ export function TimeInput({
     <>
       <PhysicalDirectionalBlockText style={styles.label}>{label}</PhysicalDirectionalBlockText>
 
-      <Pressable onPress={() => setShowPicker(true)}>
+      <Pressable style={{ width: "100%" }} onPress={() => setShowPicker(true)}>
         <DirectionalRow style={styles.inputRow}>
           <Ionicons name="time-outline" size={18} color="#8B7B6B" />
 
-          <Text style={[styles.rowInput, styles.ltrText, !value && { color: "#8B7B6B" }]}>
+          <Text
+            style={[styles.rowInput, styles.ltrText, !value && { color: "#8B7B6B" }]}
+            numberOfLines={1}
+          >
             {value || `${t("common.select")} ${label}`}
           </Text>
         </DirectionalRow>

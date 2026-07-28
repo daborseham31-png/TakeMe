@@ -3,17 +3,29 @@ import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import * as Clipboard from "expo-clipboard";
 import { Tabs } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  query,
+  QueryDocumentSnapshot,
+  where,
+} from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth, db } from "../../firebase";
-import { RIDE_CATEGORY } from "../booking/rideBookingLib";
+import { normalizeBooking } from "../booking/bookingsLib";
+import { normalizeRideBooking, RIDE_CATEGORY } from "../booking/rideBookingLib";
 import { stopDriverLocationTracking } from "../driverLocationTask";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { positionEnd } from "../i18n/rtl";
+import {
+  capturePassengerLocationOnce,
+  startPassengerLocationTracking,
+  stopPassengerLocationTracking,
+} from "../passengerLocationTask";
 import { registerForPushNotificationsAsync } from "../pushNotifications";
 
 const RIDE_LIKE_CATEGORIES = [RIDE_CATEGORY, "school"];
@@ -43,13 +55,49 @@ const driverNeedsAttention = (data: any) => {
   return data.status !== "completed" && data.tripStatus !== "completed";
 };
 
-// Small green dot shown over the My Bookings tab icon while the passenger has an
-// active (unfinished) personal-ride booking.
+// Which single booking (if any) the signed-in passenger should be sharing
+// their live location for right now — a personal-ride/legacy-school
+// booking that's still waiting for the driver to arrive. Deliberately the
+// SAME "booked"/on-the-way window as before (see git history on
+// app/(tabs)/bookings.tsx): stops being eligible the moment the driver
+// arrives, the trip starts, it's cancelled, or completed. Reused against
+// the passenger's own `bookings` snapshot that this layout already
+// subscribes to for the tab badge, instead of opening a second listener.
+const findActivePassengerLocationTarget = (
+  docs: QueryDocumentSnapshot[],
+  uid: string,
+): { targetId: string; passengerId: string; driverId: string } | null => {
+  const activeRide = docs
+    .filter((d) => d.data().category === RIDE_CATEGORY)
+    .map((d) => normalizeRideBooking(d.id, d.data()))
+    .find((r) => r.status === "booked" || r.status === "on_the_way");
+
+  const schoolDoc = activeRide
+    ? null
+    : docs.find((d) => {
+        const data = d.data();
+        return (
+          data.category === "school" &&
+          data.status === "ongoing" &&
+          (data.tripStatus === "booked" || data.tripStatus === "driver_on_way")
+        );
+      });
+
+  const activeSchoolBooking = schoolDoc ? normalizeBooking(schoolDoc.id, schoolDoc.data()) : null;
+
+  const active = activeRide || activeSchoolBooking || null;
+
+  if (!active || !active.driverId) return null;
+
+  return { targetId: active.id, passengerId: uid, driverId: active.driverId };
+};
+
+// My Bookings tab icon — deliberately no green "active ride" dot anymore
+// (removed per request); `hasActive`/`isRTL` stay accepted so the caller
+// doesn't need changing, they're just no longer drawn.
 function BookingsTabIcon({
   color,
   size,
-  hasActive,
-  isRTL,
 }: {
   color: string;
   size: number;
@@ -59,21 +107,6 @@ function BookingsTabIcon({
   return (
     <View>
       <Ionicons name="car" size={size} color={color} />
-      {hasActive ? (
-        <View
-          style={{
-            position: "absolute",
-            top: -2,
-            ...positionEnd(-3, isRTL),
-            width: 11,
-            height: 11,
-            borderRadius: 6,
-            backgroundColor: "#22C55E",
-            borderWidth: 1.5,
-            borderColor: "#FFFFFF",
-          }}
-        />
-      ) : null}
     </View>
   );
 }
@@ -226,6 +259,14 @@ export default function TabLayout() {
   const pairingInProgressRef = useRef(false);
   const lastPairingClipboardRef = useRef("");
 
+  // Which booking's location this device is currently sharing for, if any
+  // — lets the effect below start/stop tracking only when this actually
+  // changes, instead of re-issuing a capture+start on every single snapshot
+  // tick (foregroundLocationTracker.ts's own start() already de-dupes a
+  // repeat call for the SAME target, but capturePassengerLocationOnce is
+  // not idempotent — it always takes a fresh GPS fix).
+  const activePassengerTargetRef = useRef<string | null>(null);
+
   useEffect(() => {
     languageRef.current = language;
   }, [language]);
@@ -321,9 +362,29 @@ export default function TabLayout() {
 
   // Live listeners: passenger side stays lit until the trip is rated;
   // driver side stays lit until the driver presses Finish Trip.
+  //
+  // This is ALSO where the passenger's own live-location sharing
+  // (passengerLocationTask.ts) is started and stopped — deliberately here,
+  // in the tab layout, rather than on the My Bookings screen. That screen
+  // unmounts every time the passenger switches to Home/Messages/Profile,
+  // which used to kill sharing mid-trip even though the driver was still
+  // on the way; this layout stays mounted for as long as the passenger is
+  // signed in and inside the (tabs) group, so it can depend on "the app is
+  // open and the booking is still active" instead of "one particular
+  // screen happens to be open". Tracking stops the moment: the driver
+  // arrives / the trip starts / the booking is cancelled or completed (all
+  // of these simply make findActivePassengerLocationTarget stop returning
+  // a target on the next snapshot), the signed-in user changes (handled
+  // explicitly below), or foreground permission is no longer granted
+  // (foregroundLocationTracker.ts's own start() no-ops in that case).
   useEffect(() => {
     let unsubPassenger: (() => void) | null = null;
     let unsubDriver: (() => void) | null = null;
+
+    const stopPassengerSharing = () => {
+      activePassengerTargetRef.current = null;
+      stopPassengerLocationTracking().catch(() => {});
+    };
 
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       unsubPassenger?.();
@@ -338,6 +399,10 @@ export default function TabLayout() {
         // app/driverLocationTask.ts (this is the one central place every
         // auth-loss path in the app already passes through).
         stopDriverLocationTracking();
+        // Same reasoning, passenger side — a different signed-in user (or
+        // no user) must never keep sharing the previous passenger's
+        // location.
+        stopPassengerSharing();
         return;
       }
 
@@ -351,8 +416,30 @@ export default function TabLayout() {
           setHasPassengerAttention(
             snap.docs.some((d) => passengerNeedsAttention(d.data())),
           );
+
+          const target = findActivePassengerLocationTarget(snap.docs, user.uid);
+
+          if (!target) {
+            if (activePassengerTargetRef.current) stopPassengerSharing();
+            return;
+          }
+
+          if (activePassengerTargetRef.current === target.targetId) return;
+          activePassengerTargetRef.current = target.targetId;
+
+          (async () => {
+            try {
+              await capturePassengerLocationOnce(target);
+              await startPassengerLocationTracking(target);
+            } catch (error) {
+              console.log("(tabs)/_layout: failed to start passenger location sharing", error);
+            }
+          })();
         },
-        () => setHasPassengerAttention(false),
+        () => {
+          setHasPassengerAttention(false);
+          stopPassengerSharing();
+        },
       );
 
       unsubDriver = onSnapshot(
@@ -370,6 +457,9 @@ export default function TabLayout() {
       unsubPassenger?.();
       unsubDriver?.();
       unsubAuth();
+      // Leaving the (tabs) group entirely (e.g. signing out) — nothing
+      // left mounted that's still watching for a reason to keep sharing.
+      stopPassengerSharing();
     };
   }, []);
 

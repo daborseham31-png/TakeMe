@@ -4,6 +4,7 @@ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,6 +29,7 @@ import { translateCategoryLabel } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { backIconName } from "../../i18n/rtl";
 import AutocompleteTextField from "../../components/AutocompleteTextField";
+import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { fetchDriverEligibility } from "../driverEligibility";
 import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
@@ -62,6 +64,12 @@ type Props = {
   // skips this form's internal repeat-toggle and always shows the weekly
   // days card, never the one-time date/time/price/seats fields.
   forceRecurring?: boolean;
+  // Embedded mode only: renders the embedding screen's own title/subtitle
+  // (centered) at the top of THIS form's card, above the category badge,
+  // instead of the embedding screen showing them in a separate card of its
+  // own above the mode selector — see app/driver/create/school.tsx.
+  headerTitle?: string;
+  headerSubtitle?: string;
 };
 
 export default function RideForm({
@@ -70,6 +78,8 @@ export default function RideForm({
   onBack,
   embedded,
   forceRecurring,
+  headerTitle,
+  headerSubtitle,
 }: Props) {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
@@ -394,11 +404,18 @@ export default function RideForm({
 
   const content = (
     <>
-      {/* Standalone (non-embedded) mode renders the badge in the same row
-          as the back button instead — see the two returns below. */}
-      {embedded ? <View style={categoryStyles.embeddedBadgeWrap}>{categoryBadge}</View> : null}
-
       <View style={styles.card}>
+      {embedded && headerTitle ? (
+        <>
+          <Text style={[styles.title, categoryStyles.smallerTitle]}>
+            {headerTitle}
+          </Text>
+          {headerSubtitle ? (
+            <Text style={styles.subtitle}>{headerSubtitle}</Text>
+          ) : null}
+        </>
+      ) : null}
+
       {!embedded ? (
         <>
           <Text style={[styles.title, categoryStyles.smallerTitle]}>
@@ -577,34 +594,40 @@ export default function RideForm({
 
   if (embedded) {
     return (
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 8 }}
-        keyboardShouldPersistTaps="handled"
-      >
-        {content}
-      </ScrollView>
+      <KeyboardAvoidingWrapper>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: 8 }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          {content}
+        </ScrollView>
+      </KeyboardAvoidingWrapper>
     );
   }
 
   return (
     <DirectionalScreen style={styles.page}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={categoryStyles.topRow}>
-          <Pressable
-            style={styles.backButton}
-            onPress={() => (onBack ? onBack() : router.back())}
-          >
-            <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
-          </Pressable>
+      <KeyboardAvoidingWrapper>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          <View style={categoryStyles.topRow}>
+            <Pressable
+              style={styles.backButton}
+              onPress={() => (onBack ? onBack() : router.back())}
+            >
+              <Ionicons name={backIconName(isRTL)} size={24} color="#7C5F46" />
+            </Pressable>
 
-          {categoryBadge}
-        </View>
+            {categoryBadge}
+          </View>
 
-        {content}
-      </ScrollView>
+          {content}
+        </ScrollView>
+      </KeyboardAvoidingWrapper>
     </DirectionalScreen>
   );
 }
@@ -614,9 +637,6 @@ const categoryStyles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    marginBottom: 12,
-  },
-  embeddedBadgeWrap: {
     marginBottom: 12,
   },
   categoryBadge: {

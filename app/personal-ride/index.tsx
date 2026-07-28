@@ -11,10 +11,8 @@ import {
   View,
 } from "react-native";
 
-import CurrentLocationButton, {
-  CurrentLocationResult,
-} from "../booking/CurrentLocationButton";
 import IsraelLocationAutocomplete from "../booking/IsraelLocationAutocomplete";
+import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { IsraelLocation } from "../booking/israelLocations";
 import { validateWeeklyRows, WeekDayRow } from "../booking/weeklyBookingLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
@@ -112,15 +110,6 @@ export default function PersonalRideScreen() {
   // payment/confirmation screen and saved on the booking.
   const [destinationDetails, setDestinationDetails] = useState("");
 
-  // Separate "pickup location for driver navigation" — an exact GPS point
-  // (+ readable address) used ONLY so the driver can navigate to the
-  // passenger. Never sent to driver matching, never written into `from`.
-  const [navAddress, setNavAddress] = useState("");
-  const [navCoords, setNavCoords] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
-
   const [tripDate, setTripDate] = useState(getTodayDate());
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
 
@@ -153,11 +142,6 @@ export default function PersonalRideScreen() {
     if (!nextValue) {
       setWeeklyRows([]);
     }
-  };
-
-  const handleUseCurrentLocation = (result: CurrentLocationResult) => {
-    setNavAddress(result.address);
-    setNavCoords({ latitude: result.latitude, longitude: result.longitude });
   };
 
   const decreaseSeats = () => {
@@ -212,15 +196,6 @@ export default function PersonalRideScreen() {
       // the driver, never used for matching.
       ...(destinationDetails.trim()
         ? { destinationDetails: destinationDetails.trim() }
-        : {}),
-      // Separate navigation-only pickup point (optional) — passed through
-      // untouched to ride-payment/the booking doc, never used for matching.
-      ...(navCoords
-        ? {
-            pickupLatitude: String(navCoords.latitude),
-            pickupLongitude: String(navCoords.longitude),
-            pickupAddress: navAddress,
-          }
         : {}),
     };
 
@@ -307,6 +282,7 @@ export default function PersonalRideScreen() {
 
   return (
     <DirectionalScreen style={styles.page}>
+      <KeyboardAvoidingWrapper>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -374,26 +350,6 @@ export default function PersonalRideScreen() {
             />
           </View>
 
-          <View style={styles.navPickupBox}>
-            <PhysicalDirectionalBlockText style={styles.label}>
-              {t("booking.pickupLocationForDriverNav")}
-            </PhysicalDirectionalBlockText>
-            <PhysicalDirectionalBlockText style={styles.navPickupHint}>
-              {t("booking.pickupOptionalHint")}
-            </PhysicalDirectionalBlockText>
-
-            <CurrentLocationButton onLocated={handleUseCurrentLocation} />
-
-            {navAddress ? (
-              <View style={styles.navPickupResult}>
-                <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
-                <PhysicalDirectionalBlockText style={styles.navPickupSavedText}>
-                  {t("booking.locationSaved")}
-                </PhysicalDirectionalBlockText>
-              </View>
-            ) : null}
-          </View>
-
           {!weeklyBooking && (
             <>
               <DateInput
@@ -440,7 +396,7 @@ export default function PersonalRideScreen() {
             <Ionicons
               name={weeklyBooking ? "checkbox" : "square-outline"}
               size={20}
-              color={weeklyBooking ? "#F58220" : "#8B7B6B"}
+              color={weeklyBooking ? "#EC4899" : "#8B7B6B"}
             />
             <Ionicons name="calendar-outline" size={16} color="#7C5F46" />
             <Text style={styles.weeklyText}>{t("booking.bookForWholeWeek")}</Text>
@@ -460,7 +416,7 @@ export default function PersonalRideScreen() {
 
         <View style={styles.card}>
           <View style={styles.prefTitleRow}>
-            <Ionicons name="person-outline" size={18} color="#F58220" />
+            <Ionicons name="person-outline" size={18} color="#EC4899" />
             <Text style={styles.sectionTitle}>{t("booking.driverPreferences")}</Text>
           </View>
 
@@ -555,6 +511,7 @@ export default function PersonalRideScreen() {
           <Text style={styles.searchText}>{t("booking.searchDrivers")}</Text>
         </Pressable>
       </ScrollView>
+      </KeyboardAvoidingWrapper>
     </DirectionalScreen>
   );
 }
@@ -642,37 +599,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     color: "#111827",
   },
-  navPickupBox: {
-    marginTop: 14,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: "#F0E5DC",
-  },
-  navPickupHint: {
-    fontSize: 12,
-    color: "#7C5F46",
-    marginTop: -4,
-    marginBottom: 4,
-  },
-  navPickupResult: {
-    marginTop: 10,
-    backgroundColor: "#F1FBF4",
-    borderWidth: 1,
-    borderColor: "#BBE7C6",
-    borderRadius: 10,
-    padding: 10,
-  },
-  navPickupResultText: {
-    color: "#111827",
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  navPickupSavedText: {
-    color: "#166534",
-    fontWeight: "900",
-    fontSize: 12,
-    marginTop: 2,
-  },
   seatsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -731,8 +657,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   optionButtonActive: {
-    backgroundColor: "#F58220",
-    borderColor: "#F58220",
+    backgroundColor: "#EC4899",
+    borderColor: "#EC4899",
   },
   optionText: {
     fontWeight: "800",
@@ -756,8 +682,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   languageButtonActive: {
-    backgroundColor: "#F58220",
-    borderColor: "#F58220",
+    backgroundColor: "#EC4899",
+    borderColor: "#EC4899",
   },
   languageText: {
     color: "#7C5F46",
@@ -767,7 +693,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   searchButton: {
-    backgroundColor: "#F58220",
+    backgroundColor: "#EC4899",
     borderRadius: 12,
     padding: 16,
     flexDirection: "row",

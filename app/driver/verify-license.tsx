@@ -17,6 +17,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
+import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { ltrContentStyle } from "../i18n/rtl";
@@ -208,7 +209,11 @@ export default function VerifyLicenseScreen() {
 
   return (
     <DirectionalScreen style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <KeyboardAvoidingWrapper>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
         </Pressable>
@@ -350,6 +355,7 @@ export default function VerifyLicenseScreen() {
           </Pressable>
         </View>
       </ScrollView>
+      </KeyboardAvoidingWrapper>
     </DirectionalScreen>
   );
 }

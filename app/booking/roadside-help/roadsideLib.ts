@@ -43,6 +43,7 @@ import {
 
 import { auth, db } from "../../../firebase";
 import i18n from "../../i18n";
+import { getDriverSuspensionBlockedReason } from "../driverViolationsLib";
 import { notify } from "../work-errand/workErrandLib";
 
 export type LatLng = { latitude: number; longitude: number };
@@ -367,6 +368,12 @@ export const sendDriverOffer = async (input: SendOfferInput) => {
   const user = auth.currentUser;
   if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
 
+  // A suspended driver may not send/accept Roadside Help offers — same
+  // cancellation-standing check every other "creates/accepts driver work"
+  // action in this app already runs (see driverViolationsLib.ts).
+  const suspended = await getDriverSuspensionBlockedReason(user.uid);
+  if (suspended) throw new Error(suspended);
+
   let driverName = user.displayName || "Driver";
   let driverGender = "";
   let driverPhone = "";
@@ -471,9 +478,16 @@ export type AcceptableOffer = {
 // The sibling offer ids are looked up with a plain query first (Firestore
 // transactions can't run queries), then every actual read/write for those
 // specific doc refs happens inside the transaction.
+//
+// `paymentMethod` is chosen by the passenger in the accept-offer
+// confirmation modal (see waiting.tsx) and is written here, once, alongside
+// the acceptance itself — firestore.rules then freezes selectedDriverId,
+// agreedPrice, and paymentMethod together so none of the three can be
+// changed by a later client write.
 export const acceptOffer = async (
   requestId: string,
   offer: AcceptableOffer,
+  paymentMethod: RoadsidePaymentMethod,
 ): Promise<string> => {
   const user = auth.currentUser;
   if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
@@ -533,7 +547,7 @@ export const acceptOffer = async (
       "Roadside Help";
 
     transaction.update(reqRef, {
-      status: "accepted",
+      status: "helper_assigned",
       selectedOfferId: offer.id,
       selectedDriverId: offer.driverId,
       selectedDriverName: offer.driverName || "Driver",
@@ -548,7 +562,8 @@ export const acceptOffer = async (
       agreedPrice: price,
       etaMinutes,
       estimatedArrivalMinutes: etaMinutes,
-      paymentStatus: "not_due",
+      paymentMethod,
+      paymentStatus: "selected",
       bookingId: bookingRef.id,
       acceptedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -578,10 +593,12 @@ export const acceptOffer = async (
 
       status: "ongoing",
       tripStatus: "booked",
+      trackingEnabled: false,
       roleType: "roadside_accepted",
       requestId,
       offerId: offer.id,
-      paymentStatus: "not_due",
+      paymentMethod,
+      paymentStatus: "selected",
       helpCompleted: false,
 
       createdAt: serverTimestamp(),
@@ -623,26 +640,78 @@ export const rejectOffer = async (offerId: string) => {
 // which screen the driver is on.
 // ---------------------------------------------------------------------------
 
+// Request-level status vocabulary (the passenger/helper-facing stage
+// machine — kept deliberately separate from the `bookings` doc's own
+// ride-compatible `tripStatus`, which exists purely so this feature can
+// reuse the SAME live-tracking screen / cancellation-eligibility logic
+// every other category already uses; see acceptOffer/startDriving/etc.
+// below, which always write both in the same transaction).
+export type RoadsideRequestStatus =
+  | "open"
+  | "helper_assigned"
+  | "helper_on_way"
+  | "arrived"
+  | "in_progress"
+  | "completion_pending"
+  | "completed"
+  | "cancelled";
+
+// Older documents (written before this stage machine existed) used a
+// smaller vocabulary — mapped forward so an in-flight request from before
+// this change still renders sensibly instead of falling through to "open".
+const LEGACY_STATUS_MAP: Record<string, RoadsideRequestStatus> = {
+  pending: "open",
+  accepted: "helper_assigned",
+  driver_on_the_way: "helper_on_way",
+  completed_paid: "completed",
+};
+
+const normalizeRequestStatus = (value: any): RoadsideRequestStatus => {
+  if (
+    value === "open" ||
+    value === "helper_assigned" ||
+    value === "helper_on_way" ||
+    value === "arrived" ||
+    value === "in_progress" ||
+    value === "completion_pending" ||
+    value === "completed" ||
+    value === "cancelled"
+  ) {
+    return value;
+  }
+
+  return LEGACY_STATUS_MAP[value] || "open";
+};
+
+export type RoadsidePaymentMethod = "cash" | "bit";
+
 export type RoadsideRequestRecord = {
   id: string; // requestId
   bookingId: string;
   selectedOfferId: string;
+  selectedDriverId: string;
   passengerId: string;
   passengerName: string;
   passengerPhone: string;
   serviceType: string;
   problemTypes: string[];
+  description: string;
   address: string;
   latitude: number | null;
   longitude: number | null;
   agreedPrice: number | null;
   estimatedArrivalMinutes: number | null;
-  // "accepted" | "driver_on_the_way" | "completed" | "completed_paid"
-  status: string;
-  // "not_due" | "pending" | "paid"
+  status: RoadsideRequestStatus;
+  // Chosen once at acceptance, never changed afterward.
+  paymentMethod: RoadsidePaymentMethod | null;
+  // "not_due" | "selected" | "pending" | "paid" | "failed"
   paymentStatus: string;
   helpCompleted: boolean;
   paidAmount: number | null;
+  // Used only for sort ordering (Help Requests / My Bookings) — "most
+  // recent activity first" within a stage group. Never displayed raw.
+  updatedAtSeconds: number;
+  createdAtSeconds: number;
 };
 
 export const normalizeRoadsideRequest = (
@@ -652,6 +721,7 @@ export const normalizeRoadsideRequest = (
   id,
   bookingId: data.bookingId || "",
   selectedOfferId: data.selectedOfferId || "",
+  selectedDriverId: data.selectedDriverId || "",
   passengerId: data.passengerId || "",
   passengerName: data.passengerName || "Passenger",
   passengerPhone: data.passengerPhone || "",
@@ -660,6 +730,7 @@ export const normalizeRoadsideRequest = (
     (Array.isArray(data.problemTypes) ? data.problemTypes.join(", ") : "") ||
     "Roadside Help",
   problemTypes: Array.isArray(data.problemTypes) ? data.problemTypes : [],
+  description: data.description || "",
   address: data.address || data.location?.address || "",
   latitude:
     typeof data.latitude === "number"
@@ -676,67 +747,228 @@ export const normalizeRoadsideRequest = (
       : typeof data.etaMinutes === "number"
         ? data.etaMinutes
         : null,
-  status: data.status || "pending",
+  status: normalizeRequestStatus(data.status),
+  paymentMethod: data.paymentMethod === "cash" || data.paymentMethod === "bit" ? data.paymentMethod : null,
   paymentStatus: data.paymentStatus || "not_due",
   helpCompleted: data.helpCompleted === true,
   paidAmount: typeof data.paidAmount === "number" ? data.paidAmount : null,
+  updatedAtSeconds: data.updatedAt?.seconds || 0,
+  createdAtSeconds: data.createdAt?.seconds || 0,
 });
 
 // ---------------------------------------------------------------------------
-// Driver: "Go help passenger" — opens turn-by-turn directions and (best
-// effort) tells the passenger the driver is on the way.
+// Driver's OWN sent offers (roadsideOffers where driverId == me) — the
+// Help Requests screen merges this alongside RoadsideRequestRecord above so
+// the "Offer Sent" stage can show the price/ETA the driver actually
+// offered, and so a sibling offer that lost to another driver
+// ("not_selected") can be told apart from one still awaiting a response.
 // ---------------------------------------------------------------------------
 
-export const markDriverOnTheWay = async (params: {
-  bookingId: string;
+export type MyOfferRecord = {
+  id: string;
   requestId: string;
-}) => {
+  offeredPrice: number | null;
+  estimatedArrivalMinutes: number | null;
+  // "pending" | "accepted" | "not_selected" | "completed"
+  status: string;
+  updatedAtSeconds: number;
+  createdAtSeconds: number;
+};
+
+export const normalizeMyOffer = (id: string, data: any): MyOfferRecord => ({
+  id,
+  requestId: data.requestId || "",
+  offeredPrice: typeof data.offeredPrice === "number" ? data.offeredPrice : null,
+  estimatedArrivalMinutes:
+    typeof data.estimatedArrivalMinutes === "number" ? data.estimatedArrivalMinutes : null,
+  status: data.status || "pending",
+  updatedAtSeconds: data.updatedAt?.seconds || 0,
+  createdAtSeconds: data.createdAt?.seconds || 0,
+});
+
+// ---------------------------------------------------------------------------
+// Helper stage machine — Start Driving -> I've Arrived -> Start Help ->
+// Finish Help -> (customer) Confirm Completion -> (cash only) Confirm Cash
+// Received. Every step here writes BOTH `roadsideRequests` (the
+// request-level RoadsideRequestStatus vocabulary) and `bookings`
+// (tripStatus, in the SAME ride-compatible vocabulary live-tracking.tsx and
+// cancelGeneralBooking's cancel-eligibility check already understand) in one
+// transaction, re-validating the accepted helper's identity and the current
+// status against the server's own copy every time — never the caller's
+// possibly-stale in-memory copy.
+// ---------------------------------------------------------------------------
+
+type StageParams = { bookingId: string; requestId: string };
+
+// Driver: "Start Driving" — begins the trip toward the passenger. The
+// caller (RoadsideAcceptedCard) starts the actual `watchPositionAsync`
+// foreground tracking right after this resolves; only the Firestore status
+// transition + notification happen here.
+export const startDriving = async ({ bookingId, requestId }: StageParams) => {
   const user = auth.currentUser;
   if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
 
-  const reqRef = doc(db, "roadsideRequests", params.requestId);
-  const reqSnap = await getDoc(reqRef);
+  const reqRef = doc(db, "roadsideRequests", requestId);
+  const bookingRef = doc(db, "bookings", bookingId);
+  let passengerId = "";
+  let driverName = "The helper";
 
-  if (!reqSnap.exists()) throw new Error(i18n.t("roadsideHelp.requestNoLongerExists"));
+  await runTransaction(db, async (transaction) => {
+    const reqSnap = await transaction.get(reqRef);
+    if (!reqSnap.exists()) throw new Error(i18n.t("roadsideHelp.requestNoLongerExists"));
 
-  const req: any = reqSnap.data();
+    const req: any = reqSnap.data();
+    if (req.selectedDriverId !== user.uid) {
+      throw new Error(i18n.t("roadsideHelp.onlyAcceptedDriverCanDoThis"));
+    }
+    if (req.status !== "helper_assigned") {
+      throw new Error(i18n.t("roadsideHelp.actionNotAvailableNow"));
+    }
 
-  if (req.selectedDriverId !== user.uid) {
-    throw new Error(i18n.t("roadsideHelp.onlyAcceptedDriverCanDoThis"));
-  }
+    passengerId = req.passengerId || "";
+    driverName = req.selectedDriverName || driverName;
 
-  const driverName = req.selectedDriverName || "The driver";
+    transaction.update(reqRef, {
+      status: "helper_on_way",
+      driverOnTheWayAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
 
-  await updateDoc(reqRef, {
-    status: "driver_on_the_way",
-    driverOnTheWayAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    transaction.update(bookingRef, {
+      tripStatus: "driver_on_way",
+      trackingEnabled: true,
+      updatedAt: serverTimestamp(),
+    });
   });
 
-  if (req.passengerId) {
+  if (passengerId) {
     await notify({
-      receiverId: req.passengerId,
+      receiverId: passengerId,
       senderId: user.uid,
       type: "roadside_driver_on_way",
-      title: "Driver is on the way",
-      message: `${driverName} is on the way to help you.`,
+      title: i18n.t("roadsideHelp.helperOnTheWayNotifTitle"),
+      message: i18n.t("roadsideHelp.helperOnTheWayNotifMessage", { name: driverName }),
       category: "roadside",
-      requestId: params.requestId,
-      bookingId: params.bookingId,
+      requestId,
+      bookingId,
       driverId: user.uid,
       targetTab: "passenger",
     });
   }
 };
 
-// ---------------------------------------------------------------------------
-// Driver: mark an accepted roadside help as completed ("Finished Help").
-//
-// Sets status "completed" on the request, offer and booking, opens the
-// passenger's payment gate, and notifies them to pay. Guarded so the same
-// help can never be completed twice.
-// ---------------------------------------------------------------------------
+// Driver: "I've Arrived" — stops live tracking (caller-side) and notifies
+// the passenger. The final location fix stays in `tripLocations` untouched
+// (only the watcher itself is removed), so the passenger's map keeps
+// showing exactly where the helper stopped.
+export const markHelperArrived = async ({ bookingId, requestId }: StageParams) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
 
+  const reqRef = doc(db, "roadsideRequests", requestId);
+  const bookingRef = doc(db, "bookings", bookingId);
+  let passengerId = "";
+  let driverName = "The helper";
+
+  await runTransaction(db, async (transaction) => {
+    const reqSnap = await transaction.get(reqRef);
+    if (!reqSnap.exists()) throw new Error(i18n.t("roadsideHelp.requestNoLongerExists"));
+
+    const req: any = reqSnap.data();
+    if (req.selectedDriverId !== user.uid) {
+      throw new Error(i18n.t("roadsideHelp.onlyAcceptedDriverCanDoThis"));
+    }
+    if (req.status !== "helper_on_way") {
+      throw new Error(i18n.t("roadsideHelp.actionNotAvailableNow"));
+    }
+
+    passengerId = req.passengerId || "";
+    driverName = req.selectedDriverName || driverName;
+
+    transaction.update(reqRef, {
+      status: "arrived",
+      arrivedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    transaction.update(bookingRef, {
+      tripStatus: "arrived_pickup",
+      trackingEnabled: false,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  if (passengerId) {
+    await notify({
+      receiverId: passengerId,
+      senderId: user.uid,
+      type: "roadside_helper_arrived",
+      title: i18n.t("roadsideHelp.helperArrivedNotifTitle"),
+      message: i18n.t("roadsideHelp.helperArrivedNotifMessage", { name: driverName }),
+      category: "roadside",
+      requestId,
+      bookingId,
+      driverId: user.uid,
+      targetTab: "passenger",
+    });
+  }
+};
+
+// Driver: "Start Help" — the helper is now actively working on the problem.
+export const startHelp = async ({ bookingId, requestId }: StageParams) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
+
+  const reqRef = doc(db, "roadsideRequests", requestId);
+  const bookingRef = doc(db, "bookings", bookingId);
+  let passengerId = "";
+
+  await runTransaction(db, async (transaction) => {
+    const reqSnap = await transaction.get(reqRef);
+    if (!reqSnap.exists()) throw new Error(i18n.t("roadsideHelp.requestNoLongerExists"));
+
+    const req: any = reqSnap.data();
+    if (req.selectedDriverId !== user.uid) {
+      throw new Error(i18n.t("roadsideHelp.onlyAcceptedDriverCanDoThis"));
+    }
+    if (req.status !== "arrived") {
+      throw new Error(i18n.t("roadsideHelp.actionNotAvailableNow"));
+    }
+
+    passengerId = req.passengerId || "";
+
+    transaction.update(reqRef, {
+      status: "in_progress",
+      helpStartedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    transaction.update(bookingRef, {
+      tripStatus: "in_progress",
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  if (passengerId) {
+    await notify({
+      receiverId: passengerId,
+      senderId: user.uid,
+      type: "roadside_help_in_progress",
+      title: i18n.t("roadsideHelp.helpInProgressNotifTitle"),
+      message: i18n.t("roadsideHelp.helpInProgressNotifMessage"),
+      category: "roadside",
+      requestId,
+      bookingId,
+      driverId: user.uid,
+      targetTab: "passenger",
+    });
+  }
+};
+
+// Driver: "Finish Help" — moves the request into completion_pending and
+// waits for the CUSTOMER to confirm the problem is actually resolved (see
+// confirmCompletion below) — the helper can never self-confirm completion.
+// Payment stays "selected" (not yet due) until that confirmation happens.
 export const finishRoadsideHelp = async (bookingId: string) => {
   const user = auth.currentUser;
   if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
@@ -744,43 +976,121 @@ export const finishRoadsideHelp = async (bookingId: string) => {
   const bookingRef = doc(db, "bookings", bookingId);
 
   let requestId = "";
-  let offerId = "";
   let passengerId = "";
-  let driverName = "The driver";
-  let agreedPrice: number | null = null;
+  let driverName = "The helper";
 
   await runTransaction(db, async (transaction) => {
     const bookingSnap = await transaction.get(bookingRef);
-
-    if (!bookingSnap.exists()) {
-      throw new Error(i18n.t("rides.bookingNotFound"));
-    }
+    if (!bookingSnap.exists()) throw new Error(i18n.t("rides.bookingNotFound"));
 
     const booking: any = bookingSnap.data();
-
     if (booking.driverId !== user.uid) {
       throw new Error(i18n.t("roadsideHelp.onlyAcceptedDriverCanFinish"));
     }
-
-    if (booking.helpCompleted === true || booking.status === "completed") {
-      throw new Error(i18n.t("roadsideHelp.helpAlreadyFinished"));
+    if (booking.tripStatus !== "in_progress") {
+      throw new Error(i18n.t("roadsideHelp.actionNotAvailableNow"));
     }
 
     requestId = booking.requestId || "";
-    offerId = booking.offerId || "";
     driverName = booking.driverName || driverName;
-    agreedPrice = typeof booking.price === "number" ? booking.price : null;
+    passengerId = booking.passengerId || "";
 
     const reqRef = doc(db, "roadsideRequests", requestId);
     const reqSnap = await transaction.get(reqRef);
-    const req: any = reqSnap.exists() ? reqSnap.data() : {};
-    passengerId = req.passengerId || booking.passengerId || "";
 
     if (reqSnap.exists()) {
+      const req: any = reqSnap.data();
+      if (req.selectedDriverId !== user.uid) {
+        throw new Error(i18n.t("roadsideHelp.onlyAcceptedDriverCanFinish"));
+      }
+      if (req.status !== "in_progress") {
+        throw new Error(i18n.t("roadsideHelp.actionNotAvailableNow"));
+      }
+
+      passengerId = req.passengerId || passengerId;
+
+      transaction.update(reqRef, {
+        status: "completion_pending",
+        finishedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    transaction.update(bookingRef, {
+      tripStatus: "completion_pending",
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  if (passengerId) {
+    await notify({
+      receiverId: passengerId,
+      senderId: user.uid,
+      type: "roadside_completion_pending",
+      title: i18n.t("roadsideHelp.completionPendingNotifTitle"),
+      message: i18n.t("roadsideHelp.completionPendingNotifMessage", { name: driverName }),
+      category: "roadside",
+      requestId,
+      bookingId,
+      driverId: user.uid,
+      targetTab: "passenger",
+    });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Customer: confirm the problem was actually resolved. This is the ONLY
+// path that reaches "completed" — the helper's own "Finish Help" only ever
+// reaches completion_pending (see finishRoadsideHelp above). Rating and
+// payment both unlock here, never before. paymentStatus becomes "pending"
+// (payment is now actually due) — separate from the service status, per
+// spec: cash is settled by the accepted helper's own confirmCashReceived
+// below, bit is never auto-marked paid by opening the Bit app (see
+// bitPayment.ts's own module note).
+// ---------------------------------------------------------------------------
+
+export const confirmCompletion = async (bookingId: string) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
+
+  const bookingRef = doc(db, "bookings", bookingId);
+
+  let requestId = "";
+  let driverId = "";
+  let passengerName = "The customer";
+
+  await runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+    if (!bookingSnap.exists()) throw new Error(i18n.t("rides.bookingNotFound"));
+
+    const booking: any = bookingSnap.data();
+    if (booking.passengerId !== user.uid) {
+      throw new Error(i18n.t("roadsideHelp.onlyPassengerCanConfirmCompletion"));
+    }
+    if (booking.tripStatus !== "completion_pending") {
+      throw new Error(i18n.t("roadsideHelp.helpNotReadyForConfirmation"));
+    }
+
+    requestId = booking.requestId || "";
+    driverId = booking.driverId || "";
+    passengerName = booking.passengerName || passengerName;
+
+    const reqRef = doc(db, "roadsideRequests", requestId);
+    const reqSnap = await transaction.get(reqRef);
+
+    if (reqSnap.exists()) {
+      const req: any = reqSnap.data();
+      if (req.passengerId !== user.uid) {
+        throw new Error(i18n.t("roadsideHelp.onlyPassengerCanConfirmCompletion"));
+      }
+      if (req.status !== "completion_pending") {
+        throw new Error(i18n.t("roadsideHelp.helpNotReadyForConfirmation"));
+      }
+
       transaction.update(reqRef, {
         status: "completed",
-        helpCompleted: true,
         paymentStatus: "pending",
+        helpCompleted: true,
         needsPassengerRating: true,
         ratingSubmitted: false,
         completedAt: serverTimestamp(),
@@ -788,8 +1098,8 @@ export const finishRoadsideHelp = async (bookingId: string) => {
       });
     }
 
-    if (offerId) {
-      transaction.update(doc(db, "roadsideOffers", offerId), {
+    if (booking.offerId) {
+      transaction.update(doc(db, "roadsideOffers", booking.offerId), {
         status: "completed",
         paymentStatus: "pending",
         completedAt: serverTimestamp(),
@@ -800,120 +1110,11 @@ export const finishRoadsideHelp = async (bookingId: string) => {
     transaction.update(bookingRef, {
       status: "completed",
       tripStatus: "completed",
-      helpCompleted: true,
       paymentStatus: "pending",
+      helpCompleted: true,
       needsPassengerRating: true,
       ratingSubmitted: false,
       completedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  });
-
-  // One notification at Complete Trip, same trigger point and rating-gate
-  // shape as every other category (finishRide/updateTripStatus/finishJob) —
-  // never gated on payment, which is a fully independent step the passenger
-  // can still complete any time via the "Pay Now" button already shown on
-  // their roadside card in My Bookings.
-  if (passengerId) {
-    await notify({
-      receiverId: passengerId,
-      senderId: user.uid,
-      type: "roadside_rating_required",
-      title: "Trip completed",
-      message: `Your Roadside Help with ${driverName} is completed. Please rate your helper.`,
-      category: "roadside",
-      requestId,
-      offerId,
-      bookingId,
-      driverId: user.uid,
-      targetTab: "passenger",
-    });
-  }
-};
-
-// ---------------------------------------------------------------------------
-// Passenger: pay for completed roadside help.
-//
-// The amount is always read from the live `roadsideRequests.agreedPrice`
-// field inside the transaction — never trusted purely from route params.
-// Blocked unless request.status === "completed" && paymentStatus === "pending".
-// ---------------------------------------------------------------------------
-
-export type RoadsidePaymentMethod = "cash" | "card" | "bit";
-
-export const payRoadsideHelp = async (
-  bookingId: string,
-  method: RoadsidePaymentMethod,
-): Promise<{ amount: number; driverId: string }> => {
-  const user = auth.currentUser;
-  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
-
-  const bookingRef = doc(db, "bookings", bookingId);
-
-  let requestId = "";
-  let offerId = "";
-  let driverId = "";
-  let driverName = "your helper";
-  let passengerName = "The passenger";
-  let amount = 0;
-
-  await runTransaction(db, async (transaction) => {
-    const bookingSnap = await transaction.get(bookingRef);
-
-    if (!bookingSnap.exists()) {
-      throw new Error(i18n.t("rides.bookingNotFound"));
-    }
-
-    const booking: any = bookingSnap.data();
-
-    if (booking.passengerId !== user.uid) {
-      throw new Error(i18n.t("roadsideHelp.onlyPassengerCanPay"));
-    }
-
-    requestId = booking.requestId || "";
-    offerId = booking.offerId || "";
-    driverId = booking.driverId || "";
-    driverName = booking.driverName || driverName;
-    passengerName = booking.passengerName || passengerName;
-
-    const reqRef = doc(db, "roadsideRequests", requestId);
-    const reqSnap = await transaction.get(reqRef);
-
-    if (!reqSnap.exists()) {
-      throw new Error(i18n.t("roadsideHelp.requestNoLongerExists"));
-    }
-
-    const req: any = reqSnap.data();
-
-    if (req.status !== "completed" || req.paymentStatus !== "pending") {
-      throw new Error(i18n.t("roadsideHelp.helpNotReadyForPayment"));
-    }
-
-    amount = typeof req.agreedPrice === "number" ? req.agreedPrice : 0;
-
-    transaction.update(reqRef, {
-      status: "completed_paid",
-      paymentStatus: "paid",
-      paidBy: user.uid,
-      paidTo: driverId,
-      paidAmount: amount,
-      paidAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    if (offerId) {
-      transaction.update(doc(db, "roadsideOffers", offerId), {
-        paymentStatus: "paid",
-        paidAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    }
-
-    transaction.update(bookingRef, {
-      paymentStatus: "paid",
-      paymentMethod: method,
-      paidAmount: amount,
-      paidAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
   });
@@ -922,20 +1123,217 @@ export const payRoadsideHelp = async (
     await notify({
       receiverId: driverId,
       senderId: user.uid,
-      type: "roadside_payment_received",
-      title: "Payment received",
-      message: `${passengerName} paid ₪${amount} for the Roadside Help service.`,
+      type: "roadside_completion_confirmed",
+      title: i18n.t("roadsideHelp.completionConfirmedNotifTitle"),
+      message: i18n.t("roadsideHelp.completionConfirmedNotifMessage", { name: passengerName }),
       category: "roadside",
       requestId,
-      offerId,
       bookingId,
       passengerId: user.uid,
-      amount,
       targetTab: "driver",
     });
   }
+};
 
-  return { amount, driverId };
+// ---------------------------------------------------------------------------
+// Driver: "Confirm Cash Received" — the ONLY path that ever marks a cash
+// Roadside Help payment "paid". Never callable by the passenger, never
+// callable before the customer has confirmed completion, never usable for
+// the Bit method (see confirmCompletion's own comment on why Bit can never
+// be auto-marked paid here).
+// ---------------------------------------------------------------------------
+
+export const confirmCashReceived = async (
+  bookingId: string,
+): Promise<{ amount: number; passengerId: string }> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
+
+  const bookingRef = doc(db, "bookings", bookingId);
+
+  let requestId = "";
+  let passengerId = "";
+  let driverName = "your helper";
+  let amount = 0;
+
+  await runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+    if (!bookingSnap.exists()) throw new Error(i18n.t("rides.bookingNotFound"));
+
+    const booking: any = bookingSnap.data();
+    if (booking.driverId !== user.uid) {
+      throw new Error(i18n.t("roadsideHelp.onlyAcceptedDriverCanConfirmCash"));
+    }
+    if (booking.paymentMethod !== "cash") {
+      throw new Error(i18n.t("roadsideHelp.notACashPayment"));
+    }
+    if (booking.status !== "completed" || booking.paymentStatus !== "pending") {
+      throw new Error(i18n.t("roadsideHelp.helpNotReadyForPayment"));
+    }
+
+    requestId = booking.requestId || "";
+    passengerId = booking.passengerId || "";
+    driverName = booking.driverName || driverName;
+    amount = typeof booking.price === "number" ? booking.price : 0;
+
+    const reqRef = doc(db, "roadsideRequests", requestId);
+    const reqSnap = await transaction.get(reqRef);
+
+    if (reqSnap.exists()) {
+      const req: any = reqSnap.data();
+      if (req.selectedDriverId !== user.uid) {
+        throw new Error(i18n.t("roadsideHelp.onlyAcceptedDriverCanConfirmCash"));
+      }
+
+      transaction.update(reqRef, {
+        paymentStatus: "paid",
+        paidBy: passengerId,
+        paidTo: user.uid,
+        paidAmount: amount,
+        paidAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    if (booking.offerId) {
+      transaction.update(doc(db, "roadsideOffers", booking.offerId), {
+        paymentStatus: "paid",
+        paidAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    transaction.update(bookingRef, {
+      paymentStatus: "paid",
+      paidAmount: amount,
+      paidAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  if (passengerId) {
+    await notify({
+      receiverId: passengerId,
+      senderId: user.uid,
+      type: "roadside_payment_received",
+      title: i18n.t("roadsideHelp.cashConfirmedNotifTitle"),
+      message: i18n.t("roadsideHelp.cashConfirmedNotifMessage", { amount, name: driverName }),
+      category: "roadside",
+      requestId,
+      bookingId,
+      driverId: user.uid,
+      amount,
+      targetTab: "passenger",
+    });
+  }
+
+  return { amount, passengerId };
+};
+
+// ---------------------------------------------------------------------------
+// Keeps the driver-facing `roadsideRequests` record (Help Requests screen,
+// RoadsideAcceptedCard) in sync the moment either side cancels the shared
+// `bookings` doc through the generic cancelGeneralBooking flow — that
+// function only ever touches the `bookings` collection (it's shared by
+// every category), so nothing else marks this request cancelled otherwise.
+// Best-effort: never blocks/undoes a cancellation that already succeeded.
+// ---------------------------------------------------------------------------
+
+export const syncCancelledRoadsideRequest = async (requestId: string) => {
+  if (!requestId) return;
+
+  try {
+    await updateDoc(doc(db, "roadsideRequests", requestId), {
+      status: "cancelled",
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.log("syncCancelledRoadsideRequest failed", error);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Passenger: cancel a Roadside Help request — but ONLY while the accepted
+// helper hasn't pressed "Start Driving" yet (status "open" or
+// "helper_assigned" / tripStatus still "booked"). Once the helper is on the
+// way, tracking may already be live and the helper is committed to the
+// trip, so cancellation is refused here AND by firestore.rules (never just
+// the UI) — see isValidRoadsideRequestUpdate / isValidRoadsideBookingUpdate.
+//
+// One transaction closes out every linked document together: the request
+// itself, its booking (if one already exists — it does from
+// "helper_assigned" onward), and the accepted offer (moved to
+// "not_selected", the same terminal value a losing sibling offer gets, so
+// no new offer-status vocabulary is needed). The accepted helper is
+// notified after the transaction commits. There is nothing to "stop
+// tracking" for — live GPS sharing only ever starts once the helper
+// presses Start Driving (see RoadsideAcceptedCard.tsx), which is exactly
+// the point this function refuses to cancel past, so a cancellable request
+// never has an active tracking watcher in the first place.
+// ---------------------------------------------------------------------------
+
+export const cancelRoadsideRequestByPassenger = async (requestId: string): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error(i18n.t("roadsideHelp.mustBeLoggedIn"));
+
+  const reqRef = doc(db, "roadsideRequests", requestId);
+
+  let driverId = "";
+  let passengerName = "";
+
+  await runTransaction(db, async (transaction) => {
+    const reqSnap = await transaction.get(reqRef);
+    if (!reqSnap.exists()) throw new Error(i18n.t("roadsideHelp.requestNoLongerExists"));
+
+    const req: any = reqSnap.data();
+
+    if (req.passengerId !== user.uid) {
+      throw new Error(i18n.t("roadsideHelp.onlyPassengerCanCancelRoadside"));
+    }
+    if (req.status !== "open" && req.status !== "helper_assigned") {
+      throw new Error(i18n.t("roadsideHelp.cannotCancelAfterStartDriving"));
+    }
+
+    driverId = req.selectedDriverId || "";
+    passengerName = req.passengerName || "";
+
+    transaction.update(reqRef, {
+      status: "cancelled",
+      cancelledBy: "passenger",
+      cancelledAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    if (req.bookingId) {
+      transaction.update(doc(db, "bookings", req.bookingId), {
+        status: "cancelled",
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    if (req.selectedOfferId) {
+      transaction.update(doc(db, "roadsideOffers", req.selectedOfferId), {
+        status: "not_selected",
+        updatedAt: serverTimestamp(),
+      });
+    }
+  });
+
+  if (driverId) {
+    await notify({
+      receiverId: driverId,
+      senderId: user.uid,
+      type: "roadside_cancelled_by_passenger",
+      title: i18n.t("roadsideHelp.cancelledByPassengerNotifTitle"),
+      message: i18n.t("roadsideHelp.cancelledByPassengerNotifMessage", {
+        name: passengerName || i18n.t("common.user"),
+      }),
+      category: "roadside",
+      requestId,
+      passengerId: user.uid,
+      targetTab: "driver",
+    });
+  }
 };
 
 // ---------------------------------------------------------------------------

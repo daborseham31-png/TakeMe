@@ -45,7 +45,7 @@ export default function SchoolRideScreen() {
 
           <Pressable onPress={() => router.push("/booking/school/my-children" as any)}>
             <DirectionalRow style={styles.myChildrenButton}>
-              <Ionicons name="people-outline" size={16} color="#F58220" />
+              <Ionicons name="people-outline" size={16} color="#3B82F6" />
               <DirectionalText style={styles.myChildrenButtonText}>
                 {t("schoolChildren.manageChildrenLink")}
               </DirectionalText>
@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   myChildrenButtonText: {
-    color: "#F58220",
+    color: "#3B82F6",
     fontWeight: "800",
     fontSize: 12.5,
   },
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   tabTextActive: {
-    color: "#F58220",
+    color: "#3B82F6",
   },
   body: {
     flex: 1,

@@ -29,12 +29,15 @@ import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import { canStartTrip, getStartTripBlockedReason } from "../booking/bookingsLib";
+import { getDriverSuspensionBlockedReason } from "../booking/driverViolationsLib";
+import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import {
   captureDriverLocationOnce,
   startDriverLocationTracking,
   stopDriverLocationTracking,
 } from "../driverLocationTask";
 import { normalizeRideBooking, RideBooking } from "../booking/rideBookingLib";
+import { PASSENGER_LOCATIONS_COLLECTION } from "../passengerLocationTask";
 import {
   normalizeSchoolBooking,
   normalizeSchoolTrip,
@@ -186,6 +189,50 @@ export default function RideNavigationScreen() {
     return unsub;
   }, [id]);
 
+  // The passenger's own live location (see passengerLocationTask.ts) —
+  // replaces the old manually-saved pickup point as the driver's PRIMARY
+  // navigation target (see coords()/getNavTarget() below). School Trips
+  // (isSchoolTripsSource) never had a per-passenger pickup concept to begin
+  // with — its own fixed `fromLocation` point, untouched below, already
+  // covers that case — so this only ever matters for Personal Ride/legacy
+  // School (id = bookingId here).
+  const [livePassengerLocation, setLivePassengerLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!id || isSchoolTripsSource) {
+      setLivePassengerLocation(null);
+      return;
+    }
+
+    const unsub = onSnapshot(
+      doc(db, PASSENGER_LOCATIONS_COLLECTION, id),
+      (snap) => {
+        const data = snap.data();
+        const lat = Number(data?.latitude);
+        const lng = Number(data?.longitude);
+
+        setLivePassengerLocation(
+          Number.isFinite(lat) && Number.isFinite(lng) ? { latitude: lat, longitude: lng } : null,
+        );
+      },
+      (error) => {
+        console.log("Listener failed:", {
+          feature: "ride-navigation.passengerLocations",
+          collection: PASSENGER_LOCATIONS_COLLECTION,
+          docId: id,
+          code: error.code,
+          message: error.message,
+        });
+        setLivePassengerLocation(null);
+      },
+    );
+
+    return unsub;
+  }, [id, isSchoolTripsSource]);
+
   useEffect(() => {
     if (!id || !isSchoolTripsSource || !auth.currentUser) {
       setSchoolPassengerBookings([]);
@@ -295,19 +342,32 @@ export default function RideNavigationScreen() {
     }
   };
 
-  // Exact GPS pickup point, if the passenger captured one — checked across
-  // every field name this has ever been saved under. This is completely
-  // separate from booking.from/to (the manual matching fields).
+  // Navigation destination — the passenger's own LATEST live location
+  // (livePassengerLocation, above) is always the primary source. The old
+  // manually-saved pickup fields are read ONLY as backward compatibility
+  // for a booking created before that feature was removed — never the
+  // primary source for a current booking, which will never have them. A
+  // school trip's own fixed `fromLocation` (child's home / the school
+  // itself) is a separate, still-legitimate concept, unrelated to the
+  // removed feature, and stays as the last fallback.
+  //
+  // Deliberately coordinates-only — no text-address fallback. Opening
+  // Waze/Maps with a stale or manually-typed address would misrepresent it
+  // as an exact GPS point; when no real coordinate exists, the caller shows
+  // a message instead (see openMaps/openWaze) and the written From address
+  // stays what it always was: display information on this screen, never a
+  // stand-in for GPS.
   const coords = (b: any) => {
+    if (livePassengerLocation) {
+      return { lat: livePassengerLocation.latitude, lng: livePassengerLocation.longitude };
+    }
+
     const lat =
       b?.pickupLatitude ??
       b?.pickup?.latitude ??
       b?.pickupCoords?.latitude ??
       b?.pickupLocation?.latitude ??
       b?.passengerPickupLocation?.latitude ??
-      // A school trip's own "From" GPS point — the pickup spot for this
-      // trip (child's home for an outbound trip, the school itself for a
-      // return trip — see SchoolTrip.fromLocation's own comment).
       b?.fromLocation?.latitude;
     const lng =
       b?.pickupLongitude ??
@@ -322,30 +382,11 @@ export default function RideNavigationScreen() {
     return { lat, lng };
   };
 
-  // The exact readable address, if one was captured (independent of the
-  // coordinates above — used only as a last-resort navigation target).
-  const pickupAddressText = (b: any): string =>
-    b?.pickupAddress || b?.pickup?.address || b?.passengerPickupLocation?.address || "";
-
-  // Navigation destination with the exact fallback chain: precise
-  // coordinates -> exact pickup address text -> manual From address. This
-  // is ONLY for guiding the driver to the passenger — never used to decide
-  // which drivers a passenger sees (that's from/to matching, elsewhere).
-  type NavTarget =
-    | { kind: "coords"; lat: number; lng: number }
-    | { kind: "text"; text: string }
-    | null;
+  type NavTarget = { kind: "coords"; lat: number; lng: number } | null;
 
   const getNavTarget = (b: any): NavTarget => {
     const c = coords(b);
-    if (c) return { kind: "coords", lat: c.lat, lng: c.lng };
-
-    const address = pickupAddressText(b);
-    if (address) return { kind: "text", text: address };
-
-    if (b?.from) return { kind: "text", text: b.from };
-
-    return null;
+    return c ? { kind: "coords", lat: c.lat, lng: c.lng } : null;
   };
 
   // Which tripLocations/{targetId} doc this device should be writing to —
@@ -422,6 +463,20 @@ export default function RideNavigationScreen() {
 
   const updateTripStatus = async (nextStatus: TripStatus) => {
     if (!id || !booking) return;
+
+    // Guard the actual write, not just the button — this is THE ONE place
+    // every trip-lifecycle transition on this screen (driver_on_way ->
+    // arrived_pickup -> in_progress -> completed, for both School and
+    // Personal/legacy-School bookings) passes through, so a suspended
+    // driver can never start/edit/modify an active trip regardless of
+    // which button got them here.
+    if (auth.currentUser) {
+      const suspended = await getDriverSuspensionBlockedReason(auth.currentUser.uid);
+      if (suspended) {
+        Alert.alert(t("driver.accountSuspendedTitle"), suspended);
+        return;
+      }
+    }
 
     // Guard the actual write, not just the button — this is the one place
     // that flips tripStatus to driver_on_way for school + weekly bookings
@@ -730,14 +785,11 @@ export default function RideNavigationScreen() {
     const target = getNavTarget(b);
 
     if (!target) {
-      Alert.alert(t("booking.locationLabel"), t("booking.pickupLocationNotAvailable"));
+      Alert.alert(t("booking.locationLabel"), t("booking.passengerLocationUnavailableMessage"));
       return;
     }
 
-    const url =
-      target.kind === "coords"
-        ? `https://www.google.com/maps/dir/?api=1&destination=${target.lat},${target.lng}`
-        : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(target.text)}`;
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${target.lat},${target.lng}`;
 
     Linking.openURL(url).catch(() =>
       Alert.alert(t("common.error"), t("booking.couldNotOpenMaps")),
@@ -748,14 +800,11 @@ export default function RideNavigationScreen() {
     const target = getNavTarget(b);
 
     if (!target) {
-      Alert.alert(t("booking.locationLabel"), t("booking.pickupLocationNotAvailable"));
+      Alert.alert(t("booking.locationLabel"), t("booking.passengerLocationUnavailableMessage"));
       return;
     }
 
-    const url =
-      target.kind === "coords"
-        ? `https://waze.com/ul?ll=${target.lat},${target.lng}&navigate=yes`
-        : `https://waze.com/ul?q=${encodeURIComponent(target.text)}&navigate=yes`;
+    const url = `https://waze.com/ul?ll=${target.lat},${target.lng}&navigate=yes`;
 
     Linking.openURL(url).catch(() =>
       Alert.alert(t("common.error"), t("booking.couldNotOpenWaze")),
@@ -1040,9 +1089,8 @@ export default function RideNavigationScreen() {
             <Ionicons name="navigate-circle-outline" size={16} color="#7C5F46" />
             <Text style={styles.infoText}>
               {c
-                ? pickupAddressText(booking) ||
-                  `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`
-                : pickupAddressText(booking) || t("booking.exactPickupNotAvailable")}
+                ? `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`
+                : t("booking.exactPickupNotAvailable")}
             </Text>
           </View>
 
@@ -1257,7 +1305,7 @@ export default function RideNavigationScreen() {
         transparent
         onRequestClose={closeVerifyModal}
       >
-        <View style={styles.verifyOverlay}>
+        <KeyboardAvoidingWrapper style={styles.verifyOverlay}>
           <DirectionalCard style={styles.verifySheet}>
             <DirectionalText style={styles.verifySheetTitle}>
               {t("booking.verifyAndStartTrip")}
@@ -1304,7 +1352,7 @@ export default function RideNavigationScreen() {
               <DirectionalText style={styles.backText}>{t("common.cancel")}</DirectionalText>
             </Pressable>
           </DirectionalCard>
-        </View>
+        </KeyboardAvoidingWrapper>
       </Modal>
     </DirectionalScreen>
   );

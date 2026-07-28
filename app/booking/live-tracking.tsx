@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";
 import { TRIP_LOCATIONS_COLLECTION } from "../booking/schoolTripsLib";
+import { translateProblemTypesList } from "../i18n/formatters";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { positionEnd } from "../i18n/rtl";
 
@@ -35,8 +36,22 @@ const toLatLng = (value: any): LatLng | null => {
   return { latitude, longitude };
 };
 
+// Roadside Help reuses this exact screen (same tripStatus vocabulary as
+// Rides — see roadsideLib.ts's own comment on why) but shows helper-facing
+// copy instead of driver-facing copy for the same underlying states.
 const getStatusKey = (booking: any) => {
   const status = booking?.tripStatus || booking?.status;
+  const isRoadside = booking?.category === "roadside";
+
+  if (isRoadside) {
+    if (status === "driver_on_way") return "roadsideHelp.helperOnTheWay";
+    if (status === "arrived_pickup") return "roadsideHelp.helperArrivedHint";
+    if (status === "in_progress") return "roadsideHelp.helpInProgressHint";
+    if (status === "completion_pending") return "roadsideHelp.waitingForPassengerConfirmation";
+    if (status === "completed") return "roadsideHelp.badgeCompleted";
+
+    return "roadsideHelp.waitingForHelperToStartDriving";
+  }
 
   if (status === "driver_on_way") return "rides.driverOnWay";
   if (status === "arrived_pickup") return "rides.driverArrivedPickup";
@@ -146,7 +161,13 @@ export default function LiveTrackingScreen() {
       toLatLng(booking?.passengerPickupLocation) ||
       // A school trip's own "From" GPS point (see ride-navigation.tsx's
       // matching fallback).
-      toLatLng(booking?.fromLocation)
+      toLatLng(booking?.fromLocation) ||
+      // Roadside Help's own location shape (see roadsideLib.ts's
+      // acceptOffer) — the help location itself, not a pickup point.
+      toLatLng(booking?.location) ||
+      (typeof booking?.latitude === "number" && typeof booking?.longitude === "number"
+        ? { latitude: booking.latitude, longitude: booking.longitude }
+        : null)
     );
   }, [booking]);
 
@@ -236,6 +257,7 @@ export default function LiveTrackingScreen() {
   }
 
   const trackingActive = (booking.tripStatus || booking.status) === "in_progress";
+  const isRoadside = booking.category === "roadside";
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -304,11 +326,11 @@ export default function LiveTrackingScreen() {
               {pickupLocation ? (
                 <Marker
                   coordinate={pickupLocation}
-                  title={t("rides.pickupMarkerTitle")}
-                  description={t("rides.pickupMarkerDesc")}
+                  title={isRoadside ? t("roadsideHelp.helpLocationMarkerTitle") : t("rides.pickupMarkerTitle")}
+                  description={isRoadside ? "" : t("rides.pickupMarkerDesc")}
                 >
                   <View style={styles.pickupMarker}>
-                    <Ionicons name="home" size={17} color="#FFFFFF" />
+                    <Ionicons name={isRoadside ? "construct" : "home"} size={17} color="#FFFFFF" />
                   </View>
                 </Marker>
               ) : null}
@@ -329,8 +351,8 @@ export default function LiveTrackingScreen() {
                 <Marker
                   ref={driverMarkerRef}
                   coordinate={lastAnimatedCoordRef.current ?? driverLocation}
-                  title={t("rides.driverMarkerTitle")}
-                  description={t("rides.driverMarkerDesc")}
+                  title={isRoadside ? t("roadsideHelp.helperMapLabel") : t("rides.driverMarkerTitle")}
+                  description={isRoadside ? "" : t("rides.driverMarkerDesc")}
                   anchor={{ x: 0.5, y: 0.5 }}
                 >
                   <View style={styles.driverMarker}>
@@ -366,11 +388,13 @@ export default function LiveTrackingScreen() {
           <View style={styles.infoRow}>
             <Ionicons name="person-outline" size={16} color="#7C5F46" />
             <Text style={styles.infoText}>
-              {t("rides.driverLabel", { name: booking.driverName || t("rides.driverFallback") })}
+              {isRoadside
+                ? t("roadsideHelp.helperLabel", { name: booking.driverName || t("roadsideHelp.yourHelperFallback") })
+                : t("rides.driverLabel", { name: booking.driverName || t("rides.driverFallback") })}
             </Text>
           </View>
 
-          {booking.car || booking.carColor || booking.carPlate ? (
+          {!isRoadside && (booking.car || booking.carColor || booking.carPlate) ? (
             <View style={styles.infoRow}>
               <Ionicons name="car-outline" size={16} color="#7C5F46" />
               <Text style={styles.infoText}>
@@ -382,12 +406,32 @@ export default function LiveTrackingScreen() {
             </View>
           ) : null}
 
-          <View style={styles.infoRow}>
-            <Ionicons name="location-outline" size={16} color="#7C5F46" />
-            <Text style={styles.infoText}>
-              {booking.from || "?"} → {booking.to || "?"}
-            </Text>
-          </View>
+          {isRoadside ? (
+            <>
+              {Array.isArray(booking.problemTypes) && booking.problemTypes.length > 0 ? (
+                <View style={styles.infoRow}>
+                  <Ionicons name="build-outline" size={16} color="#7C5F46" />
+                  <Text style={styles.infoText}>
+                    {translateProblemTypesList(booking.problemTypes, t)}
+                  </Text>
+                </View>
+              ) : null}
+
+              {booking.address || booking.location?.address ? (
+                <View style={styles.infoRow}>
+                  <Ionicons name="location-outline" size={16} color="#7C5F46" />
+                  <Text style={styles.infoText}>{booking.address || booking.location?.address}</Text>
+                </View>
+              ) : null}
+            </>
+          ) : (
+            <View style={styles.infoRow}>
+              <Ionicons name="location-outline" size={16} color="#7C5F46" />
+              <Text style={styles.infoText}>
+                {booking.from || "?"} → {booking.to || "?"}
+              </Text>
+            </View>
+          )}
 
           {booking.date ? (
             <View style={styles.infoRow}>

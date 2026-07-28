@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -14,6 +15,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth } from "../firebase";
+import KeyboardSafeScreen from "./components/KeyboardSafeScreen";
 import {
   DirectionalRow,
   DirectionalScreen,
@@ -109,6 +111,13 @@ export default function AppStartScreen() {
   if (loading) {
     return (
       <DirectionalScreen style={styles.splash}>
+        <View style={styles.logoBadge}>
+          <Image
+            source={require("../assets/images/logo.jpeg")}
+            style={styles.logoImage}
+            resizeMode="cover"
+          />
+        </View>
         <Text style={styles.logo}>{t("common.appName")}</Text>
         <Text style={styles.tagline}>{t("auth.tagline")}</Text>
         <ActivityIndicator size="large" color="#ffffff" style={styles.loader} />
@@ -117,7 +126,7 @@ export default function AppStartScreen() {
   }
 
   return (
-    <DirectionalScreen style={styles.page}>
+    <DirectionalScreen style={styles.pageSafe}>
       <Pressable
         style={[styles.languagePill, positionEnd(20, isRTL)]}
         onPress={() => setLanguageModalVisible(true)}
@@ -127,6 +136,7 @@ export default function AppStartScreen() {
         <Text style={styles.languagePillText}>{language.toUpperCase()}</Text>
       </Pressable>
 
+      <KeyboardSafeScreen contentContainerStyle={styles.page}>
       <View style={styles.card}>
         <Text style={styles.title}>{t("auth.loginTitle")}</Text>
         <Text style={styles.subtitle}>{t("auth.welcomeBack")}</Text>
@@ -230,6 +240,7 @@ export default function AppStartScreen() {
           </Text>
         </Pressable>
       </View>
+      </KeyboardSafeScreen>
 
       <LanguageSelectorModal
         visible={languageModalVisible}
@@ -246,6 +257,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  logoBadge: {
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    overflow: "hidden",
+    backgroundColor: "#FFFFFF",
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  logoImage: {
+    width: "100%",
+    height: "100%",
+  },
   logo: {
     fontSize: 48,
     fontWeight: "900",
@@ -259,9 +287,12 @@ const styles = StyleSheet.create({
   loader: {
     marginTop: 30,
   },
-  page: {
+  pageSafe: {
     flex: 1,
     backgroundColor: "#FBF7F1",
+  },
+  page: {
+    flexGrow: 1,
     justifyContent: "center",
     padding: 20,
   },

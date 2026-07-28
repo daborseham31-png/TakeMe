@@ -138,7 +138,7 @@ export default function WorkPaymentScreen() {
     return (
       <DirectionalScreen style={styles.safe}>
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#F58220" />
+          <ActivityIndicator size="large" color="#22C55E" />
         </View>
       </DirectionalScreen>
     );
@@ -233,7 +233,7 @@ export default function WorkPaymentScreen() {
               <Ionicons
                 name="cash-outline"
                 size={26}
-                color={method === "cash" ? "#F58220" : "#7C5F46"}
+                color={method === "cash" ? "#22C55E" : "#7C5F46"}
               />
               <Text
                 style={[
@@ -289,7 +289,7 @@ export default function WorkPaymentScreen() {
               </View>
 
               <Pressable style={styles.reopenBitButton} onPress={handleSelectBit}>
-                <Ionicons name="open-outline" size={16} color="#F58220" />
+                <Ionicons name="open-outline" size={16} color="#22C55E" />
                 <Text style={styles.reopenBitText}>{t("rides.reopenBit")}</Text>
               </Pressable>
             </View>
@@ -388,7 +388,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   amountValue: {
-    color: "#F58220",
+    color: "#22C55E",
     fontWeight: "900",
     fontSize: 20,
   },
@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   methodCardActive: {
-    borderColor: "#F58220",
+    borderColor: "#22C55E",
     backgroundColor: "#FFF8F2",
   },
   methodText: {
@@ -423,7 +423,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   methodTextActive: {
-    color: "#F58220",
+    color: "#22C55E",
   },
   infoBox: {
     flexDirection: "row",
@@ -464,17 +464,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
     borderWidth: 1.5,
-    borderColor: "#F58220",
+    borderColor: "#22C55E",
     borderRadius: 10,
     paddingVertical: 10,
   },
   reopenBitText: {
-    color: "#F58220",
+    color: "#22C55E",
     fontWeight: "900",
     fontSize: 14,
   },
   continueButton: {
-    backgroundColor: "#F58220",
+    backgroundColor: "#22C55E",
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
@@ -504,7 +504,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   backLinkText: {
-    color: "#F58220",
+    color: "#22C55E",
     fontWeight: "900",
     fontSize: 15,
   },

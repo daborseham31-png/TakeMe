@@ -49,6 +49,15 @@ import {
   CancellationRole,
   getCancellationEligibility,
 } from "./cancellationEligibility";
+import {
+  readExistingCancellationViolation,
+  writeCancellationViolationIfNew,
+} from "./driverViolationCore";
+import {
+  CancellationStandingResult,
+  evaluateDriverCancellationStanding,
+  getDriverSuspensionBlockedReason,
+} from "./driverViolationsLib";
 import { normalizeTime, timeToMinutes } from "../driver/create/driverHelpers";
 import { calculateDistanceKm } from "./homeFeedLib";
 import { notify } from "./work-errand/workErrandLib";
@@ -1152,40 +1161,141 @@ export const getSchoolCancelBlockedReason = (
 // for replacement trips for the affected passengers — the client here never
 // enumerates/updates bookings itself (that matching/notification logic runs
 // server-side, per the driver-cancellation-replacement feature).
-export const cancelSchoolTrip = async (tripId: string, reason?: string) => {
+export const cancelSchoolTrip = async (
+  tripId: string,
+  reason?: string,
+): Promise<CancellationStandingResult | null> => {
   const user = auth.currentUser;
   if (!user) throw new CancellationError("NOT_AUTHORIZED");
 
   const tripRef = doc(db, SCHOOL_TRIPS_COLLECTION, tripId);
-  const tripSnap = await getDoc(tripRef);
 
-  if (!tripSnap.exists()) throw new CancellationError("DOCUMENT_NOT_FOUND");
-
-  const trip = normalizeSchoolTrip(tripSnap.id, tripSnap.data());
-
-  // Ownership was previously never re-checked here at all — only the UI
-  // happened to show a driver only their own trips. Re-verified fresh
-  // against the just-read document, never trusted from the caller.
-  if (trip.driverId !== user.uid) {
-    throw new CancellationError("NOT_AUTHORIZED");
-  }
-
-  // Already cancelled — safe no-op, never a second write/notification chain.
-  if (trip.status === "cancelled") return;
-
-  const blocked = getSchoolCancelBlockedReason(
-    trip.date,
-    trip.departureTime,
-    trip.tripStatus,
-    DRIVER_CANCEL_LOCK_HOURS,
+  // Real, confirmed passenger-booking count for THIS trip — a fresh query,
+  // never remaining/available seats. Firestore transactions can only
+  // get-by-reference, never run a query, so this one read has to happen
+  // just before the transaction below — still strictly fresher than
+  // useMySchoolRows.tsx's own affectedCount, which reads from a live
+  // listener's already-cached state instead.
+  //
+  // The `where("driverId", "==", user.uid)` filter is NOT redundant with
+  // tripId — every schoolBookings doc matching this tripId already has this
+  // driverId by construction, but Firestore Rules validate a query against
+  // its OWN filter shape, not the actual data: the schoolBookings read rule
+  // requires resource.data.driverId == request.auth.uid (or passengerId),
+  // and without an equality filter naming that field in the query itself,
+  // Firestore cannot prove every possible result would satisfy it, so it
+  // rejects the ENTIRE query with "Missing or insufficient permissions" —
+  // even though every actual matching document would have passed. This was
+  // the exact cause of the driver-side School Return cancellation failure
+  // (the query ran here without this filter); useMySchoolRows.tsx's own
+  // subscriptions already include the equivalent driverId filter, which is
+  // why only this one fresh query was affected.
+  const bookingsSnap = await getDocs(
+    query(
+      collection(db, "schoolBookings"),
+      where("tripId", "==", tripId),
+      where("status", "==", "booked"),
+      where("driverId", "==", user.uid),
+    ),
   );
-  if (blocked) throw new Error(blocked);
+  const passengerBookingCount = bookingsSnap.size;
 
-  await updateDoc(tripRef, {
-    status: "cancelled" as SchoolTripStatus,
-    ...(reason ? { cancellationReason: reason } : {}),
-    updatedAt: serverTimestamp(),
+  let didCancel = false;
+  let violationCreated = false;
+  let driverIdForViolation = "";
+
+  await runTransaction(db, async (transaction) => {
+    // PHASE 1 — every read.
+    const tripSnap = await transaction.get(tripRef);
+    if (!tripSnap.exists()) throw new CancellationError("DOCUMENT_NOT_FOUND");
+
+    const trip = normalizeSchoolTrip(tripSnap.id, tripSnap.data());
+
+    // Ownership was previously never re-checked here at all — only the UI
+    // happened to show a driver only their own trips. Re-verified fresh
+    // against the just-read document, never trusted from the caller.
+    if (trip.driverId !== user.uid) {
+      throw new CancellationError("NOT_AUTHORIZED");
+    }
+
+    // Already cancelled — safe no-op, never a second write/violation/
+    // notification chain.
+    if (trip.status === "cancelled") return;
+
+    const blocked = getSchoolCancelBlockedReason(
+      trip.date,
+      trip.departureTime,
+      trip.tripStatus,
+      DRIVER_CANCEL_LOCK_HOURS,
+    );
+    if (blocked) throw new Error(blocked);
+
+    const violationSnap = await readExistingCancellationViolation(
+      transaction,
+      trip.driverId,
+      "schoolTrips",
+      tripId,
+    );
+
+    // PHASE 2 — every write. No transaction.get() below this point.
+    transaction.update(tripRef, {
+      status: "cancelled" as SchoolTripStatus,
+      ...(reason ? { cancellationReason: reason } : {}),
+      updatedAt: serverTimestamp(),
+    });
+
+    // Cancel every connected passenger booking in the SAME transaction as
+    // the trip itself — this used to be left to onSchoolTripCancelled (a
+    // Cloud Function), but this project's Firebase plan (Spark) cannot
+    // deploy Cloud Functions at all (see driverViolationsLib.ts's own
+    // header for the confirmed live-CLI proof), so that function never
+    // actually ran: a driver cancelling a School trip never cancelled its
+    // passengers' bookings. bookingsSnap was already fetched fresh, right
+    // before this transaction started (see above) — no further
+    // transaction.get() is needed for these writes, matching the same
+    // accepted TOCTOU tradeoff already documented for passengerBookingCount
+    // itself. Never restores seats/reopens anything (the trip itself is
+    // fully cancelled — there is nothing left to rebook).
+    bookingsSnap.docs.forEach((bookingDoc) => {
+      transaction.update(bookingDoc.ref, {
+        status: "cancelled" as SchoolBookingStatus,
+        verificationStatus: "expired" as VerificationStatus,
+        bookingStatus: "driver_cancelled" as SchoolBookingLifecycleStatus,
+        cancelledBy: "driver",
+        cancellationReason: reason || "",
+        cancelledAt: serverTimestamp(),
+        originalTripId: tripId,
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    didCancel = true;
+    driverIdForViolation = trip.driverId;
+    violationCreated = writeCancellationViolationIfNew(transaction, violationSnap, {
+      driverId: trip.driverId,
+      sourceCollection: "schoolTrips",
+      sourceId: tripId,
+      sourceCategory: "school",
+      scheduledDeparture: new Date(`${trip.date}T${trip.departureTime || "00:00"}:00`),
+      passengerBookingCount,
+    });
   });
+
+  if (!didCancel || !violationCreated || !driverIdForViolation) return null;
+
+  // Best-effort — safe to re-run from anywhere, never a single point of
+  // failure (see driverViolationsLib.ts's own header). The violation doc
+  // itself was already written atomically inside the transaction above.
+  try {
+    return await evaluateDriverCancellationStanding(driverIdForViolation);
+  } catch (error) {
+    console.log("cancelSchoolTrip: evaluateDriverCancellationStanding failed (violation already recorded, non-fatal)", {
+      tripId,
+      driverId: driverIdForViolation,
+      error,
+    });
+    return null;
+  }
 };
 
 // Hides a finished (cancelled/completed) trip from the driver's own list —
@@ -1877,6 +1987,12 @@ export const verifyPassengerCodeAndStartTrip = async (
 ): Promise<{ started: boolean; booking: SchoolBooking }> => {
   const user = auth.currentUser;
   if (!user) throw new Error(i18n.t("auth.pleaseLoginFirst"));
+
+  // A suspended driver may not start an active trip — same
+  // cancellation-standing check every other "start/edit/modify a trip"
+  // action in this app already runs (see driverViolationsLib.ts).
+  const suspended = await getDriverSuspensionBlockedReason(user.uid);
+  if (suspended) throw new Error(suspended);
 
   const bookingRef = doc(db, SCHOOL_BOOKINGS_COLLECTION, bookingId);
 

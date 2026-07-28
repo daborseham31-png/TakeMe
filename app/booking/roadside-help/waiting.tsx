@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,9 +29,10 @@ import { translateProblemTypesList } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { ltrContentStyle } from "../../i18n/rtl";
 import { normalizeLanguagesFromAccount } from "../../driver/create/driverHelpers";
+import BitBadge from "../BitBadge";
 import DriverReviewsSection from "../DriverReviewsSection";
 import { getOfferDriverId } from "../driverReviewsLib";
-import { acceptOffer, rejectOffer } from "./roadsideLib";
+import { acceptOffer, RoadsidePaymentMethod, rejectOffer } from "./roadsideLib";
 
 type Offer = {
   id: string;
@@ -82,8 +84,6 @@ export default function RoadsideWaitingScreen() {
     t,
   ) || rawProblemLabel;
   const address = String(params.address || "");
-  const lat = String(params.lat || "");
-  const lng = String(params.lng || "");
   // Set when opened from a "roadside_offer_received" notification — the
   // matching offer card is scrolled to and briefly highlighted.
   const highlightOfferId = String(params.highlightOfferId || params.offerId || "");
@@ -92,6 +92,13 @@ export default function RoadsideWaitingScreen() {
   const [loading, setLoading] = useState(true);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
   const [flashOfferId, setFlashOfferId] = useState<string | null>(null);
+  // The offer awaiting a Cash/Bit choice in the confirmation modal — the
+  // customer must pick one before acceptOffer is ever called (spec #2), and
+  // that choice is frozen server-side once accepted (see roadsideLib.ts /
+  // firestore.rules — the accepted helper, price, and payment method can
+  // never change after this point).
+  const [confirmingOffer, setConfirmingOffer] = useState<Offer | null>(null);
+  const [confirmMethod, setConfirmMethod] = useState<RoadsidePaymentMethod | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const offerCardRefs = useRef<Record<string, View | null>>({});
 
@@ -248,35 +255,54 @@ export default function RoadsideWaitingScreen() {
     };
   }, [visibleOffers]);
 
-  const handleAccept = async (offer: Offer) => {
+  // "Accept Help" only opens the confirmation modal — the actual acceptance
+  // (acceptOffer) never fires until the customer has picked Cash or Bit
+  // there (spec #2).
+  const openAcceptConfirmation = (offer: Offer) => {
     if (busyOfferId) return;
+    setConfirmMethod(null);
+    setConfirmingOffer(offer);
+  };
+
+  const closeAcceptConfirmation = () => {
+    if (busyOfferId) return;
+    setConfirmingOffer(null);
+    setConfirmMethod(null);
+  };
+
+  const handleConfirmAccept = async () => {
+    const offer = confirmingOffer;
+    if (!offer || !confirmMethod || busyOfferId) return;
 
     try {
       setBusyOfferId(offer.id);
 
-      await acceptOffer(requestId, {
-        id: offer.id,
-        driverId: offer.driverId,
-        driverName: offer.driverName,
-        driverPhone: offer.driverPhone,
-        price: offer.offeredPrice,
-        etaMinutes: offer.estimatedArrivalMinutes,
-      });
-
-      // Continue to the live tracking screen (reuses the existing map screen).
-      router.replace({
-        pathname: "/booking/roadside-help/map",
-        params: {
-          problemLabel,
-          address,
-          lat,
-          lng,
-          helperName: offer.driverName || t("roadsideHelp.yourHelperFallback"),
-          helperEta: String(offer.estimatedArrivalMinutes || ""),
+      await acceptOffer(
+        requestId,
+        {
+          id: offer.id,
+          driverId: offer.driverId,
+          driverName: offer.driverName,
+          driverPhone: offer.driverPhone,
+          price: offer.offeredPrice,
+          etaMinutes: offer.estimatedArrivalMinutes,
         },
+        confirmMethod,
+      );
+
+      setConfirmingOffer(null);
+      setConfirmMethod(null);
+
+      // My Bookings now shows the full accepted-helper stage machine (Live
+      // Tracking button, Waiting for helper to start driving, ...) — see
+      // renderRoadsideCard in app/(tabs)/bookings.tsx.
+      router.replace({
+        pathname: "/(tabs)/bookings",
+        params: { tab: "passenger" },
       } as any);
     } catch (error: any) {
       Alert.alert(t("common.error"), error?.message || t("roadsideHelp.couldNotAcceptOffer"));
+    } finally {
       setBusyOfferId(null);
     }
   };
@@ -466,7 +492,7 @@ export default function RoadsideWaitingScreen() {
 
                     <Pressable
                       style={[styles.acceptButton, busy && styles.buttonDisabled]}
-                      onPress={() => handleAccept(offer)}
+                      onPress={() => openAcceptConfirmation(offer)}
                       disabled={busy}
                     >
                       {busy ? (
@@ -482,6 +508,122 @@ export default function RoadsideWaitingScreen() {
           </View>
         )}
       </ScrollView>
+
+      <Modal
+        visible={!!confirmingOffer}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAcceptConfirmation}
+      >
+        <View style={styles.confirmBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={closeAcceptConfirmation}
+          />
+
+          <View style={styles.confirmCard}>
+            <Text style={styles.confirmTitle}>{t("roadsideHelp.confirmOfferTitle")}</Text>
+
+            {confirmingOffer ? (
+              <>
+                <View style={styles.confirmRow}>
+                  <Ionicons name="person-outline" size={17} color="#7C5F46" />
+                  <Text style={styles.confirmRowText}>
+                    {confirmingOffer.driverName || t("rides.driverFallback")}
+                  </Text>
+                </View>
+
+                <View style={styles.confirmRow}>
+                  <Ionicons name="cash-outline" size={17} color="#F58220" />
+                  <Text style={styles.confirmRowText}>
+                    {t("roadsideHelp.offeredPriceLabel", {
+                      amount: confirmingOffer.offeredPrice ?? "--",
+                    })}
+                  </Text>
+                </View>
+
+                <View style={styles.confirmRow}>
+                  <Ionicons name="time-outline" size={17} color="#F58220" />
+                  <Text style={styles.confirmRowText}>
+                    {t("roadsideHelp.estimatedArrivalLabel", {
+                      minutes: confirmingOffer.estimatedArrivalMinutes ?? "--",
+                    })}
+                  </Text>
+                </View>
+              </>
+            ) : null}
+
+            <Text style={styles.confirmMethodLabel}>
+              {t("roadsideHelp.chooseHowToPayLabel")}
+            </Text>
+
+            <View style={styles.confirmMethodRow}>
+              <Pressable
+                style={[
+                  styles.confirmMethodButton,
+                  confirmMethod === "cash" && styles.confirmMethodButtonActive,
+                ]}
+                onPress={() => setConfirmMethod("cash")}
+              >
+                <Text style={styles.confirmMethodEmoji}>💵</Text>
+                <Text
+                  style={[
+                    styles.confirmMethodText,
+                    confirmMethod === "cash" && styles.confirmMethodTextActive,
+                  ]}
+                >
+                  {t("common.cash")}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.confirmMethodButton,
+                  confirmMethod === "bit" && styles.confirmMethodButtonActive,
+                ]}
+                onPress={() => setConfirmMethod("bit")}
+              >
+                <BitBadge size={18} />
+                <Text
+                  style={[
+                    styles.confirmMethodText,
+                    confirmMethod === "bit" && styles.confirmMethodTextActive,
+                  ]}
+                >
+                  {t("roadsideHelp.payWithBit")}
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.confirmActionsRow}>
+              <Pressable
+                style={styles.confirmCancelButton}
+                onPress={closeAcceptConfirmation}
+                disabled={!!busyOfferId}
+              >
+                <Text style={styles.confirmCancelText}>{t("common.cancel")}</Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.confirmAcceptButton,
+                  (!confirmMethod || !!busyOfferId) && styles.buttonDisabled,
+                ]}
+                onPress={handleConfirmAccept}
+                disabled={!confirmMethod || !!busyOfferId}
+              >
+                {busyOfferId ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.confirmAcceptText}>
+                    {t("roadsideHelp.confirmAndAcceptButton")}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </DirectionalScreen>
   );
 }
@@ -735,5 +877,108 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  confirmBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  confirmCard: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 22,
+    padding: 22,
+    gap: 4,
+  },
+  confirmTitle: {
+    fontSize: 19,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 10,
+  },
+  confirmRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  confirmRowText: {
+    color: "#3C2319",
+    fontWeight: "700",
+    fontSize: 14,
+    flexShrink: 1,
+  },
+  confirmMethodLabel: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#111827",
+    marginTop: 12,
+    marginBottom: 10,
+  },
+  confirmMethodRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 18,
+  },
+  confirmMethodButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    backgroundColor: "#FFFDFC",
+  },
+  confirmMethodButtonActive: {
+    backgroundColor: "#F58220",
+    borderColor: "#F58220",
+  },
+  confirmMethodEmoji: {
+    fontSize: 16,
+  },
+  confirmMethodText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#7C5F46",
+  },
+  confirmMethodTextActive: {
+    color: "#FFFFFF",
+  },
+  confirmActionsRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  confirmCancelButton: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: "#E4DDD7",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    backgroundColor: "#FFFDFC",
+  },
+  confirmCancelText: {
+    color: "#7C5F46",
+    fontWeight: "900",
+    fontSize: 15,
+  },
+  confirmAcceptButton: {
+    flex: 1.4,
+    backgroundColor: "#F58220",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmAcceptText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 15,
   },
 });

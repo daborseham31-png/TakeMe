@@ -1,11 +1,17 @@
 // ---------------------------------------------------------------------------
-// The ORIGINAL school ride search form (quick single-day + weekly
-// recurring), unchanged in behavior — extracted verbatim from what used to
-// be app/booking/school/index.tsx so it stays reachable as the "Weekly /
-// classic search" tab (see index.tsx) after the new outbound/return/
-// round-trip direction search (DirectionSearchForm.tsx) was added. Still
-// searches against the legacy driverRoutes collection via /booking/driverresults
-// — completely independent of the new schoolTrips collection.
+// The "Weekly recurring" school ride search form — reachable as that tab
+// (see index.tsx) alongside the newer outbound/return/round-trip direction
+// search (DirectionSearchForm.tsx). Still searches against the legacy
+// driverRoutes collection via /booking/driverresults — completely
+// independent of the new schoolTrips collection.
+//
+// This form used to ALSO offer a single "quick" (non-weekly) day inside a
+// checkbox toggle, on top of the weekly-days flow — removed since a
+// one-time booking already has its own dedicated tab ("By direction")
+// one level up, and having it duplicated inside a tab literally labeled
+// "Weekly recurring" was confusing UI, not a distinct feature. This screen
+// is now always in weekly mode; validateWeeklyRows/weeklyBookingLib.ts's
+// own rules (past-day/next-week-window/etc.) are unchanged.
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
@@ -17,27 +23,22 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { getCategoryMeta } from "../bookingsLib";
+import { translateCategoryLabel } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
-import CurrentLocationButton, {
-  CurrentLocationResult,
-} from "../CurrentLocationButton";
+import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../israelLocations";
-import DateInput, { TimeInput } from "../../driver/create/DateInput";
-import {
-  getDayFromDateText,
-  isTimeAvailableForDate,
-  normalizeDateToYMD,
-  normalizeTime,
-  styles as weeklyStyles,
-} from "../../driver/create/driverHelpers";
+import SchoolAutocomplete from "../SchoolAutocomplete";
+import { getLocalizedSchoolName, SchoolLocation } from "../schools";
 import WeeklyDaysCard from "../../driver/create/WeeklyDaysCard";
 import { validateWeeklyRows, WeekDayRow } from "../weeklyBookingLib";
+
+const SCHOOL_CATEGORY_META = getCategoryMeta("school");
 
 const LANGUAGES_LIST = [
   { key: "ar", label: "العربية" },
@@ -46,27 +47,26 @@ const LANGUAGES_LIST = [
   { key: "ru", label: "Русский" },
 ];
 
-const getTodayDate = () => {
-  const today = new Date();
-
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-};
-
 export default function LegacySchoolSearchForm() {
   const { t } = useTranslation();
-  const { isRTL } = useLanguage();
+  const { isRTL, language } = useLanguage();
 
-  const [schoolName, setSchoolName] = useState("");
   const [fromAddress, setFromAddress] = useState("");
   const [schoolLocation, setSchoolLocation] = useState("");
   const [fromPlace, setFromPlace] = useState<IsraelLocation | null>(null);
   const [schoolPlace, setSchoolPlace] = useState<IsraelLocation | null>(null);
   const [fromError, setFromError] = useState("");
   const [schoolLocationError, setSchoolLocationError] = useState("");
+
+  // The actual school/university institution, picked from SchoolAutocomplete
+  // (see below) — always scoped to `schoolPlace` (this form's To/destination
+  // field), never a free-text name. `schoolQuery` is purely the field's own
+  // displayed text (the selected school's stored name, or "" once cleared);
+  // `selectedSchool` is the validated SchoolLocation Search Drivers actually
+  // requires — see handleSearch.
+  const [schoolQuery, setSchoolQuery] = useState("");
+  const [selectedSchool, setSelectedSchool] = useState<SchoolLocation | null>(null);
+  const [schoolError, setSchoolError] = useState("");
 
   const handleFromChange = (text: string) => {
     setFromAddress(text);
@@ -78,23 +78,27 @@ export default function LegacySchoolSearchForm() {
     setSchoolLocation(text);
     setSchoolPlace(null);
     if (schoolLocationError) setSchoolLocationError("");
+
+    // The school picker is scoped to THIS field (the destination city/area
+    // — see schoolAreaLocationId below), so a school picked for the
+    // previous destination is never silently kept once it changes (spec
+    // item 4) — mirrors DirectionSearchForm.tsx's handleToChange.
+    setSchoolQuery("");
+    setSelectedSchool(null);
+    if (schoolError) setSchoolError("");
   };
 
-  const [navAddress, setNavAddress] = useState("");
-  const [navCoords, setNavCoords] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
+  const handleSchoolQueryChange = (text: string) => {
+    setSchoolQuery(text);
+    setSelectedSchool(null);
+    if (schoolError) setSchoolError("");
+  };
 
-  const [tripDate, setTripDate] = useState(getTodayDate());
-  const [showTripDatePicker, setShowTripDatePicker] = useState(false);
+  // AGENTS.md's schoolSearchArea rule (same as DirectionSearchForm.tsx):
+  // school suggestions are scoped to the destination city/area — here,
+  // this form's own "To" field — never a nationwide search.
+  const schoolAreaLocationId = schoolPlace?.id ?? null;
 
-  const [tripTime, setTripTime] = useState("07:30");
-  const [showTripTimePicker, setShowTripTimePicker] = useState(false);
-
-  const [seats, setSeats] = useState(1);
-
-  const [weeklyBooking, setWeeklyBooking] = useState(false);
   const [weeklyRows, setWeeklyRows] = useState<WeekDayRow[]>([]);
 
   const [genderPref, setGenderPref] = useState<"any" | "male" | "female">(
@@ -102,14 +106,6 @@ export default function LegacySchoolSearchForm() {
   );
 
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
-
-  const decreaseSeats = () => {
-    setSeats((prev) => Math.max(1, prev - 1));
-  };
-
-  const increaseSeats = () => {
-    setSeats((prev) => Math.min(8, prev + 1));
-  };
 
   const toggleLanguage = (lang: string) => {
     if (selectedLanguages.includes(lang)) {
@@ -119,23 +115,8 @@ export default function LegacySchoolSearchForm() {
     }
   };
 
-  const handleUseCurrentLocation = (result: CurrentLocationResult) => {
-    setNavAddress(result.address);
-    setNavCoords({ latitude: result.latitude, longitude: result.longitude });
-  };
-
-  const toggleWeeklyBooking = () => {
-    const nextValue = !weeklyBooking;
-
-    setWeeklyBooking(nextValue);
-
-    if (!nextValue) {
-      setWeeklyRows([]);
-    }
-  };
-
   const handleSearch = () => {
-    if (!schoolName.trim() || !fromAddress.trim() || !schoolLocation.trim()) {
+    if (!fromAddress.trim() || !schoolLocation.trim()) {
       Alert.alert(t("auth.missingDetails"), t("validation.schoolMissingDetails"));
       return;
     }
@@ -150,9 +131,14 @@ export default function LegacySchoolSearchForm() {
       return;
     }
 
+    if (!selectedSchool) {
+      setSchoolError(t("schoolTrip.selectSchoolFromList"));
+      return;
+    }
+
     const baseParams: Record<string, string> = {
       category: "school",
-      schoolName: schoolName.trim(),
+      schoolName: getLocalizedSchoolName(selectedSchool, language),
       from: fromAddress.trim(),
       to: schoolLocation.trim(),
       fromLocationId: fromPlace.id,
@@ -169,216 +155,103 @@ export default function LegacySchoolSearchForm() {
       }),
       genderPref,
       languages: selectedLanguages.join(","),
-      ...(navCoords
-        ? {
-            pickupLatitude: String(navCoords.latitude),
-            pickupLongitude: String(navCoords.longitude),
-            pickupAddress: navAddress,
-          }
-        : {}),
     };
 
-    if (weeklyBooking) {
-      const cleanedDays = validateWeeklyRows(weeklyRows, {
-        requirePrice: false,
-      });
+    const cleanedDays = validateWeeklyRows(weeklyRows, {
+      requirePrice: false,
+    });
 
-      if (!cleanedDays) return;
-
-      router.push({
-        pathname: "/booking/driverresults",
-        params: {
-          ...baseParams,
-          bookingType: "weekly",
-          weeklyDays: JSON.stringify(
-            cleanedDays.map(({ dayKey, dayName, date, time, seats }) => ({
-              dayKey,
-              dayName,
-              date,
-              time,
-              seats,
-            })),
-          ),
-        },
-      } as any);
-
-      return;
-    }
-
-    const cleanDate = normalizeDateToYMD(tripDate);
-
-    if (!cleanDate) {
-      Alert.alert(t("validation.invalidDateTitle"), t("validation.invalidDateFuture"));
-      return;
-    }
-
-    const tripDay = getDayFromDateText(cleanDate);
-
-    const cleanTime = normalizeTime(tripTime);
-
-    if (!cleanTime) {
-      Alert.alert(t("validation.invalidTimeTitle"), t("validation.invalidTime"));
-      return;
-    }
-
-    if (!isTimeAvailableForDate(cleanDate, cleanTime)) {
-      Alert.alert(t("validation.invalidTimeTitle"), t("validation.pastTime"));
-      return;
-    }
-
-    if (seats < 1 || seats > 8) {
-      Alert.alert(t("validation.invalidSeatsTitle"), t("validation.invalidSeats"));
-      return;
-    }
+    if (!cleanedDays) return;
 
     router.push({
       pathname: "/booking/driverresults",
       params: {
         ...baseParams,
-
-        bookForWholeWeek: "false",
-        bookingType: "quick",
-
-        tripDate: cleanDate,
-        tripDay,
-        time: cleanTime,
-        seats: String(seats),
+        bookingType: "weekly",
+        weeklyDays: JSON.stringify(
+          cleanedDays.map(({ dayKey, dayName, date, time, seats }) => ({
+            dayKey,
+            dayName,
+            date,
+            time,
+            seats,
+          })),
+        ),
       },
     } as any);
   };
 
   return (
+    <KeyboardAvoidingWrapper>
     <ScrollView
       contentContainerStyle={styles.scroll}
       keyboardShouldPersistTaps="handled"
     >
-      <View style={styles.card}>
-        <Text style={[styles.label, isRTL && styles.textRTL]}>
-          {t("school.schoolNameLabel")}
-        </Text>
-        <View style={styles.inputRow}>
-          <Ionicons name="school-outline" size={18} color="#8B7B6B" />
-          <TextInput
-            style={styles.input}
-            placeholder={t("school.schoolNamePlaceholder")}
-            placeholderTextColor="#8B7B6B"
-            value={schoolName}
-            onChangeText={setSchoolName}
-          />
-        </View>
-
-        <View style={styles.twoColumns}>
-          <View style={styles.column}>
-            <IsraelLocationAutocomplete
-              label={t("booking.from")}
-              value={fromAddress}
-              onChangeText={handleFromChange}
-              onSelectLocation={(location) => {
-                setFromPlace(location);
-                setFromError("");
-              }}
-              placeholder={t("booking.enterDepartureCity")}
-              error={fromError}
-            />
-          </View>
-
-          <View style={styles.column}>
-            <IsraelLocationAutocomplete
-              label={t("booking.to")}
-              value={schoolLocation}
-              onChangeText={handleSchoolLocationChange}
-              onSelectLocation={(location) => {
-                setSchoolPlace(location);
-                setSchoolLocationError("");
-              }}
-              placeholder={t("school.toPlaceholder")}
-              error={schoolLocationError}
-            />
-          </View>
-        </View>
-
-        <View style={styles.navPickupBox}>
-          <Text style={[styles.label, isRTL && styles.textRTL]}>
-            {t("booking.pickupSectionTitle")}
-          </Text>
-          <Text style={[styles.navPickupHint, isRTL && styles.textRTL]}>
-            {t("booking.pickupSectionHint")}
-          </Text>
-
-          <CurrentLocationButton onLocated={handleUseCurrentLocation} />
-
-          {navAddress ? (
-            <View style={styles.navPickupResult}>
-              <Text style={styles.navPickupResultText}>📍 {navAddress}</Text>
-              <Text style={styles.navPickupSavedText}>
-                {t("booking.locationSaved")}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-
-        {!weeklyBooking ? (
-          <>
-            <DateInput
-              label={t("booking.tripDate")}
-              value={tripDate}
-              onChange={setTripDate}
-              showPicker={showTripDatePicker}
-              setShowPicker={setShowTripDatePicker}
-            />
-
-            <View style={styles.twoColumns}>
-              <View style={styles.column}>
-                <TimeInput
-                  label={t("booking.tripTime")}
-                  value={tripTime}
-                  onChange={setTripTime}
-                  showPicker={showTripTimePicker}
-                  setShowPicker={setShowTripTimePicker}
-                  associatedDate={tripDate}
-                />
-              </View>
-
-              <View style={styles.column}>
-                <Text style={[weeklyStyles.label, isRTL && styles.textRTL]}>
-                  {t("booking.seats")}
-                </Text>
-                <View style={styles.seatsRow}>
-                  <Pressable style={styles.seatButton} onPress={decreaseSeats}>
-                    <Ionicons name="remove" size={20} color="#111827" />
-                  </Pressable>
-
-                  <Text style={styles.seatsNumber}>{seats}</Text>
-
-                  <Pressable style={styles.seatButton} onPress={increaseSeats}>
-                    <Ionicons name="add" size={20} color="#111827" />
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-          </>
-        ) : null}
-
-        <Pressable style={styles.weeklyRow} onPress={toggleWeeklyBooking}>
+      <View style={styles.categoryPillRow}>
+        <View
+          style={[
+            styles.categoryPill,
+            { backgroundColor: `${SCHOOL_CATEGORY_META.color}18` },
+          ]}
+        >
           <Ionicons
-            name={weeklyBooking ? "checkbox" : "square-outline"}
-            size={20}
-            color={weeklyBooking ? "#F58220" : "#8B7B6B"}
+            name={SCHOOL_CATEGORY_META.icon}
+            size={14}
+            color={SCHOOL_CATEGORY_META.color}
           />
-          <Ionicons name="calendar-outline" size={16} color="#7C5F46" />
-          <Text style={styles.weeklyText}>{t("booking.bookWholeWeek")}</Text>
-        </Pressable>
+          <Text style={[styles.categoryPillText, { color: SCHOOL_CATEGORY_META.color }]}>
+            {translateCategoryLabel("school", SCHOOL_CATEGORY_META.label, t)}
+          </Text>
+        </View>
+      </View>
 
-        {weeklyBooking ? (
-          <View style={styles.weeklyBox}>
-            <WeeklyDaysCard
-              rows={weeklyRows}
-              onChange={setWeeklyRows}
-              defaultTime="07:30"
-              mode="passenger"
-            />
-          </View>
-        ) : null}
+      <View style={styles.card}>
+        <IsraelLocationAutocomplete
+          label={t("booking.from")}
+          value={fromAddress}
+          onChangeText={handleFromChange}
+          onSelectLocation={(location) => {
+            setFromPlace(location);
+            setFromError("");
+          }}
+          placeholder={t("booking.enterDepartureCity")}
+          error={fromError}
+        />
+
+        <IsraelLocationAutocomplete
+          label={t("booking.to")}
+          value={schoolLocation}
+          onChangeText={handleSchoolLocationChange}
+          onSelectLocation={(location) => {
+            setSchoolPlace(location);
+            setSchoolLocationError("");
+          }}
+          placeholder={t("school.toPlaceholder")}
+          error={schoolLocationError}
+        />
+
+        <SchoolAutocomplete
+          label={t("school.schoolNameLabel")}
+          value={schoolQuery}
+          onChangeText={handleSchoolQueryChange}
+          onSelectSchool={(school) => {
+            setSelectedSchool(school);
+            setSchoolError("");
+          }}
+          areaLocationId={schoolAreaLocationId}
+          placeholder={t("school.schoolNamePlaceholder")}
+          error={schoolError}
+        />
+
+        <View style={styles.sectionDivider} />
+
+        <WeeklyDaysCard
+          rows={weeklyRows}
+          onChange={setWeeklyRows}
+          defaultTime="07:30"
+          mode="passenger"
+          title={t("rides.weeklyTripDays")}
+        />
       </View>
 
       <View style={styles.card}>
@@ -453,12 +326,29 @@ export default function LegacySchoolSearchForm() {
         <Text style={styles.searchText}>{t("booking.searchDrivers")}</Text>
       </Pressable>
     </ScrollView>
+    </KeyboardAvoidingWrapper>
   );
 }
 
 const styles = StyleSheet.create({
   scroll: {
     paddingBottom: 40,
+  },
+  categoryPillRow: {
+    flexDirection: "row",
+    marginBottom: 12,
+  },
+  categoryPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+  },
+  categoryPillText: {
+    fontWeight: "900",
+    fontSize: 13,
   },
   card: {
     backgroundColor: "#FFFFFF",
@@ -479,12 +369,11 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#111827",
   },
-  twoColumns: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  column: {
-    flex: 1,
+  sectionDivider: {
+    height: 1,
+    backgroundColor: "#F0E7DB",
+    marginTop: 16,
+    marginBottom: 4,
   },
   label: {
     fontSize: 14,
@@ -496,93 +385,6 @@ const styles = StyleSheet.create({
   textRTL: {
     textAlign: "right",
     writingDirection: "rtl",
-  },
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E2D8CF",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    backgroundColor: "#FFFDFC",
-  },
-  input: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    color: "#111827",
-  },
-  navPickupBox: {
-    marginTop: 14,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: "#F0E5DC",
-  },
-  navPickupHint: {
-    fontSize: 12,
-    color: "#7C5F46",
-    marginTop: -4,
-    marginBottom: 4,
-  },
-  navPickupResult: {
-    marginTop: 10,
-    backgroundColor: "#F1FBF4",
-    borderWidth: 1,
-    borderColor: "#BBE7C6",
-    borderRadius: 10,
-    padding: 10,
-  },
-  navPickupResultText: {
-    color: "#111827",
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  navPickupSavedText: {
-    color: "#166534",
-    fontWeight: "900",
-    fontSize: 12,
-    marginTop: 2,
-  },
-  seatsRow: {
-    minHeight: 46,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: "#E2D8CF",
-    borderRadius: 10,
-    backgroundColor: "#FFFDFC",
-    paddingHorizontal: 10,
-  },
-  seatButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#E2D8CF",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  seatsNumber: {
-    fontSize: 20,
-    fontWeight: "900",
-    color: "#111827",
-    minWidth: 28,
-    textAlign: "center",
-  },
-  weeklyRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  weeklyText: {
-    color: "#111827",
-    fontWeight: "800",
-  },
-  weeklyBox: {
-    marginTop: 14,
   },
   optionRow: {
     flexDirection: "row",

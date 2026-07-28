@@ -145,6 +145,7 @@ export default function ChatScreen() {
           <ScrollView
             ref={scrollRef}
             contentContainerStyle={styles.messages}
+            keyboardShouldPersistTaps="handled"
             onContentSizeChange={() =>
               scrollRef.current?.scrollToEnd({ animated: true })
             }

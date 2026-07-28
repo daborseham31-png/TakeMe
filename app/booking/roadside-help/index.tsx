@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +14,7 @@ import {
 import MapView, { Marker, Region } from "react-native-maps";
 import { useTranslation } from "react-i18next";
 
+import KeyboardSafeScreen from "../../components/KeyboardSafeScreen";
 import {
   DirectionalScreen,
   PhysicalDirectionalBlockText,
@@ -230,7 +230,7 @@ export default function RoadsideHelpScreen() {
 
   return (
     <DirectionalScreen style={styles.page}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <KeyboardSafeScreen contentContainerStyle={styles.scroll}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
         </Pressable>
@@ -246,12 +246,12 @@ export default function RoadsideHelpScreen() {
         {/* Your location + map */}
         <View style={styles.card}>
           <View style={styles.locationTitleRow}>
-            <Ionicons name="location-outline" size={18} color="#F58220" />
+            <Ionicons name="location-outline" size={18} color="#EF4444" />
             <Text style={styles.sectionTitle}>{t("roadsideHelp.yourLocation")}</Text>
           </View>
 
           <View style={styles.addressRow}>
-            <Ionicons name="location" size={16} color="#EC4899" />
+            <Ionicons name="location" size={16} color="#EF4444" />
             <Text style={styles.addressText}>{addressLabel}</Text>
           </View>
 
@@ -276,7 +276,7 @@ export default function RoadsideHelpScreen() {
             </MapView>
 
             <Pressable style={[styles.recenterButton, positionEnd(12, isRTL)]} onPress={goToMyLocation}>
-              <Ionicons name="locate" size={20} color="#F58220" />
+              <Ionicons name="locate" size={20} color="#EF4444" />
             </Pressable>
           </View>
         </View>
@@ -284,7 +284,7 @@ export default function RoadsideHelpScreen() {
         {/* Problem type */}
         <View style={styles.card}>
           <View style={styles.locationTitleRow}>
-            <Ionicons name="construct-outline" size={18} color="#F58220" />
+            <Ionicons name="construct-outline" size={18} color="#EF4444" />
             <Text style={styles.sectionTitle}>{t("roadsideHelp.whatsTheProblem")}</Text>
           </View>
 
@@ -305,7 +305,7 @@ export default function RoadsideHelpScreen() {
                   <ProblemIcon
                     problem={problem}
                     size={26}
-                    color={selected ? "#F58220" : "#7C5F46"}
+                    color={selected ? "#EF4444" : "#7C5F46"}
                   />
                   <Text
                     style={[
@@ -376,7 +376,7 @@ export default function RoadsideHelpScreen() {
             </>
           )}
         </Pressable>
-      </ScrollView>
+      </KeyboardSafeScreen>
     </DirectionalScreen>
   );
 }
@@ -498,8 +498,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   problemCardActive: {
-    borderColor: "#F58220",
-    backgroundColor: "#FFF2E8",
+    borderColor: "#EF4444",
+    backgroundColor: "#FEF2F2",
   },
   problemText: {
     fontSize: 13,
@@ -508,7 +508,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   problemTextActive: {
-    color: "#B86115",
+    color: "#B91C1C",
   },
   label: {
     fontSize: 15,
@@ -533,7 +533,7 @@ const styles = StyleSheet.create({
     color: "#111827",
   },
   searchButton: {
-    backgroundColor: "#F58220",
+    backgroundColor: "#EF4444",
     borderRadius: 12,
     padding: 16,
     flexDirection: "row",
