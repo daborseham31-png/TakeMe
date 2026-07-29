@@ -89,6 +89,7 @@ import {
   RIDE_STATUS_LABEL,
   RideBooking,
   RideStatus,
+  startRide,
   startRideInProgress,
   submitRideRating,
 } from "../booking/rideBookingLib";
@@ -2620,7 +2621,7 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         return;
       }
 
-      await startRideInProgress(r.id, r);
+      await startRide(r.id, r);
       router.push({
         pathname: "/driver/ride-navigation",
         params: { id: r.id },
@@ -2636,6 +2637,13 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
 
   const handleRideArrived = (r: RideBooking) =>
     runApp(r.id, () => arriveRide(r.id, r));
+
+  // The real "Start Ride" step, distinct from handleRideStart (which only
+  // means "began driving toward pickup") — only shown once the ride has
+  // reached "arrived_pickup". Moves the card from Upcoming to In Progress —
+  // see getDriverTripBucket in bookingsLib.ts.
+  const handleRideStartTrip = (r: RideBooking) =>
+    runApp(r.id, () => startRideInProgress(r.id, r));
 
   const handleRideFinish = (r: RideBooking) =>
     runApp(r.id, () => finishRide(r.id, r));
@@ -3446,7 +3454,7 @@ useEffect(() => {
                   disabled={busy || !rideCanStart}
                 >
                   <Ionicons name="play" size={16} color="#FFFFFF" />
-                  <Text style={styles.startButtonText}>{t("booking.startRideButton")}</Text>
+                  <Text style={styles.startButtonText}>{t("booking.startDrivingToPickup")}</Text>
                 </Pressable>
 
                 {!rideCanStart && rideBlockedReason ? (
@@ -3493,7 +3501,18 @@ useEffect(() => {
               </View>
             ) : null}
 
-            {r.status === "arrived" ? (
+            {r.status === "arrived" && r.tripStatus !== "in_progress" ? (
+              <Pressable
+                style={styles.startButton}
+                onPress={() => handleRideStartTrip(r)}
+                disabled={busy}
+              >
+                <Ionicons name="play" size={16} color="#FFFFFF" />
+                <Text style={styles.startButtonText}>{t("booking.startTripButton")}</Text>
+              </Pressable>
+            ) : null}
+
+            {r.status === "arrived" && r.tripStatus === "in_progress" ? (
               <Pressable
                 style={styles.primaryButton}
                 onPress={() => handleRideFinish(r)}
@@ -5246,15 +5265,12 @@ useEffect(() => {
       <Modal
         visible={!!rebook}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setRebook(null)}
       >
-        <View style={styles.modalBackdrop}>
-          <Pressable style={{ flex: 1 }} onPress={() => setRebook(null)} />
-
-          <DirectionalCard style={styles.modalSheet}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>{t("booking.bookAgainTitle")}</Text>
+        <KeyboardAvoidingWrapper style={styles.rebookOverlay}>
+          <DirectionalCard style={styles.rebookSheet}>
+            <Text style={styles.rebookTitle}>{t("booking.bookAgainTitle")}</Text>
             <Text style={styles.modalSub}>
               {t("booking.bookAgainSubtitle")}
             </Text>
@@ -5314,21 +5330,16 @@ useEffect(() => {
               setShowPicker={setShowTimePicker}
             />
 
-            <View style={styles.modalActions}>
-              <Pressable
-                style={styles.modalCancel}
-                onPress={() => setRebook(null)}
-              >
-                <Text style={styles.modalCancelText}>{t("common.cancel")}</Text>
-              </Pressable>
+            <Pressable style={styles.rebookSearchButton} onPress={submitRebook}>
+              <Ionicons name="search-outline" size={16} color="#FFFFFF" />
+              <Text style={styles.rebookSearchText}>{t("booking.searchDrivers")}</Text>
+            </Pressable>
 
-              <Pressable style={styles.modalSearch} onPress={submitRebook}>
-                <Ionicons name="search-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.modalSearchText}>{t("booking.searchDrivers")}</Text>
-              </Pressable>
-            </View>
+            <Pressable style={styles.rebookCancelButton} onPress={() => setRebook(null)}>
+              <Text style={styles.rebookCancelText}>{t("common.cancel")}</Text>
+            </Pressable>
           </DirectionalCard>
-        </View>
+        </KeyboardAvoidingWrapper>
       </Modal>
 
       <RepublishTripModal
@@ -6487,12 +6498,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   modalSub: {
+    width: "100%",
     color: "#7C5F46",
     fontSize: 14,
     marginTop: 4,
     marginBottom: 16,
   },
   modalSummary: {
+    width: "100%",
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E7DCD1",
@@ -6501,39 +6514,49 @@ const styles = StyleSheet.create({
     gap: 4,
     marginBottom: 8,
   },
-  modalActions: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 20,
-  },
-  modalCancel: {
+  rebookOverlay: {
     flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#E4DDD7",
-    borderRadius: 14,
-    paddingVertical: 15,
+    backgroundColor: "rgba(0,0,0,0.35)",
     alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  rebookSheet: {
+    width: "100%",
+    maxWidth: 420,
     backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 22,
+    alignItems: "center",
   },
-  modalCancelText: {
-    color: "#7C5F46",
+  rebookTitle: {
+    fontSize: 18,
     fontWeight: "900",
-    fontSize: 15,
+    color: "#111827",
   },
-  modalSearch: {
-    flex: 1.5,
+  rebookSearchButton: {
+    width: "100%",
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "#F58220",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#F58220",
-    borderRadius: 14,
-    paddingVertical: 15,
+    marginTop: 16,
   },
-  modalSearchText: {
+  rebookSearchText: {
     color: "#FFFFFF",
     fontWeight: "900",
     fontSize: 15,
+  },
+  rebookCancelButton: {
+    marginTop: 10,
+    paddingVertical: 8,
+  },
+  rebookCancelText: {
+    color: "#7C5F46",
+    fontWeight: "800",
   },
   ratingSummaryRow: {
     flexDirection: "row",

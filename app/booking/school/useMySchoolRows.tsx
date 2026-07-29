@@ -1854,11 +1854,11 @@ export default function useMySchoolRows({
             />
 
             <Pressable
-              style={[styles.ratingSubmitButton, { marginTop: 16 }]}
+              style={styles.bookAgainSearchButton}
               onPress={submitSchoolBookAgain}
             >
               <Ionicons name="search-outline" size={16} color="#FFFFFF" />
-              <Text style={styles.ratingSubmitText}>{t("booking.searchDrivers")}</Text>
+              <Text style={styles.bookAgainSearchText}>{t("booking.searchDrivers")}</Text>
             </Pressable>
 
             <Pressable style={styles.ratingCancelButton} onPress={closeBookAgainModal}>
@@ -2220,6 +2220,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   ratingSubmitText: { color: "#FFFFFF", fontWeight: "900", fontSize: 15 },
+  bookAgainSearchButton: {
+    width: "100%",
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "#F58220",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 16,
+  },
+  bookAgainSearchText: { color: "#FFFFFF", fontWeight: "900", fontSize: 15 },
   ratingCancelButton: { marginTop: 10, paddingVertical: 8 },
   ratingCancelText: { color: "#7C5F46", fontWeight: "800" },
 });

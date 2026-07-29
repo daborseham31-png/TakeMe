@@ -466,34 +466,22 @@ export const startRide = async (bookingId: string, booking: RideBooking) => {
   });
 };
 
-// The Driver My Bookings card's own "Start Ride" button (bookings.tsx —
-// handleRideStart) calls THIS, not startRide above — pressing it is the one
-// real "the ride has actually started" action for Personal Ride, so it must
-// persist tripStatus "in_progress" directly in one write, not just the
-// "driver is on the way" sub-step. `.status` is set to "arrived" (the last
+// The Driver My Bookings card's "Start Ride" button, shown only once the
+// ride has reached "arrived_pickup" (bookings.tsx — handleRideStartTrip) —
+// the passenger has now actually entered the vehicle, so this is what
+// persists tripStatus "in_progress". `.status` stays "arrived" (the last
 // non-terminal RideStatus value — RideStatus itself has no "in_progress")
 // so getRideCancelBlockedReason's existing `status !== "booked"` check still
-// correctly blocks cancellation once started, and trackingEnabled is set
-// true immediately so live GPS sharing begins right away instead of waiting
-// on an intermediate "arrived at pickup" step that this simplified flow
-// skips entirely.
+// correctly blocks cancellation once started. driverOnWayAt/arrivedPickupAt
+// were already stamped by startRide/arriveRide above — never re-stamped
+// here, only tripStartedAt is new at this stage.
 export const startRideInProgress = async (bookingId: string, booking: RideBooking) => {
-  if (!canStartTrip(booking)) {
-    throw new Error(
-      getStartTripBlockedReason(booking) ||
-        i18n.t("booking.startTripOnlyOnTripDate"),
-    );
-  }
-
   await updateDoc(doc(db, "bookings", bookingId), {
     status: "arrived" as RideStatus,
     tripStatus: "in_progress" as TripTrackingStatus,
     trackingEnabled: true,
     needsPassengerRating: false,
-    driverOnWayAt: serverTimestamp(),
-    arrivedPickupAt: serverTimestamp(),
     tripStartedAt: serverTimestamp(),
-    startedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 

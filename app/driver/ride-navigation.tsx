@@ -408,11 +408,13 @@ export default function RideNavigationScreen() {
     const tripStatus = getTripStatus(booking);
 
     // Personal Ride: tracking is active for the whole "driver has arrived
-    // and/or the trip is actually running" window — arrived_pickup (via the
-    // multi-step ride-navigation flow) or in_progress directly (the Driver
-    // My Bookings card's own "Start Ride" button — see startRideInProgress
-    // in rideBookingLib.ts, which sets trackingEnabled true and tripStatus
-    // "in_progress" in one write, skipping arrived_pickup entirely).
+    // and/or the trip is actually running" window — arrived_pickup or
+    // in_progress, whichever stage was reached last, whether the driver got
+    // there through this screen's own buttons or the Driver My Bookings
+    // card's equivalent buttons (handleRideArrived/handleRideStartTrip in
+    // bookings.tsx, calling arriveRide/startRideInProgress in
+    // rideBookingLib.ts) — every stage always advances one step at a time,
+    // never skipping arrived_pickup.
     //
     // School Trips: must NOT start merely because the driver pressed "I
     // arrived" — only once at least one passenger's code has been verified
