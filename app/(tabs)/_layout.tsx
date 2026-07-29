@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import * as Clipboard from "expo-clipboard";
 import { Tabs } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -10,9 +11,9 @@ import {
   where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
+import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth, db } from "../../firebase";
 import { normalizeBooking } from "../booking/bookingsLib";
@@ -28,6 +29,10 @@ import {
 import { registerForPushNotificationsAsync } from "../pushNotifications";
 
 const RIDE_LIKE_CATEGORIES = [RIDE_CATEGORY, "school"];
+
+const NOTIFICATION_PAIR_PREFIX = "TAKEME_PAIR:";
+const NOTIFICATION_WORKER_URL =
+  "https://takeme-notifications.yvcstudent4.workers.dev";
 
 // A booking still needs attention as a passenger while the trip hasn't been
 // finished by the driver yet, or the trip finished but the passenger hasn't
@@ -251,6 +256,8 @@ export default function TabLayout() {
   const [hasDriverAttention, setHasDriverAttention] = useState(false);
   const hasActiveRide = hasPassengerAttention || hasDriverAttention;
   const [unreadChats, setUnreadChats] = useState(0);
+  const pairingInProgressRef = useRef(false);
+  const lastPairingClipboardRef = useRef("");
 
   // Which booking's location this device is currently sharing for, if any
   // — lets the effect below start/stop tracking only when this actually
@@ -263,6 +270,95 @@ export default function TabLayout() {
   useEffect(() => {
     languageRef.current = language;
   }, [language]);
+
+  // Hidden iPhone notification pairing:
+  // When the app becomes active, read only a clipboard value that starts with
+  // "TAKEME_PAIR:" and claim its 6-digit code using the Firebase account that
+  // is currently signed in. No pairing field or button is shown in the UI.
+  useEffect(() => {
+    let disposed = false;
+
+    const claimPairingCodeFromClipboard = async () => {
+      if (disposed || pairingInProgressRef.current) return;
+
+      const user = auth.currentUser;
+      if (!user) return;
+
+      let clipboardValue = "";
+
+      try {
+        clipboardValue = (await Clipboard.getStringAsync()).trim();
+      } catch (error) {
+        console.warn("Could not read notification pairing clipboard:", error);
+        return;
+      }
+
+      const pairMatch = clipboardValue.match(/^TAKEME_PAIR:(\d{6})$/);
+
+      if (!pairMatch) return;
+      if (lastPairingClipboardRef.current === clipboardValue) return;
+
+      pairingInProgressRef.current = true;
+      lastPairingClipboardRef.current = clipboardValue;
+
+      try {
+        const idToken = await user.getIdToken(true);
+
+        const response = await fetch(`${NOTIFICATION_WORKER_URL}/pair/claim`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            code: pairMatch[1],
+          }),
+        });
+
+        const result = await response.json().catch(() => null);
+
+        if (!response.ok || result?.ok !== true) {
+          throw new Error(result?.error || `PAIRING_FAILED_${response.status}`);
+        }
+
+        // Remove the temporary pairing value after successful linking.
+        await Clipboard.setStringAsync("");
+
+        console.info("iPhone notification device linked successfully", {
+          uid: result.uid,
+          linkedDevices: result.linkedDevices,
+        });
+      } catch (error) {
+        console.warn("Hidden iPhone notification pairing failed:", error);
+      } finally {
+        pairingInProgressRef.current = false;
+      }
+    };
+
+    const appStateSubscription = AppState.addEventListener(
+      "change",
+      (nextState) => {
+        if (nextState === "active") {
+          void claimPairingCodeFromClipboard();
+        }
+      },
+    );
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        void claimPairingCodeFromClipboard();
+      }
+    });
+
+    // Also check once when this layout mounts.
+    void claimPairingCodeFromClipboard();
+
+    return () => {
+      disposed = true;
+      appStateSubscription.remove();
+      unsubscribeAuth();
+    };
+  }, []);
 
   // Live listeners: passenger side stays lit until the trip is rated;
   // driver side stays lit until the driver presses Finish Trip.
@@ -448,7 +544,12 @@ export default function TabLayout() {
         options={{
           title: t("messages.tabTitle"),
           tabBarIcon: ({ color, size }) => (
-            <MessagesTabIcon color={color} size={size} unreadCount={unreadChats} isRTL={isRTL} />
+            <MessagesTabIcon
+              color={color}
+              size={size}
+              unreadCount={unreadChats}
+              isRTL={isRTL}
+            />
           ),
         }}
       />
