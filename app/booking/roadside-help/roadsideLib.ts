@@ -308,7 +308,7 @@ export const createRoadsideRequest = async (
     // "Go help passenger" can read either shape directly off the request.
     latitude: location.latitude,
     longitude: location.longitude,
-    status: "pending",
+    status: "open",
     selectedOfferId: null,
     selectedDriverId: null,
     selectedDriverName: null,
@@ -514,7 +514,7 @@ export const acceptOffer = async (
       throw new Error(i18n.t("roadsideHelp.onlyPassengerCanAccept"));
     }
 
-    if (req.status && req.status !== "pending") {
+    if (req.status && req.status !== "open") {
       throw new Error(i18n.t("workErrand.requestAlreadyHandled"));
     }
 

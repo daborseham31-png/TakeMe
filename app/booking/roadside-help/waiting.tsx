@@ -30,6 +30,7 @@ import { useLanguage } from "../../i18n/LanguageProvider";
 import { ltrContentStyle } from "../../i18n/rtl";
 import { normalizeLanguagesFromAccount } from "../../driver/create/driverHelpers";
 import BitBadge from "../BitBadge";
+import { openBitPayment } from "../bitPayment";
 import DriverReviewsSection from "../DriverReviewsSection";
 import { getOfferDriverId } from "../driverReviewsLib";
 import { acceptOffer, RoadsidePaymentMethod, rejectOffer } from "./roadsideLib";
@@ -268,6 +269,17 @@ export default function RoadsideWaitingScreen() {
     if (busyOfferId) return;
     setConfirmingOffer(null);
     setConfirmMethod(null);
+  };
+
+  // Picking Bit as the payment method immediately copies the driver's phone
+  // number and opens the BIT app (see bitPayment.ts) so the customer can send
+  // the money right away — the offer itself is still only accepted once they
+  // press "Confirm & Accept" below.
+  const handleChooseBit = () => {
+    setConfirmMethod("bit");
+    if (confirmingOffer) {
+      openBitPayment(confirmingOffer.driverPhone || "", confirmingOffer.offeredPrice ?? null);
+    }
   };
 
   const handleConfirmAccept = async () => {
@@ -579,9 +591,9 @@ export default function RoadsideWaitingScreen() {
               <Pressable
                 style={[
                   styles.confirmMethodButton,
-                  confirmMethod === "bit" && styles.confirmMethodButtonActive,
+                  confirmMethod === "bit" && styles.confirmMethodButtonBitActive,
                 ]}
-                onPress={() => setConfirmMethod("bit")}
+                onPress={handleChooseBit}
               >
                 <BitBadge size={18} />
                 <Text
@@ -938,6 +950,12 @@ const styles = StyleSheet.create({
   confirmMethodButtonActive: {
     backgroundColor: "#F58220",
     borderColor: "#F58220",
+  },
+  // Bit keeps its own brand teal when selected (matches BitBadge) instead of
+  // the app's orange, so it reads as "Bit" rather than a generic active state.
+  confirmMethodButtonBitActive: {
+    backgroundColor: "#00B2A9",
+    borderColor: "#00B2A9",
   },
   confirmMethodEmoji: {
     fontSize: 16,
