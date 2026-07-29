@@ -642,7 +642,15 @@ export const filterNearbyItems = (
       item.distanceKm !== null && item.distanceKm <= NEARBY_RIDE_RADIUS_KM,
   );
 
-const dateTimeKey = (item: FeedItem) => {
+// Combines a feed item's real scheduled date + START time into one numeric
+// timestamp, using explicit year/month/day/hour/minute components (never
+// `new Date(dateString)`) so it parses identically on iOS and Android — same
+// technique as combineDateTimeMs above, extended to weekly items (first
+// still-available day) and to a displayed time RANGE like "18:00–20:00"
+// (every category's own stored field — time/startTime/day.time — is already
+// just "HH:MM" today, but this stays correct if a range string ever reaches
+// it too, by keeping only the part before the dash).
+const getFeedItemStartTimestamp = (item: FeedItem): number => {
   const date = item.isWeekly
     ? item.availableWeeklyDays[0]?.date || item.date
     : item.date;
@@ -650,33 +658,39 @@ const dateTimeKey = (item: FeedItem) => {
     ? item.availableWeeklyDays[0]?.time || item.time
     : item.time || item.startTime;
 
-  if (!date) return Number.MAX_SAFE_INTEGER;
-  const ts = new Date(`${date}T${time || "00:00"}:00`).getTime();
-  return Number.isNaN(ts) ? Number.MAX_SAFE_INTEGER : ts;
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ""));
+  if (!dateMatch) return Number.MAX_SAFE_INTEGER;
+
+  const [, y, m, d] = dateMatch;
+
+  const startTimeText = String(time || "").split(/[–—-]/)[0].trim();
+  const timeMatch = /^(\d{1,2}):(\d{2})$/.exec(startTimeText);
+  const hours = timeMatch ? Number(timeMatch[1]) : 0;
+  const minutes = timeMatch ? Number(timeMatch[2]) : 0;
+
+  const dt = new Date(Number(y), Number(m) - 1, Number(d), hours, minutes, 0, 0);
+  return Number.isNaN(dt.getTime()) ? Number.MAX_SAFE_INTEGER : dt.getTime();
 };
 
-// Nearest-first, then nearest upcoming date/time, then higher rating as a
-// tie-breaker. Items with no distance (coordinates missing, or user position
-// unavailable) sort after every item that does have one.
+// Chronological order is the ONE primary key — nearest upcoming date/start
+// time first, always, regardless of category/distance/rating/title/
+// createdAt/Firestore order. distanceKm (attachDistances above) is still
+// carried on every item for DISPLAY only; it must never affect this order.
+// Tie-break (same date+start time) falls back to createdAt, then id, purely
+// for a stable/deterministic order — never the primary key.
 export const sortFeedItems = (
   items: FeedItemWithDistance[],
 ): FeedItemWithDistance[] =>
   [...items].sort((a, b) => {
-    if (
-      a.distanceKm !== null &&
-      b.distanceKm !== null &&
-      a.distanceKm !== b.distanceKm
-    ) {
-      return a.distanceKm - b.distanceKm;
-    }
-    if (a.distanceKm !== null && b.distanceKm === null) return -1;
-    if (a.distanceKm === null && b.distanceKm !== null) return 1;
-
-    const aTime = dateTimeKey(a);
-    const bTime = dateTimeKey(b);
+    const aTime = getFeedItemStartTimestamp(a);
+    const bTime = getFeedItemStartTimestamp(b);
     if (aTime !== bTime) return aTime - bTime;
 
-    return b.ratingAverage - a.ratingAverage;
+    if (a.createdAtSeconds !== b.createdAtSeconds) {
+      return a.createdAtSeconds - b.createdAtSeconds;
+    }
+
+    return a.id.localeCompare(b.id);
   });
 
 export const FEED_PAGE_SIZE = 20;
