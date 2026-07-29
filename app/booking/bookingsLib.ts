@@ -1471,3 +1471,35 @@ export const normalizeDriverTrip = (
     ]),
   };
 };
+
+// A pre-fix weekly Personal Ride document stored every selected day as one
+// array entry (weeklyTrips) inside a SINGLE driverRoutes document — the
+// document this app now creates per-date going forward (see RideForm.tsx's
+// weekly submit). Display-only split for those old documents: every virtual
+// row below shares the SAME real document id, so cancel/complete/republish
+// still act on the whole legacy document (there is no independent per-day
+// state to split without rewriting old data) — but the card list no longer
+// shows every weekday joined together on one card. New documents (exactly
+// one day each) always pass through untouched as a single-item array.
+export const explodeDriverRouteTrip = (
+  id: string,
+  data: any,
+): DriverTripItem[] => {
+  const base = normalizeDriverTrip(id, data, "driverRoutes");
+
+  const isLegacyMultiDayPersonalWeekly =
+    data.category === "personal" &&
+    Array.isArray(data.weeklyTrips) &&
+    data.weeklyTrips.length > 1;
+
+  if (!isLegacyMultiDayPersonalWeekly) return [base];
+
+  return data.weeklyTrips.map((occurrence: any) => ({
+    ...base,
+    date: occurrence.date || base.date,
+    days: occurrence.dayName ? [occurrence.dayName] : base.days,
+    time: occurrence.time || base.time,
+    price: typeof occurrence.price === "number" ? occurrence.price : base.price,
+    seats: typeof occurrence.seats === "number" ? occurrence.seats : base.seats,
+  }));
+};

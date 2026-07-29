@@ -49,6 +49,7 @@ import {
   DRIVER_CANCEL_LOCK_HOURS,
   DriverCollection,
   DriverTripItem,
+  explodeDriverRouteTrip,
   getBookingDateYMD,
   getCategoryMeta,
   getDriverTripBucket,
@@ -702,10 +703,12 @@ const subscribe = (
   onSnapshot(
     query(collection(db, collectionName), where(field, "==", uid)),
     (snap) => {
+      const visibleDocs = snap.docs.filter((d) => d.data().deletedForDriver !== true);
+
       setter(
-        snap.docs
-          .filter((d) => d.data().deletedForDriver !== true)
-          .map((d) => normalizeDriverTrip(d.id, d.data(), collectionName)),
+        collectionName === "driverRoutes"
+          ? visibleDocs.flatMap((d) => explodeDriverRouteTrip(d.id, d.data()))
+          : visibleDocs.map((d) => normalizeDriverTrip(d.id, d.data(), collectionName)),
       );
       setLoading(false);
     },
@@ -3827,7 +3830,7 @@ useEffect(() => {
 
     return (
       <View
-        key={`${trip.collectionName}-${trip.id}`}
+        key={`${trip.collectionName}-${trip.id}-${trip.date}`}
         style={[styles.card, accentBorderStart(4, meta.color, isRTL), done && styles.cardDone]}
       >
         <View style={styles.cardTop}>

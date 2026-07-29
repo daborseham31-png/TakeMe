@@ -16,6 +16,7 @@ import {
   WeekDayRow,
 } from "../../booking/weeklyBookingLib";
 import DateInput, { TimeInput } from "./DateInput";
+import MonthCalendarPicker from "./MonthCalendarPicker";
 import { getDigitsOnly, styles as sharedStyles } from "./driverHelpers";
 
 type Props = {
@@ -29,7 +30,18 @@ type Props = {
   // the title any OTHER existing caller (Personal Ride weekly, driver
   // route creation) already relies on.
   title?: string;
+  // "singleWeek" (default) is the original behavior — a per-row native date
+  // picker locked to the current/next Sunday-to-Saturday week, unchanged for
+  // School and passenger booking. "fullMonth" (Personal Ride weekly
+  // creation only) replaces that with a single full-month multi-select
+  // calendar with no week restriction — see MonthCalendarPicker.
+  calendarVariant?: "singleWeek" | "fullMonth";
 };
+
+// Comfortably below Firestore's own 500-write batch limit — just a sanity
+// ceiling so one weekly Personal Ride submission can't balloon into a huge
+// batch.
+const MAX_FULL_MONTH_DATES = 60;
 
 const parseYMDToEndOfDay = (ymd: string) => {
   const [year, month, day] = ymd.split("-").map(Number);
@@ -47,11 +59,14 @@ export default function WeeklyDaysCard({
   defaultTime,
   mode,
   title,
+  calendarVariant = "singleWeek",
 }: Props) {
   const { t } = useTranslation();
   const [openDatePickerId, setOpenDatePickerId] = useState<string | null>(null);
   const [openTimePickerId, setOpenTimePickerId] = useState<string | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<WeekChoice>("current");
+  const [showMonthCalendar, setShowMonthCalendar] = useState(false);
+  const isFullMonth = calendarVariant === "fullMonth";
 
   const nextWeekOpen = isNextWeekOpen();
 
@@ -128,6 +143,32 @@ export default function WeeklyDaysCard({
     updateRow(id, { date: value });
   };
 
+  // fullMonth mode only — tapping a date in the inline calendar toggles it
+  // immediately (no separate confirm step, so several dates can be picked
+  // one after another). Deselecting an already-picked date removes its row
+  // (and any time/seats/price already entered for it); picking a new date
+  // adds a fresh row.
+  const handleToggleDate = (date: string) => {
+    const existingIndex = rows.findIndex((row) => row.date === date);
+
+    if (existingIndex !== -1) {
+      onChange(rows.filter((row) => row.date !== date));
+      return;
+    }
+
+    if (rows.length >= MAX_FULL_MONTH_DATES) {
+      Alert.alert(
+        t("rides.maxDatesReachedTitle"),
+        t("rides.maxDatesReachedMessage", { count: MAX_FULL_MONTH_DATES }),
+      );
+      return;
+    }
+
+    const nextRows = [...rows, { ...makeEmptyWeekDayRow(defaultTime), date }];
+    nextRows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    onChange(nextRows);
+  };
+
   const decreaseSeats = (id: string, current: number) =>
     updateRow(id, { seats: Math.max(1, current - 1) });
 
@@ -139,52 +180,89 @@ export default function WeeklyDaysCard({
       <Text style={sharedStyles.label}>
         {title ?? (mode === "driver" ? t("rides.weeklyTripDays") : t("rides.chooseDaysLabel"))}
       </Text>
-      <Text style={styles.hint}>{t("rides.weeklyHintRange")}</Text>
-      <Text style={styles.hint}>
-        {nextWeekOpen
-          ? t("rides.nextWeekAvailable")
-          : t("rides.nextWeekOpensSaturday")}
-      </Text>
 
-      {nextWeekOpen ? (
-        <View style={styles.weekToggleRow}>
-          <Pressable
-            style={[
-              styles.weekToggleButton,
-              selectedWeek === "current" && styles.weekToggleButtonActive,
-            ]}
-            onPress={() => switchWeek("current")}
-          >
-            <Text
-              style={[
-                styles.weekToggleText,
-                selectedWeek === "current" && styles.weekToggleTextActive,
-              ]}
-            >
-              {t("rides.thisWeek")}
-            </Text>
-          </Pressable>
+      {isFullMonth ? (
+        <>
+          <Text style={styles.hint}>{t("rides.selectDatesHintDriver")}</Text>
 
           <Pressable
-            style={[
-              styles.weekToggleButton,
-              selectedWeek === "next" && styles.weekToggleButtonActive,
-            ]}
-            onPress={() => switchWeek("next")}
+            style={styles.selectDatesField}
+            onPress={() => setShowMonthCalendar((prev) => !prev)}
           >
-            <Text
-              style={[
-                styles.weekToggleText,
-                selectedWeek === "next" && styles.weekToggleTextActive,
-              ]}
-            >
-              {t("rides.nextWeek")}
+            <Ionicons name="calendar-outline" size={20} color="#8B7B6B" />
+            <Text style={styles.selectDatesFieldText}>
+              {t("rides.selectDatesFieldPlaceholder")}
             </Text>
+            <Ionicons
+              name={showMonthCalendar ? "chevron-up" : "chevron-down"}
+              size={18}
+              color="#8B7B6B"
+            />
           </Pressable>
-        </View>
-      ) : null}
 
-      {rows.length === 0 ? (
+          {showMonthCalendar ? (
+            <MonthCalendarPicker
+              selectedDates={rows.map((row) => row.date).filter(Boolean)}
+              onToggleDate={handleToggleDate}
+            />
+          ) : null}
+
+          {rows.length > 0 ? (
+            <Text style={styles.selectedCountText}>
+              {t("rides.selectedDatesCount", { count: rows.length })}
+            </Text>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <Text style={styles.hint}>{t("rides.weeklyHintRange")}</Text>
+          <Text style={styles.hint}>
+            {nextWeekOpen
+              ? t("rides.nextWeekAvailable")
+              : t("rides.nextWeekOpensSaturday")}
+          </Text>
+
+          {nextWeekOpen ? (
+            <View style={styles.weekToggleRow}>
+              <Pressable
+                style={[
+                  styles.weekToggleButton,
+                  selectedWeek === "current" && styles.weekToggleButtonActive,
+                ]}
+                onPress={() => switchWeek("current")}
+              >
+                <Text
+                  style={[
+                    styles.weekToggleText,
+                    selectedWeek === "current" && styles.weekToggleTextActive,
+                  ]}
+                >
+                  {t("rides.thisWeek")}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.weekToggleButton,
+                  selectedWeek === "next" && styles.weekToggleButtonActive,
+                ]}
+                onPress={() => switchWeek("next")}
+              >
+                <Text
+                  style={[
+                    styles.weekToggleText,
+                    selectedWeek === "next" && styles.weekToggleTextActive,
+                  ]}
+                >
+                  {t("rides.nextWeek")}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </>
+      )}
+
+      {rows.length === 0 && !isFullMonth ? (
         <View style={styles.emptyBox}>
           <Ionicons name="calendar-outline" size={22} color="#8B7B6B" />
           <Text style={styles.emptyText}>
@@ -218,17 +296,24 @@ export default function WeeklyDaysCard({
               </Pressable>
             </View>
 
-            <DateInput
-              label={t("booking.date")}
-              value={row.date}
-              onChange={(value) => handleDateChange(row.id, value)}
-              showPicker={openDatePickerId === row.id}
-              setShowPicker={(value) =>
-                setOpenDatePickerId(value ? row.id : null)
-              }
-              minimumDate={minimumDate}
-              maximumDate={maximumDate}
-            />
+            {isFullMonth ? (
+              <View style={styles.readOnlyDateRow}>
+                <Ionicons name="calendar-outline" size={18} color="#8B7B6B" />
+                <Text style={styles.readOnlyDateText}>{row.date}</Text>
+              </View>
+            ) : (
+              <DateInput
+                label={t("booking.date")}
+                value={row.date}
+                onChange={(value) => handleDateChange(row.id, value)}
+                showPicker={openDatePickerId === row.id}
+                setShowPicker={(value) =>
+                  setOpenDatePickerId(value ? row.id : null)
+                }
+                minimumDate={minimumDate}
+                maximumDate={maximumDate}
+              />
+            )}
 
             <View style={sharedStyles.twoColumns}>
               <View style={sharedStyles.column}>
@@ -291,14 +376,16 @@ export default function WeeklyDaysCard({
         );
       })}
 
-      <Pressable
-        style={[styles.addButton, rows.length >= 7 && styles.addButtonDisabled]}
-        onPress={addRow}
-        disabled={rows.length >= 7}
-      >
-        <Ionicons name="add-circle-outline" size={18} color="#F58220" />
-        <Text style={styles.addButtonText}>{t("rides.addAnotherDay")}</Text>
-      </Pressable>
+      {!isFullMonth ? (
+        <Pressable
+          style={[styles.addButton, rows.length >= 7 && styles.addButtonDisabled]}
+          onPress={addRow}
+          disabled={rows.length >= 7}
+        >
+          <Ionicons name="add-circle-outline" size={18} color="#F58220" />
+          <Text style={styles.addButtonText}>{t("rides.addAnotherDay")}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -312,6 +399,47 @@ const styles = StyleSheet.create({
     color: "#7C5F46",
     marginTop: -4,
     marginBottom: 6,
+  },
+  selectDatesField: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    backgroundColor: "#FFFDFC",
+    marginBottom: 12,
+  },
+  selectDatesFieldText: {
+    flex: 1,
+    color: "#111827",
+    fontWeight: "700",
+  },
+  selectedCountText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 13,
+    marginBottom: 12,
+    marginTop: -4,
+  },
+  readOnlyDateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    backgroundColor: "#FFFDFC",
+    marginBottom: 4,
+  },
+  readOnlyDateText: {
+    color: "#111827",
+    fontWeight: "700",
+    writingDirection: "ltr",
   },
   weekToggleRow: {
     flexDirection: "row",

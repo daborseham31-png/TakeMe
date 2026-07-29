@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, doc, serverTimestamp, writeBatch } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -21,7 +21,9 @@ import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import {
+  generateWeeklyGroupId,
   validateWeeklyRows,
+  validateWeeklyRowsAnyFutureDate,
   WeekDayRow,
   WeeklyDriverDay,
 } from "../../booking/weeklyBookingLib";
@@ -242,9 +244,13 @@ export default function RideForm({
     let cleanPrice = 0;
 
     if (recurring) {
-      const cleanedDays = validateWeeklyRows(weeklyRows, {
-        requirePrice: true,
-      });
+      // Personal Ride weekly creation allows any future date across any
+      // future month (see MonthCalendarPicker) — School keeps the original
+      // single-week restriction via validateWeeklyRows, unchanged.
+      const cleanedDays =
+        category === "personal"
+          ? validateWeeklyRowsAnyFutureDate(weeklyRows, { requirePrice: true })
+          : validateWeeklyRows(weeklyRows, { requirePrice: true });
 
       if (!cleanedDays) return;
 
@@ -316,7 +322,7 @@ export default function RideForm({
         routeCoords.toLng = toCoords.longitude;
       }
 
-      await addDoc(collection(db, "driverRoutes"), {
+      const baseRouteFields = {
         driverId: user.uid,
 
         driverName,
@@ -358,28 +364,70 @@ export default function RideForm({
         },
         ...routeCoords,
 
-        tripDate: cleanTripDate,
-        startDate: cleanTripDate,
-        day: tripDay,
-
-        isRecurring: recurring,
-        bookingType: recurring ? "weekly" : "quick",
-        repeatDays: finalAvailableDays,
-        availableDays: finalAvailableDays,
-        weeklyTrips: recurring ? weeklyTrips : [],
-
-        time: cleanTime,
-
-        price: cleanPrice,
-        seats: cleanSeats,
-
         rating: 4.8,
         reviews: 0,
         eta: 10,
         active: true,
+      };
 
-        createdAt: serverTimestamp(),
-      });
+      if (recurring && category === "personal") {
+        // Every selected date becomes its own independent driverRoutes
+        // document — own id, own date/day/time, own booking/cancellation/
+        // completion state — instead of one document holding every day in a
+        // weeklyTrips array. weeklyGroupId only links them for traceability;
+        // it is never read back to treat them as one trip. A single
+        // writeBatch keeps the whole submission atomic.
+        const weeklyGroupId = generateWeeklyGroupId();
+        const batch = writeBatch(db);
+
+        weeklyTrips.forEach((occurrence) => {
+          const routeRef = doc(collection(db, "driverRoutes"));
+
+          batch.set(routeRef, {
+            ...baseRouteFields,
+
+            tripDate: occurrence.date,
+            startDate: occurrence.date,
+            day: occurrence.dayName,
+
+            isRecurring: true,
+            bookingType: "weekly",
+            repeatDays: [occurrence.dayName],
+            availableDays: [occurrence.dayName],
+            weeklyTrips: [{ ...occurrence }],
+            weeklyGroupId,
+
+            time: occurrence.time,
+            price: occurrence.price,
+            seats: occurrence.seats,
+
+            createdAt: serverTimestamp(),
+          });
+        });
+
+        await batch.commit();
+      } else {
+        await addDoc(collection(db, "driverRoutes"), {
+          ...baseRouteFields,
+
+          tripDate: cleanTripDate,
+          startDate: cleanTripDate,
+          day: tripDay,
+
+          isRecurring: recurring,
+          bookingType: recurring ? "weekly" : "quick",
+          repeatDays: finalAvailableDays,
+          availableDays: finalAvailableDays,
+          weeklyTrips: recurring ? weeklyTrips : [],
+
+          time: cleanTime,
+
+          price: cleanPrice,
+          seats: cleanSeats,
+
+          createdAt: serverTimestamp(),
+        });
+      }
 
       recordUsedFormValues({ carModel: car, carColor, plateNumber: carPlate, price: String(cleanPrice) });
 
@@ -551,6 +599,7 @@ export default function RideForm({
               onChange={setWeeklyRows}
               defaultTime="09:00"
               mode="driver"
+              calendarVariant={category === "personal" ? "fullMonth" : "singleWeek"}
             />
           )}
 

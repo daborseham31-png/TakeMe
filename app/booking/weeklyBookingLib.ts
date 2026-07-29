@@ -429,6 +429,108 @@ export const validateWeeklyRows = (
   return cleaned.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 };
 
+// Personal Ride weekly creation (driver side) — unlike School's
+// validateWeeklyRows above, this allows any number of today-or-future dates
+// across ANY future month, never restricted to a single Sunday-to-Saturday
+// week bucket. Every other check (past dates, duplicate dates, time already
+// passed today, seats, price) is identical to validateWeeklyRows. Kept as a
+// separate function rather than changing validateWeeklyRows so School's
+// existing single-week restriction is never affected.
+export const validateWeeklyRowsAnyFutureDate = (
+  rows: WeekDayRow[],
+  options: { requirePrice?: boolean } = {},
+): WeeklyDriverDay[] | null => {
+  if (rows.length === 0) {
+    Alert.alert(i18n.t("validation.missingDaysTitle"), i18n.t("validation.addAtLeastOneDayMessage"));
+    return null;
+  }
+
+  const now = getLocalNowInIsrael();
+  const todayYMD = formatYMD(now);
+  const seenDates = new Set<string>();
+  const cleaned: WeeklyDriverDay[] = [];
+
+  for (const row of rows) {
+    const cleanDate = parseAnyDateToYMD(row.date);
+
+    if (!cleanDate || cleanDate < todayYMD) {
+      Alert.alert(
+        i18n.t("validation.invalidDateTitle"),
+        i18n.t("validation.chooseValidDateEveryDay"),
+      );
+      return null;
+    }
+
+    if (seenDates.has(cleanDate)) {
+      Alert.alert(
+        i18n.t("validation.duplicateDayTitle"),
+        i18n.t("validation.duplicateDayMessage"),
+      );
+      return null;
+    }
+
+    seenDates.add(cleanDate);
+
+    const cleanTime = normalizeTime(row.time);
+
+    if (!cleanTime) {
+      Alert.alert(
+        i18n.t("validation.invalidTimeTitle"),
+        i18n.t("validation.chooseValidTimeEveryDay"),
+      );
+      return null;
+    }
+
+    if (!isWeeklyTimeAvailable(cleanDate, cleanTime, now)) {
+      Alert.alert(
+        i18n.t("validation.invalidTimeTitle"),
+        i18n.t("validation.timeAlreadyPassedTodayMessage"),
+      );
+      return null;
+    }
+
+    const seatsValue = Number(row.seats);
+
+    if (!Number.isFinite(seatsValue) || seatsValue < 1 || seatsValue > 8) {
+      Alert.alert(i18n.t("validation.invalidSeatsTitle"), i18n.t("validation.seatsRangeEveryDay"));
+      return null;
+    }
+
+    let priceValue = 0;
+
+    if (options.requirePrice) {
+      priceValue = Number(row.price);
+
+      if (!Number.isFinite(priceValue) || priceValue <= 0) {
+        Alert.alert(
+          i18n.t("validation.invalidPriceTitle"),
+          i18n.t("validation.priceGreaterThanZeroEveryDay"),
+        );
+        return null;
+      }
+    }
+
+    const dayKey = dayKeyFromAnyYMD(cleanDate);
+
+    if (!dayKey) {
+      Alert.alert(i18n.t("validation.invalidDateTitle"), i18n.t("validation.chooseValidDateEveryDayShort"));
+      return null;
+    }
+
+    cleaned.push({
+      dayKey,
+      dayName: DAY_KEY_LABEL[dayKey],
+      date: cleanDate,
+      time: cleanTime,
+      seats: seatsValue,
+      price: priceValue,
+      remainingSeats: seatsValue,
+    });
+  }
+
+  return cleaned.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+};
+
 // ---------------------------------------------------------------------------
 // Normalize any driverRoutes doc — weekly ("has weeklyTrips") or a normal
 // single-day trip ("date"/"tripDate"/"selectedDate" + time/seats/price at
@@ -599,6 +701,14 @@ export type CreateWeeklyBookingsInput = {
 
 export const generateBookingGroupId = () =>
   `weekly_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+// Links the separate driverRoutes documents created from one weekly Personal
+// Ride submission (one document per selected date — see RideForm.tsx) so
+// they can be traced back to the same submission, without ever being stored
+// as a single combined document. Same naming convention as
+// generateBookingGroupId above.
+export const generateWeeklyGroupId = () =>
+  `weeklygrp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
 export const createWeeklyBookings = async (
   input: CreateWeeklyBookingsInput,
