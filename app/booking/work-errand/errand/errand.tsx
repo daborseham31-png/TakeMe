@@ -23,7 +23,6 @@ import { useTranslation } from "react-i18next";
 import { db } from "../../../../firebase";
 import { DirectionalScreen } from "../../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../../i18n/LanguageProvider";
-import { chevronForwardIconName, positionEnd } from "../../../i18n/rtl";
 import DriverReviewsSection from "../../DriverReviewsSection";
 import { getDisplayedDriverId } from "../../driverReviewsLib";
 import { getErrandBookingCount, isErrandHiddenFromSearch } from "../../homeFeedLib";
@@ -489,14 +488,6 @@ export default function ErrandsScreen() {
                     onPress={() => handleSelectDriver(driver)}
                   >
                     <Text style={styles.bookButtonText}>{t("workErrand.selectAndBook")}</Text>
-
-                    <View style={[styles.bookArrowCircle, positionEnd(14, isRTL)]}>
-                      <Ionicons
-                        name={chevronForwardIconName(isRTL)}
-                        size={22}
-                        color="#F58220"
-                      />
-                    </View>
                   </Pressable>
                 </View>
               );
@@ -582,14 +573,14 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   list: {
-    gap: 18,
+    gap: 14,
   },
   card: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E4DDD7",
-    borderRadius: 24,
-    padding: 18,
+    borderRadius: 20,
+    padding: 14,
     shadowColor: "#000",
     shadowOpacity: 0.05,
     shadowOffset: {
@@ -603,18 +594,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   profileRow: {
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
-    gap: 12,
+    gap: 10,
   },
   avatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: "#FFF3E6",
     alignItems: "center",
     justifyContent: "center",
@@ -623,10 +614,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: "900",
     color: "#111827",
-    marginBottom: 5,
+    marginBottom: 4,
   },
   infoRow: {
     flexDirection: "row",
@@ -635,7 +626,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   infoText: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#7A5C4B",
   },
   dot: {
@@ -646,69 +637,69 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#FFF3E6",
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 15,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 13,
     gap: 4,
   },
   ratingText: {
-    fontSize: 16,
+    fontSize: 14,
     color: "#111827",
     fontWeight: "900",
   },
   reviewsText: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#7A5C4B",
   },
   destinationBox: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
     backgroundColor: "#FFF8F0",
     borderWidth: 1,
     borderColor: "#FFE2C5",
-    borderRadius: 17,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginBottom: 16,
+    borderRadius: 15,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    marginBottom: 12,
   },
   destinationIcon: {
-    fontSize: 23,
+    fontSize: 19,
   },
   destinationText: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: "900",
     color: "#111827",
   },
   detailsBox: {
     flexDirection: "row",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   detailColumn: {
     flex: 1,
-    gap: 10,
+    gap: 8,
   },
   detailRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    minHeight: 35,
+    gap: 7,
+    minHeight: 30,
   },
   detailIconBox: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 9,
     backgroundColor: "#FFF3E6",
     alignItems: "center",
     justifyContent: "center",
   },
   detailText: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#111827",
     flexShrink: 1,
   },
   price: {
-    fontSize: 16,
+    fontSize: 14,
     color: "#111827",
     fontWeight: "900",
   },
@@ -725,32 +716,32 @@ const styles = StyleSheet.create({
   badgesRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 9,
-    marginBottom: 16,
+    gap: 7,
+    marginBottom: 12,
   },
   languageBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
     backgroundColor: "#EAF8F5",
     borderWidth: 1,
     borderColor: "#9DDDD2",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
   },
   languageText: {
     color: "#178C7B",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "900",
   },
   petBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 18,
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
     borderWidth: 1,
   },
   petAllowedBadge: {
@@ -762,7 +753,7 @@ const styles = StyleSheet.create({
     borderColor: "#E4DDD7",
   },
   petText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "900",
   },
   petAllowedText: {
@@ -774,10 +765,10 @@ const styles = StyleSheet.create({
   kidsBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 18,
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
     borderWidth: 1,
   },
   kidsAllowedBadge: {
@@ -789,7 +780,7 @@ const styles = StyleSheet.create({
     borderColor: "#E4DDD7",
   },
   kidsText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "900",
   },
   kidsAllowedText: {
@@ -801,29 +792,19 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: "#F0E5DC",
-    marginBottom: 14,
+    marginBottom: 10,
   },
   bookButton: {
     backgroundColor: "#F58220",
-    borderRadius: 18,
-    paddingVertical: 16,
+    borderRadius: 14,
+    paddingVertical: 13,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    position: "relative",
   },
   bookButtonText: {
     color: "#FFFFFF",
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: "900",
-  },
-  bookArrowCircle: {
-    position: "absolute",
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
   },
 });

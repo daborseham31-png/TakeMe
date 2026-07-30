@@ -30,8 +30,22 @@ import {
 
 import { db } from "../../firebase";
 import { LocationNames } from "./locationSearch";
+import type { PickupLocation } from "./PickupLocationPicker";
 import { normalizeSchoolTripDirection } from "./schoolTripsLib";
 import { getDriverDayTrips, WeeklyDriverDay } from "./weeklyBookingLib";
+
+// Same param names/shape every internal category screen already uses
+// (personal-ride/index.tsx -> driverresults.tsx -> ride-payment.tsx, and
+// DirectionSearchForm.tsx -> trip-results.tsx -> trip-confirm.tsx) — see
+// PickupLocationPicker.tsx. Spread into a nav target's params so Home's
+// "quick" nav builders below carry a real pickup point instead of silently
+// omitting it.
+const pickupNavParams = (pickupLocation: PickupLocation): Record<string, string> => ({
+  pickupLat: String(pickupLocation.latitude),
+  pickupLng: String(pickupLocation.longitude),
+  pickupAddress: pickupLocation.address,
+  pickupSource: pickupLocation.source,
+});
 
 // "school" = the legacy driverRoutes-based school category (still shown for
 // backward compatibility with existing listings). "schoolTrip" = the NEW
@@ -801,7 +815,10 @@ export type FeedNavTarget = { pathname: string; params: Record<string, string> }
 // non-weekly branch; defaults to 1 seat, but now also passes maxSeats (the
 // ride's real remaining capacity) so ride-payment's own seat stepper can let
 // the passenger book more than 1 seat, up to that capacity.
-export const buildQuickRideNav = (item: FeedItem): FeedNavTarget => {
+export const buildQuickRideNav = (
+  item: FeedItem,
+  pickupLocation: PickupLocation,
+): FeedNavTarget => {
   const seats = 1;
   const unitPrice = item.price || 0;
   const maxSeats = typeof item.seats === "number" && item.seats > 0 ? item.seats : 1;
@@ -834,6 +851,8 @@ export const buildQuickRideNav = (item: FeedItem): FeedNavTarget => {
       driverCarColor: item.carColor,
       driverCarPlateLast3: item.carPlateLast3,
 
+      ...pickupNavParams(pickupLocation),
+
       source: "home_feed",
     },
   };
@@ -848,6 +867,7 @@ export const buildQuickRideNav = (item: FeedItem): FeedNavTarget => {
 export const buildWeeklyRideNav = (
   item: FeedItem,
   chosenDays: WeeklyDriverDay[],
+  pickupLocation: PickupLocation,
 ): FeedNavTarget => {
   const selectedWeeklyDays = chosenDays.map((day) => ({
     dayKey: day.dayKey,
@@ -882,6 +902,8 @@ export const buildWeeklyRideNav = (
       // this one driver's own available days directly from the feed.
       remainingWeeklyDays: JSON.stringify([]),
 
+      ...pickupNavParams(pickupLocation),
+
       source: "home_feed",
     },
   };
@@ -909,11 +931,20 @@ export const buildErrandBookNav = (item: FeedItem): FeedNavTarget => ({
 // driver/route/price/seats on the card, so this jumps straight to
 // trip-confirm.tsx (the same review screen the dedicated search results
 // list uses) rather than re-running a search.
-export const buildSchoolTripNav = (item: FeedItem): FeedNavTarget => ({
+// pickupLocation is omitted for a standalone return-leg card (item.direction
+// === "from_school") — same as DirectionSearchForm.tsx, which never shows
+// the pickup field for a return search either: the real pickup point is the
+// school itself, not something the passenger picks (see trip-confirm.tsx's
+// own comment on this).
+export const buildSchoolTripNav = (
+  item: FeedItem,
+  pickupLocation: PickupLocation | null,
+): FeedNavTarget => ({
   pathname: "/booking/school/trip-confirm",
   params: {
     tripId: item.id,
     seats: "1",
     roundTrip: "false",
+    ...(pickupLocation ? pickupNavParams(pickupLocation) : {}),
   },
 });

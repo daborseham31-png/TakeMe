@@ -303,6 +303,21 @@ export default function ProfileScreen() {
             </View>
           </Pressable>
 
+          <Pressable
+            style={styles.settingsRow}
+            onPress={() => router.push("/saved-locations" as any)}
+          >
+            <View style={styles.settingsRowLeft}>
+              <Ionicons name="location-outline" size={20} color="#7C5F46" />
+              <Text style={styles.settingsRowLabel}>{t("savedLocations.screenTitle")}</Text>
+            </View>
+            <Ionicons
+              name={isRTL ? "chevron-back" : "chevron-forward"}
+              size={18}
+              color="#C7B9AC"
+            />
+          </Pressable>
+
           <Pressable style={styles.reportButton} onPress={() => setReportVisible(true)}>
             <Text style={styles.reportText}>{t("profile.reportProblem")}</Text>
           </Pressable>

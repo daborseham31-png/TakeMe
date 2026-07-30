@@ -173,10 +173,11 @@ export default function JobNavigationScreen() {
 
   const mapRef = useRef<MapView | null>(null);
 
-  const customerCoord =
-    app?.location?.latitude != null && app?.location?.longitude != null
-      ? { latitude: app.location.latitude, longitude: app.location.longitude }
-      : null;
+  const customerCoord = (() => {
+    const lat = app?.pickupLocation?.latitude ?? app?.location?.latitude;
+    const lng = app?.pickupLocation?.longitude ?? app?.location?.longitude;
+    return lat != null && lng != null ? { latitude: lat, longitude: lng } : null;
+  })();
 
   // Keeps both markers on screen together instead of a fixed zoom/region —
   // re-fits whenever either point changes (the driver marker moves every
@@ -190,12 +191,14 @@ export default function JobNavigationScreen() {
     });
   }, [customerCoord?.latitude, customerCoord?.longitude, liveDriverLocation]);
 
-  // Both maps use the customer's REAL detected coordinates, never the typed
+  // Both maps use the customer's real pickup coordinates (pickupLocation —
+  // see PickupLocationPicker.tsx — falling back to the legacy `location`
+  // field for an application created before it existed), never the typed
   // city/neighborhood. If coordinates are missing we tell the driver instead
   // of opening a wrong (text-based) destination.
   const coords = (app_: NormalizedApplication) => {
-    const lat = app_.location?.latitude;
-    const lng = app_.location?.longitude;
+    const lat = app_.pickupLocation?.latitude ?? app_.location?.latitude;
+    const lng = app_.pickupLocation?.longitude ?? app_.location?.longitude;
     if (typeof lat !== "number" || typeof lng !== "number") return null;
     return { lat, lng };
   };
@@ -377,24 +380,32 @@ export default function JobNavigationScreen() {
             </Pressable>
           ) : null}
 
-          <View style={styles.infoRow}>
-            <Ionicons name="business-outline" size={16} color="#7C5F46" />
-            <Text style={styles.infoText}>{t("booking.cityVillageColon", { city: app.city })}</Text>
-          </View>
+          {/* Legacy applications only — the current picker no longer asks
+              for city/neighborhood separately, it's all in pickupLocation's
+              own address below. */}
+          {app.city ? (
+            <View style={styles.infoRow}>
+              <Ionicons name="business-outline" size={16} color="#7C5F46" />
+              <Text style={styles.infoText}>{t("booking.cityVillageColon", { city: app.city })}</Text>
+            </View>
+          ) : null}
 
-          <View style={styles.infoRow}>
-            <Ionicons name="location-outline" size={16} color="#7C5F46" />
-            <Text style={styles.infoText}>
-              {t("booking.neighborhoodColon", { neighborhood: app.neighborhood })}
-            </Text>
-          </View>
+          {app.neighborhood ? (
+            <View style={styles.infoRow}>
+              <Ionicons name="location-outline" size={16} color="#7C5F46" />
+              <Text style={styles.infoText}>
+                {t("booking.neighborhoodColon", { neighborhood: app.neighborhood })}
+              </Text>
+            </View>
+          ) : null}
 
           <View style={styles.infoRow}>
             <Ionicons name="navigate-circle-outline" size={16} color="#7C5F46" />
             <Text style={styles.infoText}>
-              {app.location?.latitude != null && app.location?.longitude != null
-                ? app.location.address ||
-                  `${app.location.latitude.toFixed(5)}, ${app.location.longitude.toFixed(5)}`
+              {customerCoord
+                ? app.pickupLocation?.address ||
+                  app.location?.address ||
+                  `${customerCoord.latitude.toFixed(5)}, ${customerCoord.longitude.toFixed(5)}`
                 : t("booking.exactLocationNotAvailableShort")}
             </Text>
           </View>

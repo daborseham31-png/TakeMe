@@ -1205,6 +1205,25 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // -----------------------------------------------------------------
+    // savedLocations/{locationId} — a passenger's Home + named saved pickup
+    // places (see app/booking/savedLocationsLib.ts), feeding the shared
+    // PickupLocationPicker.tsx bottom sheet. Purely owner-data, no secret
+    // fields (unlike schoolChildren's server-only return code above), so a
+    // plain client-owned CRUD shape is enough — no field-shape lockdown
+    // needed on update, every field here is freely user-editable.
+    // "At most one isHome:true per user" is enforced client-side only (see
+    // savedLocationsLib.ts's clearExistingHome), same trust boundary this
+    // app already accepts for every other cross-document invariant.
+    // -----------------------------------------------------------------
+    match /savedLocations/{locationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
     // Uniqueness ledger — server-only, full stop. Never readable or
     // writable by ANY client request, signed in or not (see this match
     // block's header comment for why even a read would be dangerous for a

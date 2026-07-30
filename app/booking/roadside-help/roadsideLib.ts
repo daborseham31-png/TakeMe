@@ -308,6 +308,13 @@ export const createRoadsideRequest = async (
     // "Go help passenger" can read either shape directly off the request.
     latitude: location.latitude,
     longitude: location.longitude,
+    // The unified pickupLocation shape (see PickupLocationPicker.tsx) —
+    // written alongside the legacy fields above, never replacing them.
+    // Always "current": this screen auto-captures GPS on open and only
+    // ever lets the passenger fine-tune that same point (drag/tap), it has
+    // no "search a different address" capability, so there's no real
+    // "custom" pick to distinguish here.
+    pickupLocation: { ...location, source: "current" as const },
     status: "open",
     selectedOfferId: null,
     selectedDriverId: null,
@@ -545,6 +552,14 @@ export const acceptOffer = async (
       req.serviceType ||
       (Array.isArray(req.problemTypes) ? req.problemTypes.join(", ") : "") ||
       "Roadside Help";
+    // req.pickupLocation always exists for a request created after this
+    // field was added — synthesized here only for a request that predates
+    // it, from the same legacy fields already being read above.
+    const pickupLocation =
+      req.pickupLocation ||
+      (latitude != null && longitude != null
+        ? { latitude, longitude, address, source: "current" as const }
+        : null);
 
     transaction.update(reqRef, {
       status: "helper_assigned",
@@ -587,6 +602,7 @@ export const acceptOffer = async (
       address,
       latitude,
       longitude,
+      pickupLocation,
 
       price,
       etaMinutes,

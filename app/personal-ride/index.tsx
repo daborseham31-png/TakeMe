@@ -14,6 +14,7 @@ import {
 import IsraelLocationAutocomplete from "../booking/IsraelLocationAutocomplete";
 import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { IsraelLocation } from "../booking/israelLocations";
+import PickupLocationPicker, { PickupLocation } from "../booking/PickupLocationPicker";
 import { validateWeeklyRows, WeekDayRow } from "../booking/weeklyBookingLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
 import {
@@ -110,6 +111,9 @@ export default function PersonalRideScreen() {
   // payment/confirmation screen and saved on the booking.
   const [destinationDetails, setDestinationDetails] = useState("");
 
+  const [pickupLocation, setPickupLocation] = useState<PickupLocation | null>(null);
+  const [pickerVisible, setPickerVisible] = useState(false);
+
   const [tripDate, setTripDate] = useState(getTodayDate());
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
 
@@ -168,6 +172,11 @@ export default function PersonalRideScreen() {
       return;
     }
 
+    if (!pickupLocation) {
+      Alert.alert(t("auth.missingDetails"), t("pickupLocation.pickupLocationRequired"));
+      return;
+    }
+
     const baseParams: Record<string, string> = {
       category: "personal",
       // Manual matching fields only — driver search compares these, never
@@ -192,6 +201,12 @@ export default function PersonalRideScreen() {
       }),
       genderPref,
       languages: selectedLanguages.join(","),
+      // The exact GPS pickup point (see PickupLocationPicker.tsx) — separate
+      // from from/to above, which stay pure city-matching text.
+      pickupLat: String(pickupLocation.latitude),
+      pickupLng: String(pickupLocation.longitude),
+      pickupAddress: pickupLocation.address,
+      pickupSource: pickupLocation.source,
       // The exact place within the destination city (optional) — shown to
       // the driver, never used for matching.
       ...(destinationDetails.trim()
@@ -329,6 +344,17 @@ export default function PersonalRideScreen() {
               />
             </View>
           </View>
+
+          <PhysicalDirectionalBlockText style={styles.label}>
+            {t("pickupLocation.fieldLabel")}
+          </PhysicalDirectionalBlockText>
+          <Pressable style={styles.inputRow} onPress={() => setPickerVisible(true)}>
+            <Ionicons name="location-outline" size={18} color="#8B7B6B" />
+            <Text style={styles.rowInput} numberOfLines={1}>
+              {pickupLocation?.address || t("pickupLocation.notSelectedPlaceholder")}
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color="#C7B9AC" />
+          </Pressable>
 
           <PhysicalDirectionalBlockText style={styles.label}>
             {t("booking.exactDestination")}
@@ -512,6 +538,12 @@ export default function PersonalRideScreen() {
         </Pressable>
       </ScrollView>
       </KeyboardAvoidingWrapper>
+
+      <PickupLocationPicker
+        visible={pickerVisible}
+        onClose={() => setPickerVisible(false)}
+        onSelect={setPickupLocation}
+      />
     </DirectionalScreen>
   );
 }

@@ -181,6 +181,15 @@ export default function SchoolTripConfirmScreen() {
         // Per-child return search (AGENTS.md #3) — each child's own return
         // finishing time, collected on the original round-trip search form.
         returnChildEntries: String(params.returnChildEntries || ""),
+
+        // The outbound leg's chosen pickup point (see
+        // PickupLocationPicker.tsx) — absent (forwarded as empty) for a
+        // standalone return leg, which has none; ride-payment.tsx only
+        // writes it for the "to_school" direction.
+        pickupLat: String(params.pickupLat || ""),
+        pickupLng: String(params.pickupLng || ""),
+        pickupAddress: String(params.pickupAddress || ""),
+        pickupSource: String(params.pickupSource || ""),
       },
     } as any);
   };

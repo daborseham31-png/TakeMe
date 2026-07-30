@@ -694,6 +694,14 @@ export type CreateWeeklyBookingsInput = {
   // The exact place within the destination city (optional, Personal Ride
   // only) — informational for the driver, never used for matching.
   destinationDetails?: string;
+  // The passenger's chosen pickup point (see PickupLocationPicker.tsx) —
+  // the same point is shared by every selected day, same as from/to above.
+  pickupLocation?: {
+    latitude: number;
+    longitude: number;
+    address: string;
+    source: "current" | "home" | "custom";
+  } | null;
 
   selectedDays: WeeklyDriverDay[];
   payment: WeeklyPayment;
@@ -862,6 +870,7 @@ export const createWeeklyBookings = async (
         to: input.to || "",
         schoolName: input.schoolName || null,
         destinationDetails: input.destinationDetails || null,
+        pickupLocation: input.pickupLocation || null,
 
         dayKey: day.dayKey,
         dayName: day.dayName,

@@ -84,6 +84,17 @@ export default function RidePaymentScreen() {
   // The exact place within the destination city (optional, Personal Ride
   // only) — informational for the driver, never used for matching.
   const destinationDetails = String(params.destinationDetails || "");
+  // The passenger's chosen pickup point (see PickupLocationPicker.tsx) —
+  // threaded through from personal-ride/index.tsx or the School Trips
+  // outbound search form via driverresults.tsx/trip-confirm.tsx.
+  const pickupLat = params.pickupLat ? Number(params.pickupLat) : null;
+  const pickupLng = params.pickupLng ? Number(params.pickupLng) : null;
+  const pickupAddress = String(params.pickupAddress || "");
+  const pickupSource = String(params.pickupSource || "custom") as "current" | "home" | "custom";
+  const pickupLocation =
+    pickupLat != null && pickupLng != null && Number.isFinite(pickupLat) && Number.isFinite(pickupLng)
+      ? { latitude: pickupLat, longitude: pickupLng, address: pickupAddress, source: pickupSource }
+      : null;
   // School only — the exact school/university name, required at trip
   // creation (see RideForm.tsx).
   const schoolName = String(params.schoolName || "");
@@ -264,14 +275,30 @@ export default function RidePaymentScreen() {
     const groupId = schoolBookingGroupIdParam || generateBookingGroupId();
 
     if (schoolChildEntries.length > 0 && schoolDirection === "to_school") {
-      await bookOutboundForChildren(schoolTripId, schoolChildEntries, paymentMethod, groupId);
+      await bookOutboundForChildren(
+        schoolTripId,
+        schoolChildEntries,
+        paymentMethod,
+        groupId,
+        pickupLocation || undefined,
+      );
     } else if (schoolChildEntries.length > 0 && schoolDirection === "from_school") {
       for (const entry of schoolChildEntries) {
         // eslint-disable-next-line no-await-in-loop
         await bookReturnForChild(schoolTripId, entry, paymentMethod, groupId);
       }
     } else {
-      await bookSchoolTripSingle(schoolTripId, selectedSeats, paymentMethod, groupId);
+      // pickupLocation is only ever populated (non-null) for the outbound
+      // direction — DirectionSearchForm.tsx never sets the pickup params for
+      // a standalone return search, so this is a no-op for return bookings.
+      await bookSchoolTripSingle(
+        schoolTripId,
+        selectedSeats,
+        paymentMethod,
+        groupId,
+        undefined,
+        pickupLocation || undefined,
+      );
     }
 
     return { bookingGroupId: groupId };
@@ -432,6 +459,7 @@ const createBookingAfterPayment = async (
       to,
       schoolName: schoolName || null,
       destinationDetails: destinationDetails || null,
+      pickupLocation,
       date,
       day,
       time,
@@ -600,6 +628,7 @@ const createBookingAfterPayment = async (
           to,
           schoolName,
           destinationDetails,
+          pickupLocation,
 
           selectedDays: selectedWeeklyDays,
           payment,

@@ -51,6 +51,7 @@ import { useCurrentLocation } from "../booking/useCurrentLocation";
 import { WeeklyDriverDay } from "../booking/weeklyBookingLib";
 import TripFeedCard from "../booking/TripFeedCard";
 import DriverProfileReviewsModal from "../booking/DriverProfileReviewsModal";
+import PickupLocationPicker, { PickupLocation } from "../booking/PickupLocationPicker";
 
 // Re-checked once a minute while Home stays open (plus on pull-to-refresh /
 // focus) so a ride whose departure time has passed disappears from the list
@@ -133,6 +134,19 @@ export default function HomeScreen() {
   const [dayPickerSelected, setDayPickerSelected] = useState<Set<string>>(
     new Set(),
   );
+
+  // Pickup-location step for Home/Nearby bookings (Personal Ride, School
+  // Ride quick/weekly, School Trip outbound) — the exact same
+  // PickupLocationPicker sheet the internal category screens
+  // (personal-ride/index.tsx, DirectionSearchForm.tsx) already use, so a
+  // booking made straight from Home always gets a real pickup point instead
+  // of skipping straight to ride-payment/trip-confirm with none. Work/Errand
+  // need no equivalent here — buildWorkApplyNav/buildErrandBookNav already
+  // send those straight to apply.tsx/book.tsx, which have this same picker
+  // built in and require it before submitting regardless of entry point.
+  const [pickupPickerVisible, setPickupPickerVisible] = useState(false);
+  const [pendingBookItem, setPendingBookItem] = useState<FeedItem | null>(null);
+  const [pendingWeeklyDays, setPendingWeeklyDays] = useState<WeeklyDriverDay[] | null>(null);
 
   // Live count of unread roadside help notifications for the signed-in driver.
   // Single equality filter keeps this index-free; unread count is computed here.
@@ -390,8 +404,50 @@ export default function HomeScreen() {
     const item = dayPickerItem;
     closeDayPicker();
 
-    const nav = buildWeeklyRideNav(item, chosen);
-    router.push(nav as any);
+    // Chosen days aren't booked yet — next comes the same pickup-location
+    // step every other path below goes through.
+    beginPickupSelection(item, chosen);
+  };
+
+  // Opens the shared PickupLocationPicker sheet before continuing on to
+  // ride-payment/trip-confirm — mirrors "select ride -> confirm pickup
+  // location -> continue" from the internal Personal Ride / School screens,
+  // which this same booking button previously skipped entirely when reached
+  // from Home. weeklyDays is null for a quick (single-day) or school-trip
+  // booking, and the chosen days for a weekly one.
+  const beginPickupSelection = (
+    item: FeedItem,
+    weeklyDays: WeeklyDriverDay[] | null,
+  ) => {
+    setPendingBookItem(item);
+    setPendingWeeklyDays(weeklyDays);
+    setPickupPickerVisible(true);
+  };
+
+  // Fires once the passenger actually confirms a pickup point (current
+  // location / Home / a saved place / a dropped pin) — never on cancel, so
+  // no booking is ever created without one. See PickupLocationPicker.tsx:
+  // onSelect is only ever called together with a real confirmed location,
+  // immediately followed by the sheet closing itself.
+  const handlePickupSelected = (pickupLocation: PickupLocation) => {
+    const item = pendingBookItem;
+    const weeklyDays = pendingWeeklyDays;
+    setPendingBookItem(null);
+    setPendingWeeklyDays(null);
+
+    if (!item) return;
+
+    if (item.category === "schoolTrip") {
+      router.push(buildSchoolTripNav(item, pickupLocation) as any);
+      return;
+    }
+
+    if (weeklyDays) {
+      router.push(buildWeeklyRideNav(item, weeklyDays, pickupLocation) as any);
+      return;
+    }
+
+    router.push(buildQuickRideNav(item, pickupLocation) as any);
   };
 
   const handleBookPress = (item: FeedItem) => {
@@ -406,7 +462,15 @@ export default function HomeScreen() {
     }
 
     if (item.category === "schoolTrip") {
-      router.push(buildSchoolTripNav(item) as any);
+      // A standalone return-leg card has no passenger-chosen pickup point —
+      // same as DirectionSearchForm.tsx, which never shows this field for a
+      // return search either (the real pickup point is the school itself).
+      if (item.direction === "from_school") {
+        router.push(buildSchoolTripNav(item, null) as any);
+        return;
+      }
+
+      beginPickupSelection(item, null);
       return;
     }
 
@@ -415,7 +479,7 @@ export default function HomeScreen() {
       return;
     }
 
-    router.push(buildQuickRideNav(item) as any);
+    beginPickupSelection(item, null);
   };
 
   const handleBecomeDriver = async () => {
@@ -1018,6 +1082,16 @@ export default function HomeScreen() {
           </DirectionalCard>
         </View>
       </Modal>
+
+      <PickupLocationPicker
+        visible={pickupPickerVisible}
+        onClose={() => {
+          setPickupPickerVisible(false);
+          setPendingBookItem(null);
+          setPendingWeeklyDays(null);
+        }}
+        onSelect={handlePickupSelected}
+      />
 
       <DriverProfileReviewsModal
         visible={!!reviewsDriverId}

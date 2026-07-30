@@ -316,10 +316,19 @@ export const notify = async (input: NotifyInput) => {
 // Details filled by the customer. Personal identity (name/age/phone) is taken
 // automatically from their profile; only these are entered by hand.
 export type CustomerDetails = {
-  city: string;
-  neighborhood: string;
+  // Legacy free-text city/neighborhood — no longer collected by the current
+  // UI (replaced by PickupLocationPicker.tsx), optional so new callers can
+  // omit them entirely; still written (as empty strings) for any code that
+  // still reads them off an application doc.
+  city?: string;
+  neighborhood?: string;
   notes: string;
   location: GeoPoint;
+  // How `location` was obtained — see PickupLocationPicker.tsx's own
+  // PickupLocationSource. Duplicated as a plain union here (not imported)
+  // to avoid a circular import (PickupLocationPicker.tsx itself imports
+  // detectCurrentLocation from this file).
+  pickupSource: "current" | "home" | "custom";
   // Stable Israeli-locality id for `city` (see israelLocations.ts) — optional
   // only because this type predates that dataset; new callers always set it.
   cityLocationId?: string;
@@ -388,11 +397,16 @@ export const createApplication = async (
 
   // Shared fields written to both collections.
   const base = {
-    city: details.city,
+    city: details.city || "",
     cityLocationId: details.cityLocationId || null,
     cityLocationNames: details.cityLocationNames || null,
-    neighborhood: details.neighborhood,
+    neighborhood: details.neighborhood || "",
     notes: details.notes || "",
+    // Unified shape (see PickupLocationPicker.tsx) — written alongside the
+    // legacy applicantLocation/passengerLocation fields below, never
+    // replacing them (NormalizedApplication.location still reads those for
+    // backward compatibility).
+    pickupLocation: { ...location, source: details.pickupSource },
 
     startTime: source.startTime,
     endTime: source.endTime,
@@ -1343,6 +1357,11 @@ export type NormalizedApplication = {
   neighborhood: string;
   notes: string;
   location: GeoPoint | null;
+  // Unified shape (see PickupLocationPicker.tsx) — synthesized from
+  // location/applicantLocation/passengerLocation for any application
+  // created before this field existed, so every reader can rely on it
+  // being present whenever `location` itself resolves to something.
+  pickupLocation: (GeoPoint & { source: "current" | "home" | "custom" }) | null;
   title: string;
   date: string;
   startTime: string;
@@ -1398,6 +1417,18 @@ export const normalizeApplication = (
   const providerName = data.employerName || data.driverName || "Provider";
   const customerName = data.applicantName || data.passengerName || "Customer";
 
+  const legacyLocation = normalizeGeo(data.applicantLocation || data.passengerLocation);
+  const pickupLocation: NormalizedApplication["pickupLocation"] = data.pickupLocation
+    ? {
+        latitude: typeof data.pickupLocation.latitude === "number" ? data.pickupLocation.latitude : null,
+        longitude: typeof data.pickupLocation.longitude === "number" ? data.pickupLocation.longitude : null,
+        address: data.pickupLocation.address || "",
+        source: data.pickupLocation.source || "custom",
+      }
+    : legacyLocation
+      ? { ...legacyLocation, source: "custom" }
+      : null;
+
   const searchParts = [
     kind === "work" ? "work helper" : "errand",
     title,
@@ -1424,7 +1455,8 @@ export const normalizeApplication = (
     cityLocationId: data.cityLocationId || "",
     neighborhood: data.neighborhood || "",
     notes: data.notes || "",
-    location: normalizeGeo(data.applicantLocation || data.passengerLocation),
+    location: legacyLocation,
+    pickupLocation,
     title,
     date,
     startTime: data.startTime || "",
