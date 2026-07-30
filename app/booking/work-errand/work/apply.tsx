@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -17,9 +17,8 @@ import { useTranslation } from "react-i18next";
 import { DirectionalScreen } from "../../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../../i18n/LanguageProvider";
 import { paddingEnd } from "../../../i18n/rtl";
-import IsraelLocationAutocomplete from "../../IsraelLocationAutocomplete";
-import { IsraelLocation } from "../../israelLocations";
-import { createApplication, detectCurrentLocation, GeoPoint } from "../workErrandLib";
+import PickupLocationPicker, { PickupLocation } from "../../PickupLocationPicker";
+import { createApplication } from "../workErrandLib";
 
 type JobListing = {
   id: string;
@@ -80,51 +79,15 @@ export default function WorkApplyScreen() {
     return defaultJob;
   }, [params.job]);
 
-  const [city, setCity] = useState("");
-  const [cityPlace, setCityPlace] = useState<IsraelLocation | null>(null);
-  const [cityError, setCityError] = useState("");
-
-  const handleCityChange = (text: string) => {
-    setCity(text);
-    setCityPlace(null);
-    if (cityError) setCityError("");
-  };
-
-  const [neighborhood, setNeighborhood] = useState("");
+  const [pickupLocation, setPickupLocation] = useState<PickupLocation | null>(null);
+  const [pickerVisible, setPickerVisible] = useState(false);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
 
-  // Silently tries for a precise GPS pin the moment this screen opens — no
-  // separate "detect my location" button (removed per product decision), so
-  // Google Maps/Waze on the employer's job-navigation screen can still open
-  // to the exact address instead of just the picked city's centroid. Never
-  // blocks or alerts on failure (permission denied, GPS off, ...); the city
-  // pick's own coordinates (see handleSubmit below) are the silent fallback.
-  const deviceLocationRef = useRef<GeoPoint | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    detectCurrentLocation()
-      .then((loc) => {
-        if (!cancelled) deviceLocationRef.current = loc;
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const handleSubmit = async () => {
-    const cleanCity = city.trim();
-    const cleanNeighborhood = neighborhood.trim();
-
-    if (!cleanCity || !cleanNeighborhood) {
-      Alert.alert(t("auth.missingDetails"), t("workErrand.fillCityNeighborhood"));
-      return;
-    }
-
-    if (!cityPlace) {
-      setCityError(t("validation.selectLocationFromList"));
+    if (!pickupLocation) {
+      Alert.alert(t("auth.missingDetails"), t("pickupLocation.pickupLocationRequired"));
       return;
     }
 
@@ -145,24 +108,13 @@ export default function WorkApplyScreen() {
           price: null,
         },
         {
-          city: cleanCity,
-          cityLocationId: cityPlace.id,
-          cityLocationNames: {
-            english: cityPlace.english,
-            arabic: cityPlace.arabic,
-            hebrew: cityPlace.hebrew,
-          },
-          neighborhood: cleanNeighborhood,
           notes: notes.trim(),
-          // Prefer the silent GPS pin (see the effect above) for an exact
-          // navigable address — falls back to the picked City/Village
-          // result's own (city-centroid) coordinates only if that GPS read
-          // never came back in time (permission denied, GPS off, ...).
-          location: deviceLocationRef.current ?? {
-            latitude: cityPlace.latitude ?? null,
-            longitude: cityPlace.longitude ?? null,
-            address: cleanCity,
+          location: {
+            latitude: pickupLocation.latitude,
+            longitude: pickupLocation.longitude,
+            address: pickupLocation.address,
           },
+          pickupSource: pickupLocation.source,
         },
       );
 
@@ -298,34 +250,14 @@ export default function WorkApplyScreen() {
 
           <Text style={styles.hint}>{t("workErrand.autoProfileHint")}</Text>
 
-          <View style={styles.row}>
-            <View style={styles.halfField}>
-              <IsraelLocationAutocomplete
-                label={t("workErrand.cityVillageLabel")}
-                value={city}
-                onChangeText={handleCityChange}
-                onSelectLocation={(location) => {
-                  setCityPlace(location);
-                  setCityError("");
-                }}
-                placeholder={t("workErrand.enterCityVillage")}
-                error={cityError}
-              />
-            </View>
-
-            <View style={styles.halfField}>
-              <Text style={[styles.label, { marginTop: 0 }]}>
-                {t("workErrand.neighborhoodLabel")}
-              </Text>
-              <TextInput
-                style={styles.input}
-                value={neighborhood}
-                onChangeText={setNeighborhood}
-                placeholder={t("workErrand.enterNeighborhood")}
-                placeholderTextColor="#9B7A68"
-              />
-            </View>
-          </View>
+          <Text style={[styles.label, { marginTop: 0 }]}>{t("pickupLocation.fieldLabel")}</Text>
+          <Pressable style={styles.pickupField} onPress={() => setPickerVisible(true)}>
+            <Ionicons name="location-outline" size={18} color="#7A665C" />
+            <Text style={styles.pickupFieldText} numberOfLines={1}>
+              {pickupLocation?.address || t("pickupLocation.notSelectedPlaceholder")}
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color="#C7B9AC" />
+          </Pressable>
 
           <Text style={styles.label}>{t("common.notes")}</Text>
           <TextInput
@@ -348,6 +280,12 @@ export default function WorkApplyScreen() {
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <PickupLocationPicker
+        visible={pickerVisible}
+        onClose={() => setPickerVisible(false)}
+        onSelect={setPickupLocation}
+      />
     </DirectionalScreen>
   );
 }
@@ -456,12 +394,24 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     lineHeight: 18,
   },
-  row: {
+  pickupField: {
     flexDirection: "row",
-    gap: 14,
+    alignItems: "center",
+    gap: 10,
+    minHeight: 46,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E4DDD7",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 14,
   },
-  halfField: {
+  pickupFieldText: {
     flex: 1,
+    fontSize: 15,
+    color: "#111827",
+    fontWeight: "700",
   },
   label: {
     fontSize: 14,

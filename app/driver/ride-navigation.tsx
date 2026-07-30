@@ -190,13 +190,14 @@ export default function RideNavigationScreen() {
     return unsub;
   }, [id]);
 
-  // The passenger's own live location (see passengerLocationTask.ts) —
-  // replaces the old manually-saved pickup point as the driver's PRIMARY
-  // navigation target (see coords()/getNavTarget() below). School Trips
-  // (isSchoolTripsSource) never had a per-passenger pickup concept to begin
-  // with — its own fixed `fromLocation` point, untouched below, already
-  // covers that case — so this only ever matters for Personal Ride/legacy
-  // School (id = bookingId here).
+  // The passenger's own live location (see passengerLocationTask.ts) — a
+  // visual "watch them approach" marker on the map only now (see the
+  // pickupCoords/getNavTarget comment below for why it's no longer the
+  // navigation target). School Trips (isSchoolTripsSource) never had a
+  // per-passenger pickup concept to begin with — its own fixed
+  // `fromLocation` point, untouched below, already covers that case — so
+  // this only ever matters for Personal Ride/legacy School (id = bookingId
+  // here).
   const [livePassengerLocation, setLivePassengerLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -343,14 +344,16 @@ export default function RideNavigationScreen() {
     }
   };
 
-  // Navigation destination — the passenger's own LATEST live location
-  // (livePassengerLocation, above) is always the primary source. The old
-  // manually-saved pickup fields are read ONLY as backward compatibility
-  // for a booking created before that feature was removed — never the
-  // primary source for a current booking, which will never have them. A
-  // school trip's own fixed `fromLocation` (child's home / the school
-  // itself) is a separate, still-legitimate concept, unrelated to the
-  // removed feature, and stays as the last fallback.
+  // Navigation destination — the pickup point the passenger actually chose
+  // at booking time (pickupLocation, see PickupLocationPicker.tsx) is now
+  // the deliberate, authoritative source: the driver must go to where the
+  // passenger said they'd be, not chase their live-moving GPS dot (that's
+  // livePassengerLocation, above — still shown, but only as its own marker
+  // on the map below, never as the Waze/Maps target). The remaining
+  // fallback fields are read ONLY for a booking created before pickupLocation
+  // existed. A school trip's own fixed `fromLocation` (child's home / the
+  // school itself) is a separate, still-legitimate concept and stays as the
+  // last fallback.
   //
   // Deliberately coordinates-only — no text-address fallback. Opening
   // Waze/Maps with a stale or manually-typed address would misrepresent it
@@ -358,23 +361,19 @@ export default function RideNavigationScreen() {
   // a message instead (see openMaps/openWaze) and the written From address
   // stays what it always was: display information on this screen, never a
   // stand-in for GPS.
-  const coords = (b: any) => {
-    if (livePassengerLocation) {
-      return { lat: livePassengerLocation.latitude, lng: livePassengerLocation.longitude };
-    }
-
+  const pickupCoords = (b: any) => {
     const lat =
+      b?.pickupLocation?.latitude ??
       b?.pickupLatitude ??
       b?.pickup?.latitude ??
       b?.pickupCoords?.latitude ??
-      b?.pickupLocation?.latitude ??
       b?.passengerPickupLocation?.latitude ??
       b?.fromLocation?.latitude;
     const lng =
+      b?.pickupLocation?.longitude ??
       b?.pickupLongitude ??
       b?.pickup?.longitude ??
       b?.pickupCoords?.longitude ??
-      b?.pickupLocation?.longitude ??
       b?.passengerPickupLocation?.longitude ??
       b?.fromLocation?.longitude;
 
@@ -386,7 +385,7 @@ export default function RideNavigationScreen() {
   type NavTarget = { kind: "coords"; lat: number; lng: number } | null;
 
   const getNavTarget = (b: any): NavTarget => {
-    const c = coords(b);
+    const c = pickupCoords(b);
     return c ? { kind: "coords", lat: c.lat, lng: c.lng } : null;
   };
 
@@ -955,7 +954,7 @@ export default function RideNavigationScreen() {
     );
   }
 
-  const c = coords(booking);
+  const c = pickupCoords(booking);
   const driverLocation = liveDriverLocation;
   const tripStatus = getTripStatus(booking);
   const completed = tripStatus === "completed";
@@ -1030,6 +1029,18 @@ export default function RideNavigationScreen() {
                   <View style={styles.driverMarker}>
                     <Ionicons name="car" size={18} color="#FFFFFF" />
                   </View>
+                </Marker>
+              ) : null}
+
+              {/* Visual-only — watching the passenger approach. Never the
+                  nav-button target (see pickupCoords's own comment above). */}
+              {livePassengerLocation ? (
+                <Marker
+                  coordinate={livePassengerLocation}
+                  title={(booking as any).passengerName}
+                  description={t("booking.passengerLiveLocationLabel")}
+                >
+                  <View style={styles.passengerLiveMarker} />
                 </Marker>
               ) : null}
             </MapView>
@@ -1433,6 +1444,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#F58220",
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
+  },
+  // Deliberately a small, plain dot — visually distinct from the orange
+  // pickup pin (the actual nav target) and the driver's own car marker.
+  passengerLiveMarker: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#2563EB",
     borderWidth: 3,
     borderColor: "#FFFFFF",
   },

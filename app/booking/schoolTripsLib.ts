@@ -1666,6 +1666,10 @@ const bookSingleSchoolTrip = async (
   bookingGroupId: string,
   paymentMethod: SchoolBookingPaymentMethod = "cash",
   childInfo?: SchoolBookingChildInfo,
+  // The passenger's chosen pickup point for the OUTBOUND leg only (see
+  // PickupLocationPicker.tsx) — never passed by bookReturnForChild, whose
+  // real pickup point is the school itself (trip.schoolLocation above).
+  pickupLocation?: { latitude: number; longitude: number; address: string; source: string },
 ): Promise<string> => {
   const me = await getCurrentUserInfo();
   const tripRef = doc(db, SCHOOL_TRIPS_COLLECTION, tripId);
@@ -1794,6 +1798,7 @@ const bookSingleSchoolTrip = async (
       fromLocation: trip.fromLocation,
       toLocation: trip.toLocation,
       schoolLocation: trip.schoolLocation,
+      pickupLocation: pickupLocation || undefined,
       date: trip.date,
       departureTime: trip.departureTime,
 
@@ -1886,6 +1891,7 @@ export const bookSchoolTripSingle = async (
   paymentMethod: SchoolBookingPaymentMethod = "cash",
   existingBookingGroupId?: string,
   childInfo?: SchoolBookingChildInfo,
+  pickupLocation?: { latitude: number; longitude: number; address: string; source: string },
 ): Promise<{ bookingGroupId: string; bookingId: string }> => {
   const bookingGroupId = existingBookingGroupId || generateBookingGroupId();
   const bookingId = await bookSingleSchoolTrip(
@@ -1894,6 +1900,7 @@ export const bookSchoolTripSingle = async (
     bookingGroupId,
     paymentMethod,
     childInfo,
+    pickupLocation,
   );
   return { bookingGroupId, bookingId };
 };
@@ -1911,6 +1918,7 @@ export const bookOutboundForChildren = async (
   childEntries: SchoolBookingChildEntry[],
   paymentMethod: SchoolBookingPaymentMethod,
   bookingGroupId: string,
+  pickupLocation?: { latitude: number; longitude: number; address: string; source: string },
 ): Promise<string> => {
   const { bookingId } = await bookSchoolTripSingle(
     tripId,
@@ -1918,6 +1926,7 @@ export const bookOutboundForChildren = async (
     paymentMethod,
     bookingGroupId,
     { childEntries },
+    pickupLocation,
   );
   return bookingId;
 };

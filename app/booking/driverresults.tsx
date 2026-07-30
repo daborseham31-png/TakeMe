@@ -332,6 +332,12 @@ export default function DriverResultsScreen() {
   // only) — pure passthrough to ride-payment/the booking doc, never used
   // for matching.
   const destinationDetails = String(params.destinationDetails || "");
+  // The passenger's chosen pickup point (see PickupLocationPicker.tsx) —
+  // pure passthrough to ride-payment, which writes it onto the booking.
+  const pickupLat = String(params.pickupLat || "");
+  const pickupLng = String(params.pickupLng || "");
+  const pickupAddress = String(params.pickupAddress || "");
+  const pickupSource = String(params.pickupSource || "");
   // Passenger's own typed school name from the search form — only ever a
   // fallback for routes created before the driver's own School Name field
   // existed; the driver's own driverRoutes.schoolName wins whenever set
@@ -548,6 +554,11 @@ const handleBookDriver = async (driver: DriverRoute) => {
         driverCarPlateLast3: (driver.carPlate || "")
           .replace(/\D/g, "")
           .slice(-3),
+
+        pickupLat,
+        pickupLng,
+        pickupAddress,
+        pickupSource,
       },
     } as any);
 
@@ -678,6 +689,11 @@ const confirmWeeklyDayPicker = () => {
       // some requested days still need a driver after this booking.
       genderPref,
       languages: String(params.languages || ""),
+
+      pickupLat,
+      pickupLng,
+      pickupAddress,
+      pickupSource,
     },
   } as any);
 };

@@ -42,6 +42,7 @@ import { normalizeDateToYMD, styles } from "../../driver/create/driverHelpers";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../israelLocations";
 import { resolveLocationCoordinates } from "../locationSearch";
+import PickupLocationPicker, { PickupLocation } from "../PickupLocationPicker";
 import SchoolAutocomplete from "../SchoolAutocomplete";
 import { getLocalizedSchoolName, SchoolLocation } from "../schools";
 import { SchoolChild, subscribeMyChildren } from "./schoolChildrenLib";
@@ -109,6 +110,13 @@ export default function DirectionSearchForm() {
   const [toAddress, setToAddress] = useState("");
   const [toPlace, setToPlace] = useState<IsraelLocation | null>(null);
   const [toError, setToError] = useState("");
+
+  // The outbound leg's real pickup point (see PickupLocationPicker.tsx) —
+  // only meaningful for "outbound"/"roundTrip" (see handleSearch). A
+  // standalone "return" search's real pickup is the school itself, fixed by
+  // the driver at trip creation — never something the passenger picks here.
+  const [pickupLocation, setPickupLocation] = useState<PickupLocation | null>(null);
+  const [pickerVisible, setPickerVisible] = useState(false);
 
   // Round trip only — the return leg's destination ("To"). Its "From" is
   // always the outbound leg's "To" (auto, read-only, never re-entered).
@@ -326,6 +334,11 @@ export default function DirectionSearchForm() {
       return;
     }
 
+    if (mode !== "return" && !pickupLocation) {
+      Alert.alert(t("auth.missingDetails"), t("pickupLocation.pickupLocationRequired"));
+      return;
+    }
+
     const cleanDate = normalizeDateToYMD(date);
     if (!cleanDate) {
       Alert.alert(t("validation.invalidDateTitle"), t("validation.invalidDateFuture"));
@@ -471,6 +484,16 @@ export default function DirectionSearchForm() {
           // only a standalone return search.
           childEntries: JSON.stringify(childEntries),
           ...returnParams,
+          // Outbound-only (see the state's own comment above) — a
+          // standalone return search never has one.
+          ...(pickupLocation
+            ? {
+                pickupLat: String(pickupLocation.latitude),
+                pickupLng: String(pickupLocation.longitude),
+                pickupAddress: pickupLocation.address,
+                pickupSource: pickupLocation.source,
+              }
+            : {}),
         },
       } as any);
     } finally {
@@ -699,6 +722,21 @@ export default function DirectionSearchForm() {
           error={toError}
         />
 
+        {mode !== "return" ? (
+          <>
+            <PhysicalDirectionalBlockText style={styles.label}>
+              {t("pickupLocation.fieldLabel")}
+            </PhysicalDirectionalBlockText>
+            <Pressable style={localStyles.pickupField} onPress={() => setPickerVisible(true)}>
+              <Ionicons name="location-outline" size={18} color="#7C5F46" />
+              <DirectionalText style={localStyles.pickupFieldText} numberOfLines={1}>
+                {pickupLocation?.address || t("pickupLocation.notSelectedPlaceholder")}
+              </DirectionalText>
+              <Ionicons name="chevron-forward" size={16} color="#C7B9AC" />
+            </Pressable>
+          </>
+        ) : null}
+
         <SchoolAutocomplete
           label={t("schoolTrip.schoolLabel")}
           value={schoolQuery}
@@ -766,17 +804,19 @@ export default function DirectionSearchForm() {
             </View>
           </DirectionalRow>
 
-          <IsraelLocationAutocomplete
-            label={t("schoolTrip.homeDestinationLabel")}
-            value={returnToAddress}
-            onChangeText={handleReturnToChange}
-            onSelectLocation={(location) => {
-              setReturnToPlace(location);
-              setReturnToError("");
-            }}
-            placeholder={t("booking.enterDestinationCity")}
-            error={returnToError}
-          />
+          <View style={{ marginTop: 12 }}>
+            <IsraelLocationAutocomplete
+              label={t("schoolTrip.homeDestinationLabel")}
+              value={returnToAddress}
+              onChangeText={handleReturnToChange}
+              onSelectLocation={(location) => {
+                setReturnToPlace(location);
+                setReturnToError("");
+              }}
+              placeholder={t("booking.enterDestinationCity")}
+              error={returnToError}
+            />
+          </View>
 
           <PhysicalDirectionalBlockText style={styles.label}>{t("schoolTrip.schoolLabel")}</PhysicalDirectionalBlockText>
           <DirectionalRow style={[styles.inputRow, localStyles.readOnlyRow]}>
@@ -868,6 +908,12 @@ export default function DirectionSearchForm() {
           </DirectionalCard>
         </View>
       </Modal>
+
+      <PickupLocationPicker
+        visible={pickerVisible}
+        onClose={() => setPickerVisible(false)}
+        onSelect={setPickupLocation}
+      />
     </ScrollView>
     </KeyboardAvoidingWrapper>
   );
@@ -939,6 +985,24 @@ const localStyles = {
     color: "#3B82F6",
     fontWeight: "900" as const,
     fontSize: 13,
+  },
+  pickupField: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 14,
+  },
+  pickupFieldText: {
+    flex: 1,
+    color: "#111827",
+    fontWeight: "700" as const,
+    fontSize: 14.5,
   },
   childPickerField: {
     flexDirection: "row" as const,

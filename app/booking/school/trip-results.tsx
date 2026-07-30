@@ -381,6 +381,13 @@ export default function SchoolTripResultsScreen() {
         schoolAddress: String(params.schoolAddress || ""),
         schoolLat: String(params.schoolLat || ""),
         schoolLng: String(params.schoolLng || ""),
+        // The outbound leg's chosen pickup point (see PickupLocationPicker.tsx)
+        // — only ever set by DirectionSearchForm for an outbound/round-trip
+        // search, harmless to forward as empty otherwise.
+        pickupLat: String(params.pickupLat || ""),
+        pickupLng: String(params.pickupLng || ""),
+        pickupAddress: String(params.pickupAddress || ""),
+        pickupSource: String(params.pickupSource || ""),
       },
     } as any);
   };
