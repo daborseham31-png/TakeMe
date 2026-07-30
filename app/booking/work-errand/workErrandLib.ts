@@ -858,11 +858,18 @@ export const finishJob = async (
   };
 
   if (kind === "work") {
-    // Work is paid AFTER completion, driver -> passenger. Finishing the job
-    // never pays anyone by itself — it just opens the payment gate; the
-    // driver still has to go through payCompletedWork below.
     payload.workCompleted = true;
-    payload.driverPaymentStatus = "pending";
+
+    // The provider now pays the worker right after accepting (see
+    // bookings.tsx's handleAppAccept), not after the job finishes — finishing
+    // must never overwrite an already-"paid" status back to "pending", or a
+    // job paid for upfront would incorrectly show as still owing on the
+    // Completed card (see bookings.tsx's payRow — Work Helper deliberately
+    // shows plain status text there, the same as Errand, never an action
+    // button once the job is done).
+    if (data.driverPaymentStatus !== "paid") {
+      payload.driverPaymentStatus = "pending";
+    }
   }
 
   await updateDoc(doc(db, COLLECTION[kind], id), payload);

@@ -1671,7 +1671,9 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
       params: { kind: a.kind, id: a.id },
     } as any);
 
-  // Work only — driver pays the passenger/worker AFTER the job is finished.
+  // Work only — the provider pays the worker right after accepting their
+  // application (see handleAppAccept); also reused as the fallback re-entry
+  // point from the Completed card if that payment never went through.
   const goToWorkPayment = (a: NormalizedApplication) =>
     router.push({
       pathname: "/booking/work-errand/work/payment",
@@ -1744,17 +1746,7 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         { text: "Cancel", style: "cancel" },
         {
           text: "Yes, finish",
-          onPress: () =>
-            runApp(a.id, async () => {
-              await finishJob(a.kind, a.id, a);
-
-              // Work is paid after completion — send the driver straight to
-              // the "pay worker" screen. Errand's payment already happened
-              // before the service started, so nothing more to do here.
-              if (a.kind === "work") {
-                goToWorkPayment(a);
-              }
-            }),
+          onPress: () => runApp(a.id, () => finishJob(a.kind, a.id, a)),
         },
       ],
     );
@@ -1816,6 +1808,17 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         return;
       }
       await acceptRequest(a.kind, a.id, a);
+
+      // Work Helper: the provider pays the worker right after accepting, not
+      // after the job is finished — Accept itself never waits on this (the
+      // request is already accepted above), it's just the very next screen.
+      // See handleAppFinish's own comment: the payment step has moved here,
+      // so Finish Work no longer auto-opens it. Errand is untouched — its
+      // customer-side upfront payment (payment_pending_passenger) already
+      // happens on its own, unrelated screen.
+      if (a.kind === "work") {
+        goToWorkPayment(a);
+      }
     });
 
   const handleAppReject = (a: NormalizedApplication) =>
@@ -3487,7 +3490,7 @@ useEffect(() => {
             {r.status === "on_the_way" ? (
               <View style={styles.appActionsRow}>
                 <Pressable
-                  style={styles.completeButton}
+                  style={[styles.completeButton, styles.completeButtonFlex]}
                   onPress={() => handleRideOpenMap(r)}
                 >
                   <Ionicons name="navigate-outline" size={16} color="#166534" />
@@ -3962,52 +3965,28 @@ useEffect(() => {
     booking count (never "Delete Trip" wording); only whether it ALSO
     records a driver cancellation violation depends on activeBookingCount
     (see cancelDriverTrip above) — a zero-booking listing never does.
-    Personal Ride and (legacy weekly) School both use the small, compact
-    style (matching the one-time School Ride card in useMySchoolRows.tsx's
-    own renderTripCard — same marginTop/alignSelf/fontSize/color), so every
-    School card looks identical regardless of which flow created it;
-    Work/Errand still use the large full-width button — a UI-only
-    distinction, the underlying eligibility/press handler is identical
-    either way. */}
+    Same large full-width bordered button for every category (Personal Ride,
+    School, Work/Errand) — matches the driver's own "cancel my listing"
+    button in useMySchoolRows.tsx's renderTripCard (cancelBookingBoxButton),
+    so a Personal Ride and a School listing look identical here too. */}
 {!done ? (
-  trip.category === "personal" || trip.category === "school" ? (
-    <>
-      <Pressable
-        style={[
-          styles.smallCancelTripButton,
-          (!!cancelBlockedReason || busy) && styles.smallCancelTripButtonDisabled,
-        ]}
-        onPress={() => confirmCancelDriverTrip(trip)}
-        disabled={!!cancelBlockedReason || busy}
-      >
-        <Text style={styles.smallCancelTripButtonText}>
-          {t("schoolTrip.cancelTripButton")}
-        </Text>
-      </Pressable>
+  <>
+    <Pressable
+      style={[
+        styles.cancelBookingButton,
+        (!!cancelBlockedReason || busy) && styles.cancelBookingButtonDisabled,
+      ]}
+      onPress={() => confirmCancelDriverTrip(trip)}
+      disabled={!!cancelBlockedReason || busy}
+    >
+      <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
+      <Text style={styles.cancelBookingButtonText}>{t("schoolTrip.cancelTripButton")}</Text>
+    </Pressable>
 
-      {cancelBlockedReason ? (
-        <Text style={styles.smallCancelTripHint}>{cancelBlockedReason}</Text>
-      ) : null}
-    </>
-  ) : (
-    <>
-      <Pressable
-        style={[
-          styles.cancelBookingButton,
-          (!!cancelBlockedReason || busy) && styles.cancelBookingButtonDisabled,
-        ]}
-        onPress={() => confirmCancelDriverTrip(trip)}
-        disabled={!!cancelBlockedReason || busy}
-      >
-        <Ionicons name="close-circle-outline" size={16} color="#B91C1C" />
-        <Text style={styles.cancelBookingButtonText}>{t("schoolTrip.cancelTripButton")}</Text>
-      </Pressable>
-
-      {cancelBlockedReason ? (
-        <Text style={styles.appHint}>{cancelBlockedReason}</Text>
-      ) : null}
-    </>
-  )
+    {cancelBlockedReason ? (
+      <Text style={styles.appHint}>{cancelBlockedReason}</Text>
+    ) : null}
+  </>
 ) : null}
       </View>
     );
@@ -4718,7 +4697,7 @@ useEffect(() => {
             {a.status === "on_the_way" ? (
               <View style={styles.appActionsRow}>
                 <Pressable
-                  style={styles.completeButton}
+                  style={[styles.completeButton, styles.completeButtonFlex]}
                   onPress={() => openNavigation(a)}
                 >
                   <Ionicons name="navigate-outline" size={16} color="#166534" />
@@ -4756,20 +4735,6 @@ useEffect(() => {
                 <Text style={styles.startButtonText}>
                   {a.kind === "work" ? t("booking.finishWork") : t("booking.finishErrand")}
                 </Text>
-              </Pressable>
-            ) : null}
-
-            {a.kind === "work" &&
-            a.status === "completed" &&
-            a.driverPaymentStatus !== "paid" ? (
-              // Fallback re-entry in case the driver left the payment screen
-              // without paying right after Finish Work.
-              <Pressable
-                style={styles.primaryButton}
-                onPress={() => goToWorkPayment(a)}
-              >
-                <Ionicons name="cash-outline" size={16} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>{t("workErrand.payWorkerTitle")}</Text>
               </Pressable>
             ) : null}
 
@@ -6203,7 +6168,15 @@ const styles = StyleSheet.create({
     borderColor: "#BBE7C6",
     backgroundColor: "#F1FBF4",
     borderRadius: 14,
-    paddingVertical: 13,
+    paddingVertical: 14,
+  },
+  // Only for completeButton's two appActionsRow pairings (open map + I've
+  // arrived) — makes it share the row evenly with its flex:1 sibling
+  // startButton, instead of shrinking to a cramped, oddly-placed pill.
+  // Never applied to completeButton's OTHER, standalone "Mark as Completed"
+  // usage, which must stay full-width in its own vertical stack.
+  completeButtonFlex: {
+    flex: 1,
   },
   completeButtonText: {
     color: "#166534",
@@ -6249,27 +6222,6 @@ const styles = StyleSheet.create({
   },
   cancelBookingButtonDisabled: {
     opacity: 0.5,
-  },
-  // Personal Ride's driver "Unbooked Trips" card only — matches the School
-  // Ride card's own small cancel action exactly (useMySchoolRows.tsx's
-  // cancelButton/cancelButtonText/noReturnRowText), instead of the large
-  // full-width cancelBookingButton every other category card here uses.
-  smallCancelTripButton: {
-    marginTop: 8,
-    alignSelf: "flex-start",
-  },
-  smallCancelTripButtonDisabled: {
-    opacity: 0.5,
-  },
-  smallCancelTripButtonText: {
-    color: "#B91C1C",
-    fontWeight: "800",
-    fontSize: 12.5,
-  },
-  smallCancelTripHint: {
-    fontSize: 12,
-    color: "#7C5F46",
-    fontWeight: "700",
   },
   primaryButton: {
     flexDirection: "row",

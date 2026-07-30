@@ -59,6 +59,7 @@ import {
 import { useLanguage } from "../i18n/LanguageProvider";
 import { ltrContentStyle } from "../i18n/rtl";
 import { getUserLanguage } from "../i18n/userLanguage";
+import { openWazeNavigation } from "./wazeNav";
 
 type TripStatus =
   | "booked"
@@ -806,9 +807,7 @@ export default function RideNavigationScreen() {
       return;
     }
 
-    const url = `https://waze.com/ul?ll=${target.lat},${target.lng}&navigate=yes`;
-
-    Linking.openURL(url).catch(() =>
+    openWazeNavigation(target.lat, target.lng).catch(() =>
       Alert.alert(t("common.error"), t("booking.couldNotOpenWaze")),
     );
   };

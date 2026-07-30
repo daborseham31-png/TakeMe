@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -19,7 +19,7 @@ import { useLanguage } from "../../../i18n/LanguageProvider";
 import { paddingEnd } from "../../../i18n/rtl";
 import IsraelLocationAutocomplete from "../../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../israelLocations";
-import { createApplication } from "../workErrandLib";
+import { createApplication, detectCurrentLocation, GeoPoint } from "../workErrandLib";
 
 type JobListing = {
   id: string;
@@ -95,6 +95,25 @@ export default function WorkApplyScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
 
+  // Silently tries for a precise GPS pin the moment this screen opens — no
+  // separate "detect my location" button (removed per product decision), so
+  // Google Maps/Waze on the employer's job-navigation screen can still open
+  // to the exact address instead of just the picked city's centroid. Never
+  // blocks or alerts on failure (permission denied, GPS off, ...); the city
+  // pick's own coordinates (see handleSubmit below) are the silent fallback.
+  const deviceLocationRef = useRef<GeoPoint | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    detectCurrentLocation()
+      .then((loc) => {
+        if (!cancelled) deviceLocationRef.current = loc;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleSubmit = async () => {
     const cleanCity = city.trim();
     const cleanNeighborhood = neighborhood.trim();
@@ -135,10 +154,11 @@ export default function WorkApplyScreen() {
           },
           neighborhood: cleanNeighborhood,
           notes: notes.trim(),
-          // The picked City/Village autocomplete result already carries
-          // coordinates — no need for a separate GPS "detect my location"
-          // step just to satisfy CustomerDetails.location's GeoPoint shape.
-          location: {
+          // Prefer the silent GPS pin (see the effect above) for an exact
+          // navigable address — falls back to the picked City/Village
+          // result's own (city-centroid) coordinates only if that GPS read
+          // never came back in time (permission denied, GPS off, ...).
+          location: deviceLocationRef.current ?? {
             latitude: cityPlace.latitude ?? null,
             longitude: cityPlace.longitude ?? null,
             address: cleanCity,

@@ -148,9 +148,18 @@ service cloud.firestore {
     // broad allowance every OTHER personal_ride/school write on this
     // collection still relies on (trip lifecycle, cancellation, etc. — see
     // the "Everything else" comment on match /bookings/{bookingId}).
+    // Deliberately keyed off "rating" itself, not "ratingSubmitted" —
+    // Roadside Help's confirmCompletion (isValidRoadsideBookingUpdate's own
+    // "Customer confirms completion" branch) legitimately sets
+    // ratingSubmitted: false / needsPassengerRating: true as part of
+    // unlocking rating eligibility, without ever submitting a "rating"
+    // field. A real rating submission (submitRideRating/submitSchoolRating/
+    // submitRoadsideRating) always writes "rating" itself (see
+    // isValidPassengerBookingRatingUpdate's own `newData.rating is int`
+    // requirement below), so this still catches every genuine attempt.
     function isRatingLikeBookingUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys()
-        .hasAny(["rating", "reviewComment", "ratingSubmitted", "ratedAt"]);
+        .hasAny(["rating", "reviewComment", "ratedAt"]);
     }
 
     // Personal Ride (rideBookingLib.ts's submitRideRating), legacy School
@@ -324,7 +333,17 @@ service cloud.firestore {
           oldData.status == "completed" &&
           oldData.get("paymentStatus", "") == "pending" &&
           newData.paymentStatus == "paid" &&
-          newData.diff(oldData).affectedKeys().hasOnly(["paymentStatus", "paidAt", "updatedAt"]))
+          newData.diff(oldData).affectedKeys().hasOnly(["paymentStatus", "paidAt", "updatedAt"])) ||
+        // Passenger rates the helper (submitRoadsideRating) — mirrors the
+        // matching rating branch on roadsideRequests above; this is the
+        // SAME rating being echoed onto the offer doc, once, only after
+        // completion.
+        (oldData.passengerId == request.auth.uid &&
+          oldData.status == "completed" &&
+          oldData.get("ratingSubmitted", false) == false &&
+          newData.rating is int && newData.rating >= 1 && newData.rating <= 5 &&
+          newData.diff(oldData).affectedKeys()
+            .hasOnly(["rating", "reviewComment", "ratingSubmitted", "ratedAt", "updatedAt"]))
       );
     }
 

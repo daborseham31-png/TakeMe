@@ -47,7 +47,6 @@ import { ltrContentStyle } from "../../i18n/rtl";
 import { openConversation } from "../../chat/chatLib";
 import {
   buildDirectionsUrl,
-  confirmCashReceived,
   finishRoadsideHelp,
   getCurrentPositionBestEffort,
   markHelperArrived,
@@ -67,7 +66,7 @@ type Props = {
 export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
   const { t } = useTranslation();
   const [busyAction, setBusyAction] = useState<
-    "start_driving" | "arrived" | "start_help" | "finish" | "confirm_cash" | null
+    "start_driving" | "arrived" | "finish" | null
   >(null);
 
   const status = request.status;
@@ -79,9 +78,7 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
   const isCompletionPending = status === "completion_pending";
   const isCompleted = status === "completed";
 
-  const isCash = request.paymentMethod === "cash";
   const isPaid = request.paymentStatus === "paid";
-  const showConfirmCashReceived = isCompleted && isCash && !isPaid;
 
   // ---------------------------------------------------------------------
   // Foreground-only GPS sharing (Location.watchPositionAsync — no
@@ -188,20 +185,24 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
       "roadsideHelp.couldNotUpdateStatus",
     );
 
+  // A single tap covers both "I've arrived" and "Start Help" — arrived and
+  // in_progress are still two separate Firestore writes (firestore.rules
+  // only allows one status step at a time), just no longer two separate
+  // button presses for the driver. Checks `status` fresh each call so that
+  // if the first write succeeds but the second one fails (network drop
+  // mid-transition), the button — now rendered again for the "arrived"
+  // state below — can safely retry from wherever it actually got stuck,
+  // instead of re-attempting a step that already happened.
   const handleArrived = () =>
     runAction(
       "arrived",
       async () => {
-        await markHelperArrived({ bookingId: request.bookingId, requestId: request.id });
-        await stopDriverLocationTracking();
+        if (status === "helper_on_way") {
+          await markHelperArrived({ bookingId: request.bookingId, requestId: request.id });
+          await stopDriverLocationTracking();
+        }
+        await startHelp({ bookingId: request.bookingId, requestId: request.id });
       },
-      "roadsideHelp.couldNotUpdateStatus",
-    );
-
-  const handleStartHelp = () =>
-    runAction(
-      "start_help",
-      () => startHelp({ bookingId: request.bookingId, requestId: request.id }),
       "roadsideHelp.couldNotUpdateStatus",
     );
 
@@ -223,27 +224,6 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
               "finish",
               () => finishRoadsideHelp(request.bookingId),
               "roadsideHelp.couldNotFinishHelp",
-            ),
-        },
-      ],
-    );
-  };
-
-  const handleConfirmCashReceived = () => {
-    Alert.alert(
-      t("roadsideHelp.confirmCashReceivedTitle"),
-      t("roadsideHelp.confirmCashReceivedConfirm", { amount: request.agreedPrice ?? 0 }),
-      [
-        { text: t("common.cancel"), style: "cancel" },
-        {
-          text: t("common.confirm"),
-          onPress: () =>
-            runAction(
-              "confirm_cash",
-              async () => {
-                await confirmCashReceived(request.bookingId);
-              },
-              "roadsideHelp.couldNotConfirmCash",
             ),
         },
       ],
@@ -408,21 +388,6 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
             })}
           </Text>
         </View>
-      ) : showConfirmCashReceived ? (
-        <Pressable
-          style={[styles.cashButton, busyAction === "confirm_cash" && styles.buttonDisabled]}
-          onPress={handleConfirmCashReceived}
-          disabled={!!busyAction}
-        >
-          {busyAction === "confirm_cash" ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <>
-              <Ionicons name="cash" size={18} color="#FFFFFF" />
-              <Text style={styles.cashButtonText}>{t("roadsideHelp.confirmCashReceivedButton")}</Text>
-            </>
-          )}
-        </Pressable>
       ) : isCompleted && request.paymentMethod === "bit" ? (
         <View style={styles.statusBanner}>
           <Ionicons name="time-outline" size={18} color="#B86115" />
@@ -480,13 +445,17 @@ export default function RoadsideAcceptedCard({ request, onDelete }: Props) {
             </>
           ) : null}
 
+          {/* Only ever visible if the "arrived" write above succeeded but
+              the immediately-following "start help" write failed (e.g. a
+              dropped connection) — the normal path never leaves the driver
+              sitting on this stage long enough to see it. */}
           {isArrived ? (
             <Pressable
               style={[styles.primaryButtonFull, busyAction && styles.buttonDisabled]}
-              onPress={handleStartHelp}
+              onPress={handleArrived}
               disabled={!!busyAction}
             >
-              {busyAction === "start_help" ? (
+              {busyAction === "arrived" ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <>
@@ -734,20 +703,6 @@ const styles = StyleSheet.create({
   },
   finishButtonText: {
     color: "#166534",
-    fontWeight: "900",
-    fontSize: 15,
-  },
-  cashButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#F58220",
-    borderRadius: 14,
-    paddingVertical: 15,
-  },
-  cashButtonText: {
-    color: "#FFFFFF",
     fontWeight: "900",
     fontSize: 15,
   },

@@ -1463,7 +1463,7 @@
     "enterCityVillage": "Введите город или посёлок",
     "neighborhoodLabel": "Район",
     "enterNeighborhood": "Введите район",
-    "notesLabel": "Заметки (необязательно)",
+    "notesLabel": "Заметки",
     "notesPlaceholder": "Всё, что должен знать работодатель",
     "sending": "Отправка...",
     "sendRequest": "Отправить запрос",

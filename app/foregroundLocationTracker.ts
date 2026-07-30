@@ -45,6 +45,22 @@ export function createForegroundLocationTracker(collectionName: string) {
   let subscription: Location.LocationSubscription | null = null;
   let startPromise: Promise<StartTrackingResult> | null = null;
 
+  // Firestore rules require the FIRST write to targetId (a `create`, i.e.
+  // the doc doesn't exist yet) to carry no latitude/longitude — only once
+  // the doc exists does the rules' `update` branch allow coordinate fields.
+  // School Trips satisfies this itself (its own verify-and-start transaction
+  // pre-creates the doc with just {driverId, authorizedPassengerIds}) but no
+  // caller did this for a 1:1 target (Personal Ride, Work, Errand), so their
+  // very first coordinate write would otherwise be evaluated as a `create`
+  // carrying latitude/longitude and get rejected. Calling this once before
+  // the first write — safe to call repeatedly, since re-merging the same
+  // driverId/passengerId onto an existing doc is a no-op diff — closes that
+  // gap for every caller without changing firestore.rules.
+  const ensureTargetDoc = async (target: ForegroundTrackTarget): Promise<void> => {
+    const { targetId, ...fields } = target;
+    await setDoc(doc(db, collectionName, targetId), fields, { merge: true });
+  };
+
   // Shared by the watchPositionAsync callback and captureOnce — exactly one
   // place writes a location fix to Firestore for this collection.
   const writeLocationFix = async (
@@ -95,6 +111,7 @@ export function createForegroundLocationTracker(collectionName: string) {
     }
 
     try {
+      await ensureTargetDoc(target);
       activeTargetId = target.targetId;
       subscription = await Location.watchPositionAsync(
         {
@@ -146,6 +163,7 @@ export function createForegroundLocationTracker(collectionName: string) {
   const captureOnce = async (target: ForegroundTrackTarget): Promise<void> => {
     try {
       const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      await ensureTargetDoc(target);
       await writeLocationFix(target, current.coords);
     } catch (error) {
       console.log(`foregroundLocationTracker(${collectionName}): captureOnce failed`, error);
