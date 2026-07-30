@@ -41,7 +41,6 @@ import { auth, db } from "../../firebase";
 import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { formatLocalizedDate, formatLocalizedTime, translateProblemType } from "../i18n/formatters";
-import { ltrContentStyle } from "../i18n/rtl";
 import { useLanguage } from "../i18n/LanguageProvider";
 import RoadsideAcceptedCard from "../booking/roadside-help/RoadsideAcceptedCard";
 import {
@@ -573,7 +572,7 @@ export default function DriverHelpRequestsScreen() {
         {createdDate ? (
           <View style={styles.infoRow}>
             <Ionicons name="calendar-outline" size={16} color="#7C5F46" />
-            <Text style={[styles.infoText, ltrContentStyle]}>
+            <Text style={styles.infoText}>
               {formatLocalizedDate(createdDate, language)} • {formatLocalizedTime(createdDate, language)}
             </Text>
           </View>
