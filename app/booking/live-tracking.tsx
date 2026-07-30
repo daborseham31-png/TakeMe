@@ -80,8 +80,6 @@ export default function LiveTrackingScreen() {
   const bookingCollection = isSchoolTripsSource ? "schoolTrips" : "bookings";
 
   const mapRef = useRef<MapView | null>(null);
-  const driverMarkerRef = useRef<any>(null);
-  const lastAnimatedCoordRef = useRef<LatLng | null>(null);
   const hasCenteredOnceRef = useRef(false);
   const userHasPannedRef = useRef(false);
 
@@ -94,6 +92,10 @@ export default function LiveTrackingScreen() {
   // re-fetched by reloading this screen). Firestore rules restrict this
   // read to the assigned driver + authorized passenger(s) only.
   const [driverDoc, setDriverDoc] = useState<any | null>(null);
+  // The marker is rendered straight off this state (no ref, no imperative
+  // animation API) — those native marker commands aren't available under
+  // the New Architecture in Expo Go and crash on iOS.
+  const [driverLocation, setDriverLocation] = useState<LatLng | null>(null);
 
   useEffect(() => {
     if (!id) {
@@ -138,7 +140,9 @@ export default function LiveTrackingScreen() {
     const unsub = onSnapshot(
       doc(db, TRIP_LOCATIONS_COLLECTION, id),
       (snap) => {
-        setDriverDoc(snap.exists() ? snap.data() : null);
+        const data = snap.exists() ? snap.data() : null;
+        setDriverDoc(data);
+        setDriverLocation(toLatLng(data));
         setLocationError(false);
       },
       // A permission-denied or offline read lands here — surfaced as a
@@ -149,7 +153,6 @@ export default function LiveTrackingScreen() {
     return unsub;
   }, [id]);
 
-  const driverLocation = useMemo(() => toLatLng(driverDoc), [driverDoc]);
   const driverUpdatedAtMs: number | null = driverDoc?.updatedAt?.seconds
     ? driverDoc.updatedAt.seconds * 1000
     : null;
@@ -180,21 +183,6 @@ export default function LiveTrackingScreen() {
   }, [booking]);
 
   const mapCenter = driverLocation || pickupLocation || destinationLocation;
-
-  // Smoothly animates the marker to each new fix instead of teleporting it
-  // — the FIRST fix places it directly (nothing to animate from yet), every
-  // fix after that calls the imperative animate API so the movement itself
-  // is visible rather than a jump-cut. Never re-renders/reloads the map for
-  // this — only the marker's own position changes.
-  useEffect(() => {
-    if (!driverLocation) return;
-
-    if (lastAnimatedCoordRef.current && driverMarkerRef.current) {
-      (driverMarkerRef.current as any).animateMarkerToCoordinate?.(driverLocation, 1000);
-    }
-
-    lastAnimatedCoordRef.current = driverLocation;
-  }, [driverLocation]);
 
   // Auto-frame the map ONCE, the first time a driver fix arrives, so the
   // passenger doesn't open to an empty ocean tile — never again after that,
@@ -349,8 +337,10 @@ export default function LiveTrackingScreen() {
 
               {driverLocation ? (
                 <Marker
-                  ref={driverMarkerRef}
-                  coordinate={lastAnimatedCoordRef.current ?? driverLocation}
+                  coordinate={{
+                    latitude: driverLocation.latitude,
+                    longitude: driverLocation.longitude,
+                  }}
                   title={isRoadside ? t("roadsideHelp.helperMapLabel") : t("rides.driverMarkerTitle")}
                   description={isRoadside ? "" : t("rides.driverMarkerDesc")}
                   anchor={{ x: 0.5, y: 0.5 }}
