@@ -471,7 +471,11 @@ export const getPassengerTripStatus = (row: any): PassengerTripStatus => {
 
   const tripStatus = String(row.tripStatus ?? "");
   if (tripStatus === "completed") return "completed";
-  if (tripStatus === "in_progress") return "inProgress";
+  // Roadside Help's "driver marked it finished, waiting on the passenger to
+  // confirm" stage (see roadsideLib.ts's confirmCompletion) — still reads as
+  // actively in progress to the passenger, exactly like "in_progress" above,
+  // never falls back to "booked"/Upcoming.
+  if (tripStatus === "in_progress" || tripStatus === "completion_pending") return "inProgress";
   if (ARRIVED_VALUES.includes(tripStatus)) return "driverArrived";
   if (ON_THE_WAY_VALUES.includes(tripStatus)) return "driverOnWay";
   return "booked";

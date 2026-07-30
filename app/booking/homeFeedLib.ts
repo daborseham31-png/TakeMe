@@ -361,7 +361,7 @@ const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
     startTime: data.startTime || "",
     endTime: data.endTime || "",
 
-    price: null,
+    price: Number(data.hourlyPay || 0),
     isHourly: true,
     seats: remainingSeats,
 

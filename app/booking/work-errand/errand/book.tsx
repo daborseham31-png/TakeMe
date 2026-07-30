@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -19,11 +19,7 @@ import { useLanguage } from "../../../i18n/LanguageProvider";
 import { paddingEnd } from "../../../i18n/rtl";
 import IsraelLocationAutocomplete from "../../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../israelLocations";
-import {
-  createApplication,
-  detectCurrentLocation,
-  GeoPoint,
-} from "../workErrandLib";
+import { createApplication, detectCurrentLocation, GeoPoint } from "../workErrandLib";
 
 type Driver = {
   id: string;
@@ -118,23 +114,25 @@ export default function ErrandsBookScreen() {
 
   const [neighborhood, setNeighborhood] = useState("");
   const [notes, setNotes] = useState("");
-  const [location, setLocation] = useState<GeoPoint | null>(null);
-  const [locating, setLocating] = useState(false);
 
-  const detectLocation = async () => {
-    try {
-      setLocating(true);
-      const loc = await detectCurrentLocation();
-      setLocation(loc);
-    } catch (error: any) {
-      Alert.alert(
-        t("workErrand.locationTitle"),
-        error?.message || t("workErrand.couldNotDetectLocation"),
-      );
-    } finally {
-      setLocating(false);
-    }
-  };
+  // Silently tries for a precise GPS pin the moment this screen opens — no
+  // separate "detect my location" button (removed per product decision), so
+  // Google Maps/Waze on the driver's job-navigation screen can still open to
+  // the exact address instead of just the picked city's centroid. Never
+  // blocks or alerts on failure (permission denied, GPS off, ...); the city
+  // pick's own coordinates (see handleSubmit below) are the silent fallback.
+  const deviceLocationRef = useRef<GeoPoint | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    detectCurrentLocation()
+      .then((loc) => {
+        if (!cancelled) deviceLocationRef.current = loc;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSubmit = async () => {
     const cleanCity = city.trim();
@@ -147,14 +145,6 @@ export default function ErrandsBookScreen() {
 
     if (!cityPlace) {
       setCityError(t("validation.selectLocationFromList"));
-      return;
-    }
-
-    if (!location || location.latitude === null || location.longitude === null) {
-      Alert.alert(
-        t("workErrand.locationNeededTitle"),
-        t("workErrand.detectLocationMessageDriver"),
-      );
       return;
     }
 
@@ -184,7 +174,15 @@ export default function ErrandsBookScreen() {
           },
           neighborhood: cleanNeighborhood,
           notes: notes.trim(),
-          location,
+          // Prefer the silent GPS pin (see the effect above) for an exact
+          // navigable address — falls back to the picked City/Village
+          // result's own (city-centroid) coordinates only if that GPS read
+          // never came back in time (permission denied, GPS off, ...).
+          location: deviceLocationRef.current ?? {
+            latitude: cityPlace.latitude ?? null,
+            longitude: cityPlace.longitude ?? null,
+            address: cleanCity,
+          },
         },
       );
 
@@ -334,29 +332,6 @@ export default function ErrandsBookScreen() {
 
             <Text style={styles.hint}>{t("workErrand.autoProfileHint")}</Text>
 
-            <Text style={styles.label}>{t("workErrand.yourLocation")}</Text>
-            <Pressable
-              style={styles.locationBox}
-              onPress={detectLocation}
-              disabled={locating}
-            >
-              <Ionicons
-                name={location ? "location" : "locate-outline"}
-                size={20}
-                color="#F58220"
-              />
-              <Text style={styles.locationText} numberOfLines={2}>
-                {locating
-                  ? t("booking.findingLocation")
-                  : location
-                    ? location.address || t("workErrand.currentLocationDetected")
-                    : t("workErrand.tapToDetectLocation")}
-              </Text>
-              {location ? (
-                <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
-              ) : null}
-            </Pressable>
-
             <View style={styles.row}>
               <View style={styles.halfField}>
                 <IsraelLocationAutocomplete
@@ -373,7 +348,9 @@ export default function ErrandsBookScreen() {
               </View>
 
               <View style={styles.halfField}>
-                <Text style={styles.label}>{t("workErrand.neighborhoodLabel")}</Text>
+                <Text style={[styles.label, styles.neighborhoodLabel]}>
+                  {t("workErrand.neighborhoodLabel")}
+                </Text>
                 <TextInput
                   style={styles.input}
                   value={neighborhood}
@@ -551,24 +528,6 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     lineHeight: 18,
   },
-  locationBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "#FFF8F2",
-    borderWidth: 1.5,
-    borderColor: "#FFE2C5",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    marginBottom: 6,
-  },
-  locationText: {
-    flex: 1,
-    color: "#3C2319",
-    fontSize: 14,
-    fontWeight: "700",
-  },
   row: {
     flexDirection: "row",
     gap: 14,
@@ -582,6 +541,13 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 8,
     marginTop: 10,
+  },
+  // City/Village (IsraelLocationAutocomplete) renders its own label with no
+  // marginTop, so the shared styles.label's marginTop: 10 alone would push
+  // this field's input box lower than the city field's — this flushes it
+  // back to the same top edge as the city field beside it.
+  neighborhoodLabel: {
+    marginTop: 0,
   },
   input: {
     minHeight: 46,

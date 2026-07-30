@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { doc, onSnapshot } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,10 +12,17 @@ import {
   Text,
   View,
 } from "react-native";
+import MapView, { Marker } from "react-native-maps";
 
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";
+import {
+  captureDriverLocationOnce,
+  startDriverLocationTracking,
+  stopDriverLocationTracking,
+} from "../driverLocationTask";
+import { TRIP_LOCATIONS_COLLECTION } from "../booking/schoolTripsLib";
 import {
   arriveJob,
   collectionFor,
@@ -27,6 +34,14 @@ import {
 import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { ltrContentStyle } from "../i18n/rtl";
+import { openWazeNavigation } from "./wazeNav";
+
+// Live tracking is active for the whole "Start Driving" → Finish window —
+// on_the_way (Errand's own Start Driving step), arrived, and in_progress
+// (Work skips straight to in_progress — see workErrandLib.ts's
+// beginJobTrip/startJob) — mirroring ride-navigation.tsx's own tracking
+// window but starting one stage earlier, per this screen's own spec.
+const TRACKED_STATUSES = new Set(["on_the_way", "arrived", "in_progress"]);
 
 export default function JobNavigationScreen() {
   const { t } = useTranslation();
@@ -60,6 +75,121 @@ export default function JobNavigationScreen() {
     return unsub;
   }, [id, kind]);
 
+  // The driver's own live location, read back from the SAME tripLocations
+  // doc driverLocationTask.ts writes to — same round-trip pattern as
+  // ride-navigation.tsx, reused verbatim rather than a second tracking path.
+  const [liveDriverLocation, setLiveDriverLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!id) {
+      setLiveDriverLocation(null);
+      return;
+    }
+
+    const unsub = onSnapshot(
+      doc(db, TRIP_LOCATIONS_COLLECTION, id),
+      (snap) => {
+        const data = snap.data();
+        const lat = Number(data?.latitude);
+        const lng = Number(data?.longitude);
+
+        setLiveDriverLocation(
+          Number.isFinite(lat) && Number.isFinite(lng) ? { latitude: lat, longitude: lng } : null,
+        );
+      },
+      (error) => {
+        console.log("Listener failed:", {
+          feature: "job-navigation.tripLocations",
+          collection: TRIP_LOCATIONS_COLLECTION,
+          docId: id,
+          code: error.code,
+          message: error.message,
+        });
+        setLiveDriverLocation(null);
+      },
+    );
+
+    return unsub;
+  }, [id]);
+
+  // tripLocations/{applicationId} — targetId is this application's own id
+  // (workApplications/errandApplications), the exact same 1:1 shape
+  // Personal Ride already uses (tripLocations/{bookingId}): one driver, one
+  // customer, both known up front, no School-style shared-car authorized
+  // list needed. driverId is always the provider viewing this screen
+  // (app.providerId); passengerId is the applicant/customer (app.customerId)
+  // — named "passengerId" (not "customerId") because that is the literal
+  // field firestore.rules' tripLocations read rule checks for the non-driver
+  // party, so this must match it exactly, not invent a new field name.
+  const getTrackingTarget = () => {
+    if (!id || !app?.providerId) return null;
+    return { targetId: id, driverId: app.providerId, passengerId: app.customerId };
+  };
+
+  // Starts the moment this screen shows a tracked stage (on_the_way onward —
+  // i.e. right after "Start Driving", per this screen's own spec) and keeps
+  // running only while the screen stays mounted; stops on unmount, and
+  // separately the instant the job is marked completed (see handleFinish).
+  useEffect(() => {
+    if (!app || !id) return;
+    if (!TRACKED_STATUSES.has(app.status)) return;
+
+    const target = getTrackingTarget();
+    if (!target) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await captureDriverLocationOnce(target);
+        if (cancelled) return;
+
+        const result = await startDriverLocationTracking(target);
+        if (!cancelled && !result.started) {
+          Alert.alert(t("booking.locationPermissionTitle"), t("booking.allowLocationForTracking"));
+        }
+      } catch (error) {
+        console.log("job-navigation: failed to start driver location tracking", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [app?.status, id, app?.providerId, app?.customerId]);
+
+  // Screen closed / component unmounted — always stop the watcher, unlike
+  // ride-navigation.tsx's deliberate "keep tracking across navigation"
+  // choice; this screen's own spec requires tracking to stop here.
+  useEffect(() => {
+    return () => {
+      stopDriverLocationTracking().catch(() => {});
+    };
+  }, []);
+
+  const mapRef = useRef<MapView | null>(null);
+
+  const customerCoord =
+    app?.location?.latitude != null && app?.location?.longitude != null
+      ? { latitude: app.location.latitude, longitude: app.location.longitude }
+      : null;
+
+  // Keeps both markers on screen together instead of a fixed zoom/region —
+  // re-fits whenever either point changes (the driver marker moves every
+  // few seconds while tracking is active).
+  useEffect(() => {
+    if (!mapRef.current || !customerCoord || !liveDriverLocation) return;
+
+    mapRef.current.fitToCoordinates([customerCoord, liveDriverLocation], {
+      edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
+      animated: true,
+    });
+  }, [customerCoord?.latitude, customerCoord?.longitude, liveDriverLocation]);
+
   // Both maps use the customer's REAL detected coordinates, never the typed
   // city/neighborhood. If coordinates are missing we tell the driver instead
   // of opening a wrong (text-based) destination.
@@ -88,8 +218,7 @@ export default function JobNavigationScreen() {
       Alert.alert(t("booking.locationLabel"), t("booking.exactLocationNotAvailable"));
       return;
     }
-    const url = `https://waze.com/ul?ll=${c.lat},${c.lng}&navigate=yes`;
-    Linking.openURL(url).catch(() =>
+    openWazeNavigation(c.lat, c.lng).catch(() =>
       Alert.alert(t("common.error"), t("booking.couldNotOpenWaze")),
     );
   };
@@ -119,6 +248,7 @@ export default function JobNavigationScreen() {
             try {
               setBusy(true);
               await finishJob(kind, app.id, app);
+              await stopDriverLocationTracking().catch(() => {});
               Alert.alert(t("common.completed"), t("booking.greatJobCompletedMessage"), [
                 {
                   text: t("common.ok"),
@@ -178,15 +308,52 @@ export default function JobNavigationScreen() {
           </Text>
         </View>
 
-        {/* Map placeholder (kept lightweight – uses external maps apps) */}
-        <View style={styles.mapBox}>
-          <Ionicons name="map-outline" size={40} color="#F58220" />
-          <Text style={styles.mapText}>
-            {arrived
-              ? t("booking.arrivedAtDestination")
-              : t("booking.navigateToCustomerLocation")}
-          </Text>
-        </View>
+        {/* Live map — driver + customer markers when a customer coordinate
+            exists; falls back to the plain status placeholder otherwise
+            (missing customer coordinates, exactly like openMaps/openWaze's
+            own fallback above). */}
+        {customerCoord ? (
+          <View style={styles.mapWrapper}>
+            <MapView
+              ref={mapRef}
+              style={styles.map}
+              initialRegion={{
+                latitude: (liveDriverLocation ?? customerCoord).latitude,
+                longitude: (liveDriverLocation ?? customerCoord).longitude,
+                latitudeDelta: 0.02,
+                longitudeDelta: 0.02,
+              }}
+            >
+              <Marker
+                coordinate={customerCoord}
+                title={app.customerName}
+                description={t("booking.locationLabel")}
+                pinColor="#F58220"
+              />
+
+              {liveDriverLocation ? (
+                <Marker
+                  coordinate={liveDriverLocation}
+                  title={t("booking.yourLocationLabel")}
+                  description={t("booking.liveDriverLocation")}
+                >
+                  <View style={styles.driverMarker}>
+                    <Ionicons name="car" size={18} color="#FFFFFF" />
+                  </View>
+                </Marker>
+              ) : null}
+            </MapView>
+          </View>
+        ) : (
+          <View style={styles.mapBox}>
+            <Ionicons name="map-outline" size={40} color="#F58220" />
+            <Text style={styles.mapText}>
+              {arrived
+                ? t("booking.arrivedAtDestination")
+                : t("booking.exactLocationNotAvailableShort")}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{app.title}</Text>
@@ -350,6 +517,28 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: "900",
     color: "#111827",
+  },
+  mapWrapper: {
+    height: 260,
+    borderRadius: 18,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    marginBottom: 18,
+  },
+  map: {
+    width: "100%",
+    height: "100%",
+  },
+  driverMarker: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#F58220",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
   },
   mapBox: {
     backgroundColor: "#FFF8F2",

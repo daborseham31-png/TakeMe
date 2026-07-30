@@ -22,13 +22,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useTranslation } from "react-i18next";
 
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { getLocalNowInIsrael } from "../../booking/weeklyBookingLib";
 import { formatDateToYMD } from "./driverHelpers";
-
-const SHORT_DAY_KEYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const MONTH_LOCALE: Record<string, string> = {
   ar: "ar",
@@ -36,6 +33,20 @@ const MONTH_LOCALE: Record<string, string> = {
   he: "he-IL",
   ru: "ru-RU",
 };
+
+// Locale-correct SHORT weekday labels (e.g. "Sun", "Mon" in English), not the
+// full day names from booking.days.* (those wrap onto two lines inside this
+// grid's narrow 1/7-width columns — see the bug this replaces). 2023-01-01 is
+// a known Sunday, used purely to walk Sun..Sat in order regardless of locale.
+const getWeekdayLabels = (locale: string): string[] =>
+  Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(2023, 0, 1 + i);
+    try {
+      return new Intl.DateTimeFormat(locale, { weekday: "short" }).format(d);
+    } catch {
+      return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][i];
+    }
+  });
 
 type DayCell = { ymd: string; day: number; inMonth: boolean };
 
@@ -45,8 +56,12 @@ type Props = {
 };
 
 export default function MonthCalendarPicker({ selectedDates, onToggleDate }: Props) {
-  const { t } = useTranslation();
   const { language } = useLanguage();
+
+  const weekdayLabels = useMemo(
+    () => getWeekdayLabels(MONTH_LOCALE[language] || "en-US"),
+    [language],
+  );
 
   // Israel-local "today" — matches validateWeeklyRowsAnyFutureDate, the
   // authoritative save-time check, so the calendar never allows a date that
@@ -150,14 +165,14 @@ export default function MonthCalendarPicker({ selectedDates, onToggleDate }: Pro
         <Text style={styles.monthLabel}>{monthLabel}</Text>
 
         <Pressable onPress={goNextMonth} style={styles.navButton} hitSlop={8}>
-          <Ionicons name="chevron-forward" size={20} color="#E11D48" />
+          <Ionicons name="chevron-forward" size={20} color="#7C5F46" />
         </Pressable>
       </View>
 
       <View style={styles.weekdayRow}>
-        {SHORT_DAY_KEYS.map((key) => (
-          <Text key={key} style={styles.weekdayText}>
-            {t(`booking.days.${key}`)}
+        {weekdayLabels.map((label, i) => (
+          <Text key={i} style={styles.weekdayText} numberOfLines={1}>
+            {label}
           </Text>
         ))}
       </View>
