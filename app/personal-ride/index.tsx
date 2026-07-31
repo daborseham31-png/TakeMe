@@ -14,6 +14,7 @@ import {
 import IsraelLocationAutocomplete from "../booking/IsraelLocationAutocomplete";
 import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { IsraelLocation } from "../booking/israelLocations";
+import { resolveLocationCoordinates } from "../booking/locationSearch";
 import PickupLocationPicker, { PickupLocation } from "../booking/PickupLocationPicker";
 import { validateWeeklyRows, WeekDayRow } from "../booking/weeklyBookingLib";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
@@ -156,7 +157,7 @@ export default function PersonalRideScreen() {
     setSeats((prev) => Math.min(8, prev + 1));
   };
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
     if (!fromLocation || !toLocation) {
       Alert.alert(t("auth.missingDetails"), t("validation.enterFromAndTo"));
       return;
@@ -176,6 +177,16 @@ export default function PersonalRideScreen() {
       Alert.alert(t("auth.missingDetails"), t("pickupLocation.pickupLocationRequired"));
       return;
     }
+
+    // The passenger's destination (D) — resolved once here, same
+    // dataset-first/geocode-fallback approach RideForm.tsx already uses for
+    // the driver side (see resolveLocationCoordinates). This lets
+    // driverresults.tsx run the shared local route-matching algorithm
+    // (routeMatchLib.ts) instead of only exact from/to text matching.
+    // Best-effort: a failed/unavailable resolution simply omits toLat/toLng
+    // below, and driverresults.tsx safely falls back to the existing
+    // text-based matching for this search.
+    const toCoords = await resolveLocationCoordinates(toPlace, toLocation);
 
     const baseParams: Record<string, string> = {
       category: "personal",
@@ -207,6 +218,13 @@ export default function PersonalRideScreen() {
       pickupLng: String(pickupLocation.longitude),
       pickupAddress: pickupLocation.address,
       pickupSource: pickupLocation.source,
+      // The passenger's destination coordinates (D) — used only by
+      // driverresults.tsx's local route-matching (routeMatchLib.ts); omitted
+      // entirely when resolution failed, so D is treated as genuinely
+      // missing (falls back to C) rather than a wrong guess.
+      ...(toCoords
+        ? { toLat: String(toCoords.latitude), toLng: String(toCoords.longitude) }
+        : {}),
       // The exact place within the destination city (optional) — shown to
       // the driver, never used for matching.
       ...(destinationDetails.trim()

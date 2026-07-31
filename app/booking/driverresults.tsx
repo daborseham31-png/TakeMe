@@ -30,6 +30,15 @@ import DriverReviewsSection from "./DriverReviewsSection";
 import { getDisplayedDriverId } from "./driverReviewsLib";
 import { LocationNames, sameLocation } from "./locationSearch";
 import {
+  DriverRouteInput,
+  getRouteMatchesForCandidates,
+  isEffectivelySameLocation,
+  LatLng,
+  projectOntoCorridor,
+  RouteMatchResult,
+  toFiniteCoordinate,
+} from "./routeMatchLib";
+import {
   buildBookingDayFromMatch,
   computeWeeklyTotal,
   matchDriverWeeklyDays,
@@ -81,6 +90,14 @@ type DriverRoute = {
   toLocationId?: string;
   fromLocationNames?: LocationNames;
   toLocationNames?: LocationNames;
+  // Origin/destination coordinates (A/C — see routeMatchLib.ts), written at
+  // creation by RideForm.tsx. Typed loosely since some legacy Firestore
+  // documents may store these as numeric strings — always read through
+  // toFiniteCoordinate below, never compared/used directly.
+  fromLat?: number | string;
+  fromLng?: number | string;
+  toLat?: number | string;
+  toLng?: number | string;
   // School: the exact school/university name (required at creation, so
   // absent only on documents created before this existed). Personal: the
   // exact place within the destination city (optional either way).
@@ -294,6 +311,56 @@ const getDaysText = (driver: DriverRoute) => {
   return driver.day || "";
 };
 
+// ---------------------------------------------------------------------------
+// Temporary development-only diagnostics for the local route-matching
+// integration below — covers both Personal Ride and the legacy weekly
+// School Ride path (category "school", via driver.fromLat/fromLng/toLat/
+// toLng — see the shared `routeMatchInputs` gate below), helps verify
+// real-world rejections (like the Kafr Kanna -> Afula / Mashhad -> Afula
+// regression this was built for) without guessing. __DEV__-gated only:
+// never runs, never logs anything, in a production build. Reuses
+// routeMatchLib.ts's own exported projectOntoCorridor/
+// isEffectivelySameLocation rather than reimplementing the projection math
+// here, purely to surface the progress values the shared RouteMatchResult
+// type doesn't itself carry. Deliberately excludes raw coordinates and any
+// driver/passenger contact info — only derived matching metrics and the
+// same from/to text already shown on the card.
+// ---------------------------------------------------------------------------
+
+const logRejectedRouteMatchCandidate = (
+  driver: DriverRoute,
+  match: RouteMatchResult,
+  driverInput: DriverRouteInput,
+  pickup: LatLng,
+  destination: LatLng | null,
+) => {
+  const origin = driverInput.origin!;
+  const driverDestination = driverInput.destination!;
+
+  const destinationTarget: LatLng =
+    destination && !isEffectivelySameLocation(destination, driverDestination)
+      ? destination
+      : driverDestination;
+
+  const pickupProjection = projectOntoCorridor(origin, driverDestination, pickup);
+  const destinationProjection = projectOntoCorridor(origin, driverDestination, destinationTarget);
+
+  // eslint-disable-next-line no-console
+  console.log("[routeMatch] rejected candidate", {
+    tripId: driver.id,
+    category: driver.category || "",
+    schoolName: driver.category === "school" ? driver.schoolName || "" : undefined,
+    driverFrom: driver.from || driver.fromNormalized || "",
+    driverTo: driver.to || driver.toNormalized || "",
+    rejectionReason: match.reason,
+    corridorDistanceKm: match.pickupDistanceFromRouteKm,
+    approximateDetourKm: match.approximateDetourKm,
+    detourRatio: match.detourRatio,
+    pickupProgress: pickupProjection.progress,
+    destinationProgress: destinationProjection.progress,
+  });
+};
+
 export default function DriverResultsScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
@@ -332,12 +399,21 @@ export default function DriverResultsScreen() {
   // only) — pure passthrough to ride-payment/the booking doc, never used
   // for matching.
   const destinationDetails = String(params.destinationDetails || "");
-  // The passenger's chosen pickup point (see PickupLocationPicker.tsx) —
-  // pure passthrough to ride-payment, which writes it onto the booking.
+  // The passenger's chosen pickup point (B — see PickupLocationPicker.tsx).
+  // Passed through to ride-payment as before, and (Personal Ride + legacy
+  // weekly School Ride — see ROUTE_MATCH_CATEGORIES below) also fed into
+  // the local route-matching algorithm below (routeMatchLib.ts).
   const pickupLat = String(params.pickupLat || "");
   const pickupLng = String(params.pickupLng || "");
   const pickupAddress = String(params.pickupAddress || "");
   const pickupSource = String(params.pickupSource || "");
+  // The passenger's destination (D — see personal-ride/index.tsx, which
+  // resolves this from the typed "to" city). Personal Ride only, only used
+  // for route-matching below; absent/invalid is treated as "D is genuinely
+  // missing" (falls back to the driver's own destination C internally —
+  // see routeMatchLib.ts's PassengerRouteQuery).
+  const toLat = String(params.toLat || "");
+  const toLng = String(params.toLng || "");
   // Passenger's own typed school name from the search form — only ever a
   // fallback for routes created before the driver's own School Name field
   // existed; the driver's own driverRoutes.schoolName wins whenever set
@@ -410,26 +486,90 @@ export default function DriverResultsScreen() {
         }),
       );
 
+      // -----------------------------------------------------------------
+      // Personal Ride + (legacy weekly) School Ride only: local route-based/
+      // detour-aware matching (see routeMatchLib.ts) — a driver whose ORIGIN
+      // city text differs from the passenger's typed pickup city (e.g.
+      // driver published "Kafr Kanna -> Afula", passenger typed pickup city
+      // "Mashhad") can still match here as long as the passenger's actual
+      // GPS pickup point (pickupLat/pickupLng — already collected by
+      // PickupLocationPicker, previously only passed through to
+      // ride-payment) is close to the driver's A->C corridor and the
+      // resulting approximate detour is small. Fully local/free — no
+      // network call, the exact same shared algorithm Home's nearby feed
+      // uses. No other category (Work/Errand/Roadside/...) is ever included
+      // here.
+      //
+      // A driver only enters this path when BOTH the driver's own saved
+      // origin/destination coordinates AND the passenger's GPS pickup
+      // point are valid numbers (see toFiniteCoordinate — handles legacy
+      // Firestore documents that may have saved these as numeric strings).
+      // Anything missing/invalid falls back to the existing from/to text
+      // matching below, unchanged — never a hard rejection just because a
+      // coordinate happens to be absent. In practice this means: School
+      // route-matching only activates once a search screen actually
+      // collects a real GPS pickup point for School (LegacySchoolSearchForm
+      // does not today) — until then, School searches keep using the
+      // existing text-based matching exactly as before, safely.
+      // -----------------------------------------------------------------
+
+      const ROUTE_MATCH_CATEGORIES = new Set(["personal", "school"]);
+
+      const passengerPickup: LatLng | null = (() => {
+        const latitude = toFiniteCoordinate(pickupLat);
+        const longitude = toFiniteCoordinate(pickupLng);
+        return latitude !== null && longitude !== null ? { latitude, longitude } : null;
+      })();
+
+      // D — genuinely optional (see PassengerRouteQuery in routeMatchLib.ts,
+      // which already treats an omitted/invalid destination as "same as C").
+      const passengerDestination: LatLng | null = (() => {
+        const latitude = toFiniteCoordinate(toLat);
+        const longitude = toFiniteCoordinate(toLng);
+        return latitude !== null && longitude !== null ? { latitude, longitude } : null;
+      })();
+
+      const routeMatchInputs = new Map<string, DriverRouteInput>();
+
+      if (ROUTE_MATCH_CATEGORIES.has(category) && passengerPickup) {
+        routesWithProfiles.forEach((driver) => {
+          const driverCategoryMatches =
+            category === "personal"
+              ? driver.category === "personal" || driver.category === "personal_ride"
+              : driver.category === "school";
+
+          if (!driverCategoryMatches) return;
+
+          const originLat = toFiniteCoordinate(driver.fromLat);
+          const originLng = toFiniteCoordinate(driver.fromLng);
+          const destLat = toFiniteCoordinate(driver.toLat);
+          const destLng = toFiniteCoordinate(driver.toLng);
+
+          if (originLat === null || originLng === null || destLat === null || destLng === null) {
+            return; // legacy fallback for this specific driver
+          }
+
+          routeMatchInputs.set(driver.id, {
+            tripId: driver.id,
+            origin: { latitude: originLat, longitude: originLng },
+            destination: { latitude: destLat, longitude: destLng },
+          });
+        });
+      }
+
+      const routeMatchResults: Map<string, RouteMatchResult> =
+        routeMatchInputs.size > 0 && passengerPickup
+          ? new Map(
+              getRouteMatchesForCandidates(Array.from(routeMatchInputs.values()), {
+                pickup: passengerPickup,
+                destination: passengerDestination,
+              }).map((result) => [result.tripId, result]),
+            )
+          : new Map();
+
       const commonFiltered = routesWithProfiles.filter((driver) => {
         const activeMatches = driver.active !== false;
         const categoryMatches = !category || driver.category === category;
-
-        const fromMatches = locationMatches(
-          driver.from || driver.fromNormalized || "",
-          from,
-          driver.fromLocationId,
-          fromLocationId,
-          driver.fromLocationNames,
-          fromLocationNames,
-        );
-        const toMatches = locationMatches(
-          driver.to || driver.toNormalized || "",
-          to,
-          driver.toLocationId,
-          toLocationId,
-          driver.toLocationNames,
-          toLocationNames,
-        );
 
         const driverGender = getDriverGender(driver);
         const driverLanguages = getDriverLanguages(driver);
@@ -441,11 +581,48 @@ export default function DriverResultsScreen() {
           selectedLanguages.length === 0 ||
           selectedLanguages.some((lang) => driverLanguages.includes(lang));
 
+        const routeMatch =
+          ROUTE_MATCH_CATEGORIES.has(category) ? routeMatchResults.get(driver.id) : undefined;
+
+        let locationCompatible: boolean;
+
+        if (routeMatch) {
+          locationCompatible = routeMatch.eligible;
+
+          if (__DEV__ && !routeMatch.eligible) {
+            logRejectedRouteMatchCandidate(
+              driver,
+              routeMatch,
+              routeMatchInputs.get(driver.id)!,
+              passengerPickup!,
+              passengerDestination,
+            );
+          }
+        } else {
+          const fromMatches = locationMatches(
+            driver.from || driver.fromNormalized || "",
+            from,
+            driver.fromLocationId,
+            fromLocationId,
+            driver.fromLocationNames,
+            fromLocationNames,
+          );
+          const toMatches = locationMatches(
+            driver.to || driver.toNormalized || "",
+            to,
+            driver.toLocationId,
+            toLocationId,
+            driver.toLocationNames,
+            toLocationNames,
+          );
+
+          locationCompatible = fromMatches && toMatches;
+        }
+
         return (
           activeMatches &&
           categoryMatches &&
-          fromMatches &&
-          toMatches &&
+          locationCompatible &&
           genderMatches &&
           languageMatches
         );

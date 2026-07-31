@@ -8,6 +8,14 @@
 // POST /school-children/reset-code -> auth required -> regenerated return code
 // POST /school-kiosk/lookup        -> PUBLIC, no auth -> today's return-ride info
 //
+// Route-based/detour-aware ride matching (see app/booking/routeMatchLib.ts)
+// is a fully local, free, on-device geometric approximation — it never
+// calls this Worker, never needs a Google Maps API key, and never enables
+// Google Cloud billing. There used to be /compute-route and /route-match
+// endpoints here backed by the paid Google Routes API; they were removed
+// in favor of that local approach and must not be reintroduced without an
+// explicit decision to take on that cost.
+//
 // The first three routes are a 1:1 migration of the local server/index.js +
 // server/gemini.js Express backend onto the Workers runtime — unchanged by
 // this file's later additions (app/login/idVerificationLib.ts keeps working

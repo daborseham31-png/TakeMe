@@ -33,20 +33,23 @@ import { useLanguage } from "../i18n/LanguageProvider";
 import { positionEnd } from "../i18n/rtl";
 import {
   attachDistances,
+  attachRouteMatches,
   buildErrandBookNav,
   buildQuickRideNav,
   buildSchoolTripNav,
   buildWeeklyRideNav,
   buildWorkApplyNav,
+  computeRouteMatchesForPersonalRides,
   FEED_PAGE_SIZE,
   FeedCategory,
   FeedItem,
-  filterNearbyItems,
+  filterNearbyOrRouteMatchedItems,
   isRideExpired,
   NEARBY_RIDE_RADIUS_KM,
   sortFeedItems,
   subscribeHomeFeed,
 } from "../booking/homeFeedLib";
+import { RouteMatchResult } from "../booking/routeMatchLib";
 import { useCurrentLocation } from "../booking/useCurrentLocation";
 import { WeeklyDriverDay } from "../booking/weeklyBookingLib";
 import TripFeedCard from "../booking/TripFeedCard";
@@ -361,14 +364,35 @@ export default function HomeScreen() {
     [categoryFilteredItems, coords],
   );
 
+  // Route-based/detour-aware matching (see routeMatchLib.ts) — a fully
+  // local, free, synchronous geometric approximation (no network call, no
+  // API key), so this is just another useMemo, computed only for
+  // "personal" items and only while in "nearby" mode (the only place
+  // eligibility actually depends on it; "All rides" ignores it below).
+  const routeMatches = useMemo(() => {
+    if (effectiveMode !== "nearby" || !coords) return new Map<string, RouteMatchResult>();
+
+    const personalCandidates = categoryFilteredItems.filter(
+      (item) => item.category === "personal",
+    );
+    if (personalCandidates.length === 0) return new Map<string, RouteMatchResult>();
+
+    return computeRouteMatchesForPersonalRides(personalCandidates, coords);
+  }, [categoryFilteredItems, coords, effectiveMode]);
+
+  const itemsWithRouteMatch = useMemo(
+    () => attachRouteMatches(itemsWithDistance, routeMatches),
+    [itemsWithDistance, routeMatches],
+  );
+
   const nearbyItems = useMemo(
-    () => sortFeedItems(filterNearbyItems(itemsWithDistance)),
-    [itemsWithDistance],
+    () => sortFeedItems(filterNearbyOrRouteMatchedItems(itemsWithRouteMatch)),
+    [itemsWithRouteMatch],
   );
 
   const allItemsSorted = useMemo(
-    () => sortFeedItems(itemsWithDistance),
-    [itemsWithDistance],
+    () => sortFeedItems(itemsWithRouteMatch),
+    [itemsWithRouteMatch],
   );
 
   const visibleFeedItems = (

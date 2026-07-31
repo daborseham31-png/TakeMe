@@ -37,6 +37,7 @@ import { useLanguage } from "../../i18n/LanguageProvider";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../israelLocations";
+import PickupLocationPicker, { PickupLocation } from "../PickupLocationPicker";
 import SchoolAutocomplete from "../SchoolAutocomplete";
 import { getLocalizedSchoolName, SchoolLocation } from "../schools";
 import WeeklyDaysCard from "../../driver/create/WeeklyDaysCard";
@@ -80,6 +81,16 @@ export default function LegacySchoolSearchForm() {
   const [schoolQuery, setSchoolQuery] = useState("");
   const [selectedSchool, setSelectedSchool] = useState<SchoolLocation | null>(null);
   const [schoolError, setSchoolError] = useState("");
+
+  // The student's real GPS pickup/home point (B — see routeMatchLib.ts and
+  // PickupLocationPicker.tsx, the exact same shared component Personal Ride
+  // already uses) — separate from fromAddress/fromPlace above, which stay
+  // pure city-matching text. Lets driverresults.tsx run the local
+  // route-matching algorithm for weekly School searches instead of only
+  // exact from/to text matching, without ever exposing latitude/longitude
+  // fields to the user.
+  const [pickupLocation, setPickupLocation] = useState<PickupLocation | null>(null);
+  const [pickerVisible, setPickerVisible] = useState(false);
 
   const handleFromChange = (text: string) => {
     setFromAddress(text);
@@ -149,6 +160,11 @@ export default function LegacySchoolSearchForm() {
       return;
     }
 
+    if (!pickupLocation) {
+      Alert.alert(t("auth.missingDetails"), t("pickupLocation.pickupLocationRequired"));
+      return;
+    }
+
     const baseParams: Record<string, string> = {
       category: "school",
       schoolName: getLocalizedSchoolName(selectedSchool, language),
@@ -169,6 +185,14 @@ export default function LegacySchoolSearchForm() {
       genderPref,
       languages: selectedLanguages.join(","),
       childEntries: childEntriesParam,
+      // The student's real GPS pickup point (B) — see routeMatchLib.ts.
+      // driverresults.tsx already reads these exact param names for both
+      // Personal Ride and (legacy weekly) School Ride; never rendered as
+      // raw numbers anywhere in this form's own UI.
+      pickupLat: String(pickupLocation.latitude),
+      pickupLng: String(pickupLocation.longitude),
+      pickupAddress: pickupLocation.address,
+      pickupSource: pickupLocation.source,
     };
 
     const cleanedDays = validateWeeklyRowsAnyFutureDate(weeklyRows, {
@@ -196,6 +220,7 @@ export default function LegacySchoolSearchForm() {
   };
 
   return (
+    <>
     <KeyboardAvoidingWrapper>
     <ScrollView
       contentContainerStyle={styles.scroll}
@@ -256,6 +281,17 @@ export default function LegacySchoolSearchForm() {
           placeholder={t("school.schoolNamePlaceholder")}
           error={schoolError}
         />
+
+        <Text style={[styles.label, isRTL && styles.textRTL]}>
+          {t("pickupLocation.fieldLabel")}
+        </Text>
+        <Pressable style={styles.pickupRow} onPress={() => setPickerVisible(true)}>
+          <Ionicons name="location-outline" size={18} color="#8B7B6B" />
+          <Text style={styles.pickupRowText} numberOfLines={1}>
+            {pickupLocation?.address || t("pickupLocation.notSelectedPlaceholder")}
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color="#C7B9AC" />
+        </Pressable>
 
         <View style={styles.sectionDivider} />
 
@@ -342,6 +378,13 @@ export default function LegacySchoolSearchForm() {
       </Pressable>
     </ScrollView>
     </KeyboardAvoidingWrapper>
+
+    <PickupLocationPicker
+      visible={pickerVisible}
+      onClose={() => setPickerVisible(false)}
+      onSelect={setPickupLocation}
+    />
+    </>
   );
 }
 
@@ -400,6 +443,22 @@ const styles = StyleSheet.create({
   textRTL: {
     textAlign: "right",
     writingDirection: "rtl",
+  },
+  pickupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#FFFDFC",
+  },
+  pickupRowText: {
+    flex: 1,
+    color: "#111827",
+    fontWeight: "700",
   },
   optionRow: {
     flexDirection: "row",
