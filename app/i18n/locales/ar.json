@@ -152,8 +152,8 @@
     "findARideSubtitle": "ابحث عن رحلات بالقرب منك",
     "becomeADriver": "انضم كسائق",
     "becomeADriverSubtitle": "انضم إلى مجتمع السائقين لدينا",
-    "whereToGo": "إلى أين تريد\nالذهاب؟",
-    "heroDescription": "تواصل مع جيران موثوقين في طريقك. رحلات آمنة وبأسعار مناسبة لمجتمعك.",
+    "whereToGo": "مرحباً بكم في TakeMe",
+    "heroDescription": "TakeMe حيث تحدث الحياة",
     "connectingPeople": "نربط الناس ببعضهم",
     "noNearbyRides": "لا توجد رحلات قريبة ضمن {{radius}} كم حاليًا.",
     "noAvailableRides": "لا توجد رحلات متاحة حاليًا.",
@@ -172,8 +172,7 @@
       "schoolTrip": "رحلات مدرسية",
       "work": "عمل",
       "errand": "مشاوير"
-    },
-    "communityRides": "رحلات المجتمع"
+    }
   },
   "rides": {
     "personalRide": "رحلة شخصية",

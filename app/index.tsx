@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -29,6 +30,7 @@ import { getAccountRestriction, isUserAdmin } from "./admin/adminAuthLib";
 export default function AppStartScreen() {
   const { t } = useTranslation();
   const { isRTL, language } = useLanguage();
+  const { width: windowWidth } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);
   const [showPw, setShowPw] = useState(false);
@@ -109,18 +111,28 @@ export default function AppStartScreen() {
   };
 
   if (loading) {
+    // Responsive, proportion-based sizing (capped so it doesn't get huge on
+    // tablets) instead of one fixed pixel size for every screen width.
+    const logoSize = Math.min(220, windowWidth * 0.5);
+    // Source wordmark art is 300x107 — derive height from width so it's
+    // never stretched/distorted at any screen size.
+    const wordmarkWidth = Math.min(190, windowWidth * 0.42);
+    const wordmarkHeight = wordmarkWidth * (107 / 300);
+
     return (
       <DirectionalScreen style={styles.splash}>
-        <View style={styles.logoBadge}>
-          <Image
-            source={require("../assets/images/logo.jpeg")}
-            style={styles.logoImage}
-            resizeMode="cover"
-          />
-        </View>
-        <Text style={styles.logo}>{t("common.appName")}</Text>
+        <Image
+          source={require("../assets/images/map-pin-icon.png")}
+          style={{ width: logoSize, height: logoSize, marginBottom: 12 }}
+          resizeMode="contain"
+        />
+        <Image
+          source={require("../assets/images/takeme-wordmark.png")}
+          style={{ width: wordmarkWidth, height: wordmarkHeight, marginBottom: 4 }}
+          resizeMode="contain"
+        />
         <Text style={styles.tagline}>{t("auth.tagline")}</Text>
-        <ActivityIndicator size="large" color="#ffffff" style={styles.loader} />
+        <ActivityIndicator size="large" color="#F58220" style={styles.loader} />
       </DirectionalScreen>
     );
   }
@@ -253,36 +265,23 @@ export default function AppStartScreen() {
 const styles = StyleSheet.create({
   splash: {
     flex: 1,
-    backgroundColor: "#F28C28",
+    // Very light beige/off-white — covers the full screen including the
+    // safe-area insets, since SafeAreaView paints its own background there.
+    backgroundColor: "#FFF9F2",
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 24,
   },
-  logoBadge: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    overflow: "hidden",
-    backgroundColor: "#FFFFFF",
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  logoImage: {
-    width: "100%",
-    height: "100%",
-  },
-  logo: {
-    fontSize: 48,
-    fontWeight: "900",
-    color: "#ffffff",
-  },
+  // No frame/card/shadow prop here on purpose — RN's shadow* props on an
+  // Image commonly render as a rectangular halo behind transparent PNGs,
+  // which is exactly the "pasted/boxed" look to avoid. The map+pin artwork
+  // already has its own soft ground shadow baked into the art.
   tagline: {
-    color: "#fff7ed",
+    color: "#8A6F58",
     marginTop: 10,
     fontSize: 16,
+    fontWeight: "400",
+    textAlign: "center",
   },
   loader: {
     marginTop: 30,

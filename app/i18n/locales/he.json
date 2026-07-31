@@ -152,8 +152,8 @@
     "findARideSubtitle": "חפש נסיעות בקרבתך",
     "becomeADriver": "הצטרף כנהג",
     "becomeADriverSubtitle": "הצטרף לקהילת הנהגים שלנו",
-    "whereToGo": "לאן תרצה\nלנסוע?",
-    "heroDescription": "התחבר לשכנים אמינים בדרכך. נסיעות בטוחות ובמחיר סביר לקהילה שלך.",
+    "whereToGo": "ברוכים הבאים ל-TakeMe",
+    "heroDescription": "TakeMe איפה שהחיים קורים",
     "connectingPeople": "מחברים בין אנשים",
     "noNearbyRides": "אין כרגע נסיעות בקרבתך בטווח של {{radius}} ק\"מ.",
     "noAvailableRides": "אין כרגע נסיעות זמינות.",
@@ -172,8 +172,7 @@
       "schoolTrip": "נסיעות בית ספר",
       "work": "עבודה",
       "errand": "שליחויות"
-    },
-    "communityRides": "נסיעות קהילתיות"
+    }
   },
   "rides": {
     "personalRide": "נסיעה אישית",
