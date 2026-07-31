@@ -25,6 +25,7 @@ import { Alert } from "react-native";
 
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";
+import { deepRemoveUndefined } from "./schoolTripsLib";
 import { translateStoredDayName } from "../i18n/formatters";
 import {
   formatDateToYMD,
@@ -703,6 +704,15 @@ export type CreateWeeklyBookingsInput = {
     source: "current" | "home" | "custom";
   } | null;
 
+  // School only — the child(ren) this weekly booking is for, selected up
+  // front on select-child.tsx (Home → School Ride) and carried through
+  // LegacySchoolSearchForm.tsx → driverresults.tsx → ride-payment.tsx.
+  // Undefined for Personal Ride and any School booking made before this
+  // existed — every selected day gets the same roster (see the write below).
+  childId?: string;
+  childName?: string;
+  childEntries?: { localId: string; childId?: string; childName?: string }[];
+
   selectedDays: WeeklyDriverDay[];
   payment: WeeklyPayment;
 };
@@ -871,6 +881,17 @@ export const createWeeklyBookings = async (
         schoolName: input.schoolName || null,
         destinationDetails: input.destinationDetails || null,
         pickupLocation: input.pickupLocation || null,
+
+        childId: input.childId || null,
+        childName: input.childName || null,
+        // deepRemoveUndefined defensively, same as every other school-
+        // booking write (see its own header comment in schoolTripsLib.ts) —
+        // Firestore rejects a literal `undefined` anywhere in the document,
+        // including nested inside this array.
+        childEntries:
+          input.childEntries && input.childEntries.length > 0
+            ? deepRemoveUndefined(input.childEntries)
+            : null,
 
         dayKey: day.dayKey,
         dayName: day.dayName,

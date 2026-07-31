@@ -58,8 +58,13 @@ export default function RideCategoryScreen() {
   const { isRTL } = useLanguage();
   const handleSelect = (key: string) => {
     const routes: Record<string, string> = {
-school: "/booking/school",
-workErrands: "/booking/work-errand",
+      // Straight into the School Ride form (Daily/By direction + Weekly
+      // tabs, see school/index.tsx) — the child-selection step
+      // (select-child.tsx/ChildSelector.tsx) only gates booking an already-
+      // published School trip from the Home feed (see home.tsx's
+      // childSelectItem), never this category entry point.
+      school: "/booking/school",
+      workErrands: "/booking/work-errand",
       personal: "/personal-ride",
       help: "/booking/roadside-help",
     };

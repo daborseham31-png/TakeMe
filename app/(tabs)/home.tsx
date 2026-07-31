@@ -52,6 +52,7 @@ import { WeeklyDriverDay } from "../booking/weeklyBookingLib";
 import TripFeedCard from "../booking/TripFeedCard";
 import DriverProfileReviewsModal from "../booking/DriverProfileReviewsModal";
 import PickupLocationPicker, { PickupLocation } from "../booking/PickupLocationPicker";
+import ChildSelector, { SelectedChildEntry } from "../booking/school/ChildSelector";
 
 // Re-checked once a minute while Home stays open (plus on pull-to-refresh /
 // focus) so a ride whose departure time has passed disappears from the list
@@ -134,6 +135,14 @@ export default function HomeScreen() {
   const [dayPickerSelected, setDayPickerSelected] = useState<Set<string>>(
     new Set(),
   );
+  // Set only for a weekly School Ride item (never weekly Personal Ride) —
+  // the child(ren) already confirmed on the child-select step BEFORE the day
+  // picker opens for this item, carried through confirmDayPicker's own seat
+  // check into beginPickupSelection. Cleared whenever the day picker closes,
+  // same lifetime as dayPickerItem/dayPickerSelected.
+  const [dayPickerChildEntries, setDayPickerChildEntries] = useState<SelectedChildEntry[] | null>(
+    null,
+  );
 
   // Pickup-location step for Home/Nearby bookings (Personal Ride, School
   // Ride quick/weekly, School Trip outbound) — the exact same
@@ -147,6 +156,19 @@ export default function HomeScreen() {
   const [pickupPickerVisible, setPickupPickerVisible] = useState(false);
   const [pendingBookItem, setPendingBookItem] = useState<FeedItem | null>(null);
   const [pendingWeeklyDays, setPendingWeeklyDays] = useState<WeeklyDriverDay[] | null>(null);
+  // Carried alongside pendingBookItem/pendingWeeklyDays from the child-select
+  // step below through to whichever buildSchoolTripNav call actually fires
+  // (with or without a pickup step) — never re-derived, never defaulted back
+  // to "no children" once set.
+  const [pendingChildEntries, setPendingChildEntries] = useState<SelectedChildEntry[] | null>(null);
+
+  // School Trip's own child-selection gate, inserted between the card's
+  // "View details"/"Select ride" press and the pickup-location step (or the
+  // direct push for a return-leg card, which has no pickup step at all) —
+  // mirrors dayPickerItem below (pending item + a modal keyed off it), and
+  // reuses the exact same ChildSelector component select-child.tsx uses for
+  // the main School Ride category entry, never a second child picker.
+  const [childSelectItem, setChildSelectItem] = useState<FeedItem | null>(null);
 
   // Live count of unread roadside help notifications for the signed-in driver.
   // Single equality filter keeps this index-free; unread count is computed here.
@@ -375,6 +397,7 @@ export default function HomeScreen() {
   const closeDayPicker = () => {
     setDayPickerItem(null);
     setDayPickerSelected(new Set());
+    setDayPickerChildEntries(null);
   };
 
   const toggleDaySelection = (date: string) => {
@@ -401,12 +424,30 @@ export default function HomeScreen() {
       return;
     }
 
+    // Weekly School only (dayPickerChildEntries is never set for weekly
+    // Personal Ride — see handleChildSelectionContinue) — one seat per
+    // selected child is required on EVERY chosen day, not just one. This is
+    // a convenience check; createWeeklyBookings' own Firestore transaction
+    // re-verifies remainingSeats server-side regardless (see
+    // weeklyBookingLib.ts), so this can never be bypassed by racing it.
+    if (dayPickerChildEntries && dayPickerChildEntries.length > 0) {
+      const shortOnSeats = chosen.some(
+        (day) => day.remainingSeats < dayPickerChildEntries.length,
+      );
+
+      if (shortOnSeats) {
+        Alert.alert(t("common.error"), t("rides.notEnoughSeats"));
+        return;
+      }
+    }
+
     const item = dayPickerItem;
+    const childEntries = dayPickerChildEntries;
     closeDayPicker();
 
     // Chosen days aren't booked yet — next comes the same pickup-location
     // step every other path below goes through.
-    beginPickupSelection(item, chosen);
+    beginPickupSelection(item, chosen, childEntries);
   };
 
   // Opens the shared PickupLocationPicker sheet before continuing on to
@@ -418,9 +459,11 @@ export default function HomeScreen() {
   const beginPickupSelection = (
     item: FeedItem,
     weeklyDays: WeeklyDriverDay[] | null,
+    childEntries: SelectedChildEntry[] | null = null,
   ) => {
     setPendingBookItem(item);
     setPendingWeeklyDays(weeklyDays);
+    setPendingChildEntries(childEntries);
     setPickupPickerVisible(true);
   };
 
@@ -432,22 +475,58 @@ export default function HomeScreen() {
   const handlePickupSelected = (pickupLocation: PickupLocation) => {
     const item = pendingBookItem;
     const weeklyDays = pendingWeeklyDays;
+    const childEntries = pendingChildEntries;
     setPendingBookItem(null);
     setPendingWeeklyDays(null);
+    setPendingChildEntries(null);
 
     if (!item) return;
 
     if (item.category === "schoolTrip") {
-      router.push(buildSchoolTripNav(item, pickupLocation) as any);
+      router.push(buildSchoolTripNav(item, pickupLocation, childEntries) as any);
       return;
     }
 
     if (weeklyDays) {
-      router.push(buildWeeklyRideNav(item, weeklyDays, pickupLocation) as any);
+      router.push(buildWeeklyRideNav(item, weeklyDays, pickupLocation, childEntries) as any);
       return;
     }
 
     router.push(buildQuickRideNav(item, pickupLocation) as any);
+  };
+
+  const closeChildSelect = () => setChildSelectItem(null);
+
+  // Fires once the passenger has picked ≥1 child and pressed Continue on the
+  // child-select sheet (ChildSelector's own Continue is disabled until then
+  // — nothing here is ever reached with an empty roster). A standalone
+  // return-leg card has no pickup step at all (see handleBookPress's own
+  // comment), so it goes straight to buildSchoolTripNav; every other
+  // schoolTrip card continues into the SAME pickup-location step every other
+  // Home booking already goes through, just now carrying the chosen
+  // children forward through it.
+  const handleChildSelectionContinue = (entries: SelectedChildEntry[]) => {
+    const item = childSelectItem;
+    setChildSelectItem(null);
+
+    if (!item) return;
+
+    // Weekly School Ride — the day picker (which day(s) of the driver's
+    // week to book) still comes next, same as it always has; the chosen
+    // children just ride along into it (see confirmDayPicker's own seat
+    // check) instead of straight into the pickup step.
+    if (item.category === "school" && item.isWeekly) {
+      setDayPickerChildEntries(entries);
+      openDayPicker(item);
+      return;
+    }
+
+    if (item.direction === "from_school") {
+      router.push(buildSchoolTripNav(item, null, entries) as any);
+      return;
+    }
+
+    beginPickupSelection(item, null, entries);
   };
 
   const handleBookPress = (item: FeedItem) => {
@@ -462,15 +541,25 @@ export default function HomeScreen() {
     }
 
     if (item.category === "schoolTrip") {
-      // A standalone return-leg card has no passenger-chosen pickup point —
-      // same as DirectionSearchForm.tsx, which never shows this field for a
-      // return search either (the real pickup point is the school itself).
-      if (item.direction === "from_school") {
-        router.push(buildSchoolTripNav(item, null) as any);
-        return;
-      }
+      // Every School Trip card — outbound, return-leg, exact, or
+      // alternative — shares this one handler, so gating it here covers all
+      // of them. The child-select step decides for itself (via
+      // handleChildSelectionContinue) whether a pickup step follows, since a
+      // standalone return-leg card still has none (same as
+      // DirectionSearchForm.tsx, which never shows that field for a return
+      // search either — the real pickup point is the school itself).
+      setChildSelectItem(item);
+      return;
+    }
 
-      beginPickupSelection(item, null);
+    // A published Weekly School Ride (legacy driverRoutes, category
+    // "school") — gated the SAME as School Trip above, before the day
+    // picker even opens (handleChildSelectionContinue opens it once
+    // children are confirmed). Checked ahead of the generic `isWeekly`
+    // branch below so weekly Personal Ride (category "personal") keeps
+    // going straight into openDayPicker, completely unaffected.
+    if (item.category === "school" && item.isWeekly) {
+      setChildSelectItem(item);
       return;
     }
 
@@ -1083,12 +1172,48 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
+      <Modal
+        visible={!!childSelectItem}
+        transparent
+        animationType="slide"
+        onRequestClose={closeChildSelect}
+      >
+        <View style={styles.childSelectOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeChildSelect} />
+
+          <DirectionalCard style={styles.childSelectCard}>
+            <View style={styles.childSelectHandle} />
+
+            <View style={styles.childSelectHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.childSelectTitle, isRTL && styles.textRTL]}>
+                  {t("schoolChildren.selectChildScreenTitle")}
+                </Text>
+                <Text style={[styles.childSelectSubtitle, isRTL && styles.textRTL]}>
+                  {t("schoolChildren.selectChildScreenSubtitle")}
+                </Text>
+              </View>
+
+              <Pressable style={styles.childSelectClose} onPress={closeChildSelect} hitSlop={8}>
+                <Ionicons name="close" size={20} color="#7C5F46" />
+              </Pressable>
+            </View>
+
+            <ChildSelector
+              onContinue={handleChildSelectionContinue}
+              onAddChild={() => router.push("/booking/school/my-children" as any)}
+            />
+          </DirectionalCard>
+        </View>
+      </Modal>
+
       <PickupLocationPicker
         visible={pickupPickerVisible}
         onClose={() => {
           setPickupPickerVisible(false);
           setPendingBookItem(null);
           setPendingWeeklyDays(null);
+          setPendingChildEntries(null);
         }}
         onSelect={handlePickupSelected}
       />
@@ -1558,5 +1683,53 @@ const styles = StyleSheet.create({
   dayPickerConfirmText: {
     color: "#FFFFFF",
     fontWeight: "900",
+  },
+  // School Trip's child-select sheet — same bottom-sheet convention as
+  // PickupLocationPicker.tsx (overlay + backdrop + rounded-top card + handle
+  // bar), the step it sits directly in front of, so the two feel like one
+  // continuous flow rather than two differently-designed modals.
+  childSelectOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  childSelectCard: {
+    backgroundColor: "#FBF7F1",
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingTop: 12,
+    paddingHorizontal: 0,
+    maxHeight: "85%",
+  },
+  childSelectHandle: {
+    alignSelf: "center",
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#E2D8CF",
+    marginBottom: 10,
+  },
+  childSelectHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingHorizontal: 20,
+  },
+  childSelectTitle: {
+    fontSize: 19,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  childSelectSubtitle: {
+    fontSize: 13,
+    color: "#7C5F46",
+    marginTop: 4,
+  },
+  childSelectClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3ECE3",
   },
 });

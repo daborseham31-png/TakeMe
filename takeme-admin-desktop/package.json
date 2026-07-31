@@ -1,7 +1,7 @@
 {
   "name": "takeme-admin-desktop",
   "productName": "TakeMe Admin",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "TakeMe admin dashboard, packaged as a Windows desktop app (Electron + React Native Web), reusing the existing admin screens from the TakeMe mobile app.",
   "author": "TakeMe",
@@ -43,5 +43,3 @@
     "wait-on": "^8.0.1"
   }
 }
-
-

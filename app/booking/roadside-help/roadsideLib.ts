@@ -44,7 +44,30 @@ import {
 import { auth, db } from "../../../firebase";
 import i18n from "../../i18n";
 import { getDriverSuspensionBlockedReason } from "../driverViolationsLib";
-import { notify } from "../work-errand/workErrandLib";
+import { notify, NotifyInput } from "../work-errand/workErrandLib";
+
+// ---------------------------------------------------------------------------
+// Roadside Help notifications — EVERY external (OneSignal/Cloudflare Worker)
+// push for Roadside Help goes through the shared notify() (workErrandLib.ts)
+// via this one thin wrapper, never a second implementation of the
+// Worker/OneSignal call in this file. The wrapper only adds temporary
+// diagnostic logging (event/senderId/receiverId/requestId/offerId/
+// notificationId/push result) on top of notify()'s own result — safe to
+// delete later without touching notify() itself.
+// ---------------------------------------------------------------------------
+const notifyRoadside = async (input: NotifyInput): Promise<void> => {
+  const result = await notify(input);
+
+  console.log("[RoadsideNotify]", {
+    event: input.type,
+    senderId: input.senderId || auth.currentUser?.uid || null,
+    receiverId: input.receiverId,
+    requestId: input.requestId || null,
+    offerId: input.offerId || null,
+    notificationId: result.notificationId,
+    push: result.push,
+  });
+};
 
 export type LatLng = { latitude: number; longitude: number };
 
@@ -353,6 +376,33 @@ export const createRoadsideRequest = async (
     ),
   );
 
+  // Same eligible-driver list as the driverNotifications writes above (the
+  // Help Requests discovery screen's own eligibility/filter logic —
+  // findMatchingDrivers), so the shared in-app + external push pipeline
+  // reaches exactly the same drivers as the in-app list does, never more,
+  // never fewer. driverNotifications above still exists separately — it
+  // feeds the Help Requests LIST itself; this is what actually gets an
+  // external OneSignal push to a driver who isn't already looking at that
+  // screen.
+  await Promise.all(
+    matches.map((match) =>
+      notifyRoadside({
+        receiverId: match.driverId,
+        senderId: passenger.id,
+        type: "roadside_help_requested",
+        title: i18n.t("roadsideHelp.newRequestNotifTitle"),
+        message: i18n.t("roadsideHelp.newRequestNotifMessage"),
+        category: "roadside",
+        status: "open",
+        requestId: requestRef.id,
+        driverId: match.driverId,
+        passengerId: passenger.id,
+        targetPage: "help-requests",
+        targetTab: "driver",
+      }),
+    ),
+  );
+
   return { requestId: requestRef.id, matchedCount: matches.length };
 };
 
@@ -429,17 +479,20 @@ export const sendDriverOffer = async (input: SendOfferInput) => {
   });
 
   if (passengerId) {
-    await notify({
+    await notifyRoadside({
       receiverId: passengerId,
       senderId: user.uid,
       type: "roadside_offer_received",
       title: "New help offer",
       message: `${driverName} offered to help you.`,
       category: "roadside",
+      status: "pending",
       requestId: input.requestId,
       offerId: offerRef.id,
       driverId: user.uid,
+      passengerId,
       targetPage: "finding-help",
+      targetTab: "passenger",
     });
   }
 
@@ -622,16 +675,18 @@ export const acceptOffer = async (
     });
   });
 
-  await notify({
+  await notifyRoadside({
     receiverId: offer.driverId,
     senderId: user.uid,
     type: "roadside_offer_accepted",
     title: "Passenger accepted your offer",
     message: `${passengerName} accepted your Roadside Help offer.`,
     category: "roadside",
+    status: "helper_assigned",
     requestId,
     offerId: offer.id,
     bookingId: bookingRef.id,
+    driverId: offer.driverId,
     passengerId: user.uid,
     targetTab: "driver",
   });
@@ -858,16 +913,18 @@ export const startDriving = async ({ bookingId, requestId }: StageParams) => {
   });
 
   if (passengerId) {
-    await notify({
+    await notifyRoadside({
       receiverId: passengerId,
       senderId: user.uid,
       type: "roadside_driver_on_way",
       title: i18n.t("roadsideHelp.helperOnTheWayNotifTitle"),
       message: i18n.t("roadsideHelp.helperOnTheWayNotifMessage", { name: driverName }),
       category: "roadside",
+      status: "helper_on_way",
       requestId,
       bookingId,
       driverId: user.uid,
+      passengerId,
       targetTab: "passenger",
     });
   }
@@ -915,16 +972,18 @@ export const markHelperArrived = async ({ bookingId, requestId }: StageParams) =
   });
 
   if (passengerId) {
-    await notify({
+    await notifyRoadside({
       receiverId: passengerId,
       senderId: user.uid,
       type: "roadside_helper_arrived",
       title: i18n.t("roadsideHelp.helperArrivedNotifTitle"),
       message: i18n.t("roadsideHelp.helperArrivedNotifMessage", { name: driverName }),
       category: "roadside",
+      status: "arrived",
       requestId,
       bookingId,
       driverId: user.uid,
+      passengerId,
       targetTab: "passenger",
     });
   }
@@ -966,16 +1025,18 @@ export const startHelp = async ({ bookingId, requestId }: StageParams) => {
   });
 
   if (passengerId) {
-    await notify({
+    await notifyRoadside({
       receiverId: passengerId,
       senderId: user.uid,
       type: "roadside_help_in_progress",
       title: i18n.t("roadsideHelp.helpInProgressNotifTitle"),
       message: i18n.t("roadsideHelp.helpInProgressNotifMessage"),
       category: "roadside",
+      status: "in_progress",
       requestId,
       bookingId,
       driverId: user.uid,
+      passengerId,
       targetTab: "passenger",
     });
   }
@@ -1039,16 +1100,18 @@ export const finishRoadsideHelp = async (bookingId: string) => {
   });
 
   if (passengerId) {
-    await notify({
+    await notifyRoadside({
       receiverId: passengerId,
       senderId: user.uid,
       type: "roadside_completion_pending",
       title: i18n.t("roadsideHelp.completionPendingNotifTitle"),
       message: i18n.t("roadsideHelp.completionPendingNotifMessage", { name: driverName }),
       category: "roadside",
+      status: "completion_pending",
       requestId,
       bookingId,
       driverId: user.uid,
+      passengerId,
       targetTab: "passenger",
     });
   }
@@ -1136,15 +1199,17 @@ export const confirmCompletion = async (bookingId: string) => {
   });
 
   if (driverId) {
-    await notify({
+    await notifyRoadside({
       receiverId: driverId,
       senderId: user.uid,
       type: "roadside_completion_confirmed",
       title: i18n.t("roadsideHelp.completionConfirmedNotifTitle"),
       message: i18n.t("roadsideHelp.completionConfirmedNotifMessage", { name: passengerName }),
       category: "roadside",
+      status: "completed",
       requestId,
       bookingId,
+      driverId,
       passengerId: user.uid,
       targetTab: "driver",
     });
@@ -1228,16 +1293,18 @@ export const confirmCashReceived = async (
   });
 
   if (passengerId) {
-    await notify({
+    await notifyRoadside({
       receiverId: passengerId,
       senderId: user.uid,
       type: "roadside_payment_received",
       title: i18n.t("roadsideHelp.cashConfirmedNotifTitle"),
       message: i18n.t("roadsideHelp.cashConfirmedNotifMessage", { amount, name: driverName }),
       category: "roadside",
+      status: "paid",
       requestId,
       bookingId,
       driverId: user.uid,
+      passengerId,
       amount,
       targetTab: "passenger",
     });
@@ -1336,7 +1403,7 @@ export const cancelRoadsideRequestByPassenger = async (requestId: string): Promi
   });
 
   if (driverId) {
-    await notify({
+    await notifyRoadside({
       receiverId: driverId,
       senderId: user.uid,
       type: "roadside_cancelled_by_passenger",
@@ -1345,7 +1412,9 @@ export const cancelRoadsideRequestByPassenger = async (requestId: string): Promi
         name: passengerName || i18n.t("common.user"),
       }),
       category: "roadside",
+      status: "cancelled",
       requestId,
+      driverId,
       passengerId: user.uid,
       targetTab: "driver",
     });

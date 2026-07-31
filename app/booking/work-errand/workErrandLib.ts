@@ -55,6 +55,15 @@ import {
 const NOTIFICATION_WORKER_URL =
   "https://takeme-notifications.yvcstudent4.workers.dev";
 
+// Result of asking the Worker to deliver (or not) the external push — every
+// caller of notify() gets this back so it can log/inspect what actually
+// happened, without any caller ever touching OneSignal/the Worker directly.
+export type ExternalPushResult = {
+  ok: boolean;
+  status?: number;
+  error?: string;
+};
+
 // After the in-app Firestore notification is created, ask the trusted
 // Cloudflare Worker to deliver the matching OneSignal Web Push. The Worker
 // verifies the current Firebase ID token, reads this exact notification doc
@@ -62,9 +71,11 @@ const NOTIFICATION_WORKER_URL =
 // the authenticated caller. No OneSignal secret is stored in the mobile app.
 const sendExternalPushForNotification = async (
   notificationId: string,
-): Promise<void> => {
+): Promise<ExternalPushResult> => {
   const user = auth.currentUser;
-  if (!user || !notificationId) return;
+  if (!user || !notificationId) {
+    return { ok: false, error: "not-authenticated-or-missing-notification-id" };
+  }
 
   try {
     const idToken = await user.getIdToken(true);
@@ -84,11 +95,15 @@ const sendExternalPushForNotification = async (
     if (!response.ok) {
       const details = await response.text().catch(() => "");
       console.warn("External push delivery failed", response.status, details);
+      return { ok: false, status: response.status, error: details };
     }
-  } catch (error) {
+
+    return { ok: true, status: response.status };
+  } catch (error: any) {
     // The in-app notification was already saved. A temporary push failure must
     // never cancel the real booking/request action.
     console.warn("External push delivery failed", error);
+    return { ok: false, error: error?.message || String(error) };
   }
 };
 
@@ -260,8 +275,17 @@ export type NotifyInput = {
   childId?: string;
 };
 
-export const notify = async (input: NotifyInput) => {
-  if (!input.receiverId) return;
+// Result handed back to every caller (fire-and-forget by every existing
+// caller today, but callers that want to log/inspect what happened — e.g.
+// Roadside Help's notifyRoadside wrapper in roadsideLib.ts — can await it
+// without this file ever needing to know who's asking).
+export type NotifyResult = {
+  notificationId: string | null;
+  push: ExternalPushResult | null;
+};
+
+export const notify = async (input: NotifyInput): Promise<NotifyResult> => {
+  if (!input.receiverId) return { notificationId: null, push: null };
 
   const tab =
     input.targetTab || input.roleTarget || input.openBookingTab || null;
@@ -302,10 +326,12 @@ export const notify = async (input: NotifyInput) => {
 
     // Wait until the Worker accepted the request so the sender cannot close
     // the app before the outgoing push request was even started.
-    await sendExternalPushForNotification(notificationRef.id);
-  } catch (error) {
+    const push = await sendExternalPushForNotification(notificationRef.id);
+    return { notificationId: notificationRef.id, push };
+  } catch (error: any) {
     // Notifications are best-effort – never block the main action on them.
     console.warn("Notification creation/delivery failed", error);
+    return { notificationId: null, push: { ok: false, error: error?.message || String(error) } };
   }
 };
 

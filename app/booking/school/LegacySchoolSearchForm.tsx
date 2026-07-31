@@ -10,12 +10,16 @@
 // one-time booking already has its own dedicated tab ("By direction")
 // one level up, and having it duplicated inside a tab literally labeled
 // "Weekly recurring" was confusing UI, not a distinct feature. This screen
-// is now always in weekly mode; validateWeeklyRows/weeklyBookingLib.ts's
-// own rules (past-day/next-week-window/etc.) are unchanged.
+// is now always in weekly mode. The calendar (WeeklyDaysCard) uses
+// calendarVariant="anyDate" — same per-row native date picker as every
+// other weekly flow, just without the current/next-week clamp, so any
+// today-or-future date can be picked; validated with
+// validateWeeklyRowsAnyFutureDate (weeklyBookingLib.ts), the same
+// any-future-date check Personal Ride's weekly booking already uses.
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
 import {
   Alert,
@@ -36,7 +40,7 @@ import { IsraelLocation } from "../israelLocations";
 import SchoolAutocomplete from "../SchoolAutocomplete";
 import { getLocalizedSchoolName, SchoolLocation } from "../schools";
 import WeeklyDaysCard from "../../driver/create/WeeklyDaysCard";
-import { validateWeeklyRows, WeekDayRow } from "../weeklyBookingLib";
+import { validateWeeklyRowsAnyFutureDate, WeekDayRow } from "../weeklyBookingLib";
 
 const SCHOOL_CATEGORY_META = getCategoryMeta("school");
 
@@ -50,6 +54,15 @@ const LANGUAGES_LIST = [
 export default function LegacySchoolSearchForm() {
   const { t } = useTranslation();
   const { isRTL, language } = useLanguage();
+
+  // The child(ren) already confirmed on select-child.tsx before this screen
+  // ever mounted (see ride-category.tsx) — this form and DirectionSearchForm
+  // read the same `childEntries` route param (both are rendered inside the
+  // same /booking/school route, not separate routes). This legacy/weekly
+  // flow has no per-row child picker of its own, so the roster is simply
+  // carried straight through to /booking/driverresults unchanged.
+  const params = useLocalSearchParams<{ childEntries?: string }>();
+  const childEntriesParam = String(params.childEntries || "");
 
   const [fromAddress, setFromAddress] = useState("");
   const [schoolLocation, setSchoolLocation] = useState("");
@@ -155,9 +168,10 @@ export default function LegacySchoolSearchForm() {
       }),
       genderPref,
       languages: selectedLanguages.join(","),
+      childEntries: childEntriesParam,
     };
 
-    const cleanedDays = validateWeeklyRows(weeklyRows, {
+    const cleanedDays = validateWeeklyRowsAnyFutureDate(weeklyRows, {
       requirePrice: false,
     });
 
@@ -251,6 +265,7 @@ export default function LegacySchoolSearchForm() {
           defaultTime="07:30"
           mode="passenger"
           title={t("rides.weeklyTripDays")}
+          calendarVariant="anyDate"
         />
       </View>
 

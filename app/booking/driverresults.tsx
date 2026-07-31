@@ -539,6 +539,12 @@ const handleBookDriver = async (driver: DriverRoute) => {
                 driver.destinationDetails || destinationDetails || "",
             }
           : {}),
+        // The child(ren) originally selected on select-child.tsx (Home →
+        // School Ride), carried through unchanged from this screen's own
+        // incoming route params — see LegacySchoolSearchForm.tsx, which is
+        // the only sender for the Weekly/classic School flow this screen
+        // also serves. Empty/absent for Personal Ride.
+        ...(isSchool ? { childEntries: String(params.childEntries || "") } : {}),
 
         date: selectedDate,
         day: selectedDay,
@@ -675,7 +681,11 @@ const confirmWeeklyDayPicker = () => {
       // The driver's own route-level value wins; the passenger's own typed
       // value is only a fallback for routes created before these existed.
       ...(category === "school"
-        ? { schoolName: driver.schoolName || searchedSchoolName }
+        ? {
+            schoolName: driver.schoolName || searchedSchoolName,
+            // Same passthrough as the quick-booking path above.
+            childEntries: String(params.childEntries || ""),
+          }
         : { destinationDetails: driver.destinationDetails || destinationDetails || "" }),
 
       driverCar: driver.car || "",

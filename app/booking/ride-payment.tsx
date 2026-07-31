@@ -35,6 +35,7 @@ import {
   bookOutboundForChildren,
   bookReturnForChild,
   bookSchoolTripSingle,
+  deepRemoveUndefined,
   generateBookingGroupId,
   SchoolBookingChildEntry,
   SchoolBookingPaymentMethod,
@@ -142,14 +143,21 @@ export default function RidePaymentScreen() {
     try {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed
-        .filter((entry: any) => entry && typeof entry.localId === "string")
-        .map((entry: any) => ({
-          localId: entry.localId,
-          childId: entry.childId || undefined,
-          childName: entry.childName || undefined,
-          sourceRideRequestId: entry.sourceRideRequestId || undefined,
-        }));
+      // deepRemoveUndefined here (not just at the eventual write) means
+      // every consumer of this memo — the schoolTrips path below AND the
+      // legacy bookings/createWeeklyBookings writes this screen also
+      // feeds — already gets a Firestore-safe array, never one with a
+      // literal `undefined` field Firestore would reject.
+      return deepRemoveUndefined(
+        parsed
+          .filter((entry: any) => entry && typeof entry.localId === "string")
+          .map((entry: any) => ({
+            localId: entry.localId,
+            childId: entry.childId || undefined,
+            childName: entry.childName || undefined,
+            sourceRideRequestId: entry.sourceRideRequestId || undefined,
+          })),
+      );
     } catch {
       return [];
     }
@@ -464,6 +472,20 @@ const createBookingAfterPayment = async (
       day,
       time,
 
+      // School only — the child(ren) this booking is for, selected up front
+      // on select-child.tsx (Home → School Ride) and carried through
+      // LegacySchoolSearchForm.tsx/DirectionSearchForm.tsx →
+      // driverresults.tsx/trip-confirm.tsx → this screen's own
+      // schoolChildEntries (parsed above). Empty/null for Personal Ride and
+      // any School booking made before this existed.
+      ...(isSchool
+        ? {
+            childId: schoolChildEntries[0]?.childId || null,
+            childName: schoolChildEntries[0]?.childName || null,
+            childEntries: schoolChildEntries.length > 0 ? schoolChildEntries : null,
+          }
+        : {}),
+
       // This function only ever runs for the non-weekly path (weekly bookings
       // go through createWeeklyBookings instead) — always the passenger's own
       // stepper selection / calculated total, never the old fixed params.
@@ -629,6 +651,17 @@ const createBookingAfterPayment = async (
           schoolName,
           destinationDetails,
           pickupLocation,
+
+          // Same School-only child passthrough as createBookingAfterPayment
+          // above — see schoolChildEntries's own comment.
+          ...(isSchool
+            ? {
+                childId: schoolChildEntries[0]?.childId,
+                childName: schoolChildEntries[0]?.childName,
+                childEntries:
+                  schoolChildEntries.length > 0 ? schoolChildEntries : undefined,
+              }
+            : {}),
 
           selectedDays: selectedWeeklyDays,
           payment,

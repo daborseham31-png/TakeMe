@@ -16,6 +16,8 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import { formatLocalizedDate } from "../i18n/formatters";
+import { useLanguage } from "../i18n/LanguageProvider";
 import { DriverReviewItem, loadDriverReviews } from "./driverReviewsLib";
 
 type Props = {
@@ -30,6 +32,7 @@ export default function DriverReviewsSection({
   reviewCountHint,
 }: Props) {
   const { t } = useTranslation();
+  const { language } = useLanguage();
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -56,6 +59,10 @@ export default function DriverReviewsSection({
   };
 
   const displayCount = loaded ? reviews.length : (reviewCountHint ?? 0);
+  // Star-only reviews (no written comment) still count toward the header
+  // above and toward the driver's overall rating/count — they just aren't
+  // rendered as a blank comment line below.
+  const reviewsWithComments = reviews.filter((review) => review.comment);
 
   return (
     <>
@@ -95,8 +102,16 @@ export default function DriverReviewsSection({
 
               <Text style={styles.commentText}>{t("driver.noReviewsYet")}</Text>
             </View>
+          ) : reviewsWithComments.length === 0 ? (
+            <View style={styles.noCommentsRow}>
+              <View style={styles.noCommentsIcon}>
+                <Ionicons name="chatbox-outline" size={18} color="#7C5F46" />
+              </View>
+
+              <Text style={styles.commentText}>{t("driver.noWrittenReviewsYet")}</Text>
+            </View>
           ) : (
-            reviews.map((review, index) => (
+            reviewsWithComments.map((review, index) => (
               <View key={index} style={styles.commentItem}>
                 <View style={styles.commentHeader}>
                   <Text style={styles.commentUser}>
@@ -116,6 +131,15 @@ export default function DriverReviewsSection({
                 </View>
 
                 <Text style={styles.commentText}>{review.comment}</Text>
+
+                {review.createdAtSeconds > 0 ? (
+                  <Text style={styles.commentDate}>
+                    {formatLocalizedDate(
+                      new Date(review.createdAtSeconds * 1000),
+                      language,
+                    )}
+                  </Text>
+                ) : null}
               </View>
             ))
           )}
@@ -183,5 +207,11 @@ const styles = StyleSheet.create({
     color: "#7C5F46",
     fontSize: 14,
     flexShrink: 1,
+  },
+  commentDate: {
+    color: "#8B7B6B",
+    fontSize: 11.5,
+    fontWeight: "700",
+    marginTop: 2,
   },
 });

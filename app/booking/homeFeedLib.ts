@@ -864,17 +864,28 @@ export const buildQuickRideNav = (
 // getDriverDayTrips/WeeklyDriverDay in weeklyBookingLib.ts, which already
 // carry dayKey/dayName/date/time/price; only `seats` is overridden here to
 // the passenger's own request (defaulting to 1, same reasoning as above).
+// childEntries — School only (see home.tsx's dayPickerChildEntries/
+// handleChildSelectionContinue's weekly branch) — one seat per selected
+// child on EVERY chosen day, in the same { localId, childId, childName }
+// shape buildSchoolTripNav already forwards; ride-payment.tsx's existing
+// isSchool-gated createWeeklyBookings call already writes childId/
+// childName/childEntries onto every generated day's booking doc, so nothing
+// downstream of this needs to change. Always undefined/empty for weekly
+// Personal Ride.
 export const buildWeeklyRideNav = (
   item: FeedItem,
   chosenDays: WeeklyDriverDay[],
   pickupLocation: PickupLocation,
+  childEntries?: { localId: string; childId?: string; childName?: string }[] | null,
 ): FeedNavTarget => {
+  const seatsPerDay = childEntries && childEntries.length > 0 ? childEntries.length : 1;
+
   const selectedWeeklyDays = chosenDays.map((day) => ({
     dayKey: day.dayKey,
     dayName: day.dayName,
     date: day.date,
     time: day.time,
-    seats: 1,
+    seats: seatsPerDay,
     price: day.price,
   }));
 
@@ -903,6 +914,10 @@ export const buildWeeklyRideNav = (
       remainingWeeklyDays: JSON.stringify([]),
 
       ...pickupNavParams(pickupLocation),
+
+      ...(childEntries && childEntries.length > 0
+        ? { childEntries: JSON.stringify(childEntries) }
+        : {}),
 
       source: "home_feed",
     },
@@ -936,9 +951,16 @@ export const buildErrandBookNav = (item: FeedItem): FeedNavTarget => ({
 // the pickup field for a return search either: the real pickup point is the
 // school itself, not something the passenger picks (see trip-confirm.tsx's
 // own comment on this).
+// childEntries — the child(ren) picked on Home's own child-select step (see
+// home.tsx's childSelectItem/handleChildSelectionContinue) — forwarded in
+// the exact { localId, childId, childName } shape trip-confirm.tsx already
+// parses from DirectionSearchForm's flow (SchoolBookingChildEntry,
+// schoolTripsLib.ts), so seat count/child-linking downstream (ride-payment,
+// the booking write) work identically regardless of entry point.
 export const buildSchoolTripNav = (
   item: FeedItem,
   pickupLocation: PickupLocation | null,
+  childEntries?: { localId: string; childId?: string; childName?: string }[] | null,
 ): FeedNavTarget => ({
   pathname: "/booking/school/trip-confirm",
   params: {
@@ -946,5 +968,8 @@ export const buildSchoolTripNav = (
     seats: "1",
     roundTrip: "false",
     ...(pickupLocation ? pickupNavParams(pickupLocation) : {}),
+    ...(childEntries && childEntries.length > 0
+      ? { childEntries: JSON.stringify(childEntries) }
+      : {}),
   },
 });

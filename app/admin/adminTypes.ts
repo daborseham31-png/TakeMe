@@ -135,7 +135,13 @@ export type AdminAuditAction =
 export type AdminAuditLogEntry = {
   adminId: string;
   action: AdminAuditAction;
-  targetType: "user" | "driver" | "ride" | "booking" | "report" | "notification";
+  targetType:
+    | "user"
+    | "driver"
+    | "ride"
+    | "booking"
+    | "report"
+    | "notification";
   targetId: string;
   reason?: string;
 };

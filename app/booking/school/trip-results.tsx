@@ -33,6 +33,7 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
+import DriverReviewsSection from "../DriverReviewsSection";
 import { DirectionalCard, DirectionalScreen } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import {
@@ -609,6 +610,13 @@ export default function SchoolTripResultsScreen() {
           </Text>
         </View>
 
+        <View style={localStyles.reviewsWrap}>
+          <DriverReviewsSection
+            driverId={trip.driverId}
+            reviewCountHint={info?.ratingCount ?? null}
+          />
+        </View>
+
         <View style={styles.buttonRow}>
           <Pressable style={styles.secondaryButton} onPress={() => goToConfirm(trip.id)}>
             <Text style={styles.secondaryButtonText}>{t("schoolTrip.viewDetails")}</Text>
@@ -668,6 +676,13 @@ export default function SchoolTripResultsScreen() {
           <Text style={styles.seatsText}>
             {trip.availableSeats} {t("schoolTrip.seatsLeft")}
           </Text>
+        </View>
+
+        <View style={localStyles.reviewsWrap}>
+          <DriverReviewsSection
+            driverId={trip.driverId}
+            reviewCountHint={info?.ratingCount ?? null}
+          />
         </View>
 
         <Pressable
@@ -1082,6 +1097,7 @@ const styles = StyleSheet.create({
 const localStyles = StyleSheet.create({
   cardSelected: { borderColor: "#F58220", borderWidth: 2 },
   selectButtonActive: { backgroundColor: "#2E7D32" },
+  reviewsWrap: { marginTop: 10 },
   useSameAllButton: {
     flexDirection: "row",
     alignItems: "center",

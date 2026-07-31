@@ -195,7 +195,9 @@ export default function DriverProfileReviewsModal({
                     </View>
                   </DirectionalRow>
 
-                  <DirectionalText style={styles.reviewComment}>{review.comment}</DirectionalText>
+                  {review.comment ? (
+                    <DirectionalText style={styles.reviewComment}>{review.comment}</DirectionalText>
+                  ) : null}
 
                   {review.createdAtSeconds > 0 ? (
                     <DirectionalText style={styles.reviewDate}>
