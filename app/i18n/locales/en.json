@@ -152,8 +152,8 @@
     "findARideSubtitle": "Search for rides near you",
     "becomeADriver": "Become a Driver",
     "becomeADriverSubtitle": "Join our community of drivers",
-    "whereToGo": "Where would you\nlike to go?",
-    "heroDescription": "Connect with trusted neighbors heading your way. Safe, affordable rides for your community.",
+    "whereToGo": "Welcome To TakeMe",
+    "heroDescription": "TakeMe Where Life Happens",
     "connectingPeople": "Connecting people",
     "noNearbyRides": "No nearby rides within {{radius}} km right now.",
     "noAvailableRides": "No available rides right now.",
@@ -172,8 +172,7 @@
       "schoolTrip": "School Trips",
       "work": "Work",
       "errand": "Errands"
-    },
-    "communityRides": "Community Rides"
+    }
   },
   "rides": {
     "personalRide": "Personal Ride",

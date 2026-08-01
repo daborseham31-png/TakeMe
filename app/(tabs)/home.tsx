@@ -4,18 +4,21 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
+  ImageBackground,
   Linking,
   Modal,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -60,7 +63,9 @@ const EXPIRY_RECHECK_INTERVAL_MS = 60000;
 
 type RideDisplayMode = "nearby" | "all";
 
-const logoImg = require("../../assets/images/logo.jpeg");
+// Combined pin+map + "Takeme" wordmark, transparent background, trimmed to
+// its content box.
+const logoImg = require("../../assets/images/TakeMe_header_logo.png");
 
 type FilterKey = "all" | FeedCategory;
 
@@ -101,6 +106,31 @@ export default function HomeScreen() {
   const [feedLoading, setFeedLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterKey>("all");
+
+  // --- Initial-viewport scroll layout ------------------------------------
+  // A single vertical ScrollView (no nested ScrollView/FlatList) holds the
+  // whole screen. "aboveFoldHeight" is the measured height of
+  // header+hero+action-cards; "scrollViewportHeight" is the ScrollView's
+  // own visible height. The Nearby-rides preview panel below (see its
+  // minHeight+justifyContent:"flex-end" further down) fills the remaining
+  // space between them, so it always sits flush above the tab bar, with the
+  // ride cards/filters starting only after it. "nearbySectionY" is the
+  // measured Y (within the ScrollView's own content, which onLayout already
+  // reports in) of where that "rest" content begins — the chevron scrolls
+  // there.
+  const scrollViewRef = useRef<ScrollView>(null);
+  const { height: windowHeight } = useWindowDimensions();
+  const [scrollViewportHeight, setScrollViewportHeight] = useState(0);
+  const [aboveFoldHeight, setAboveFoldHeight] = useState(0);
+  const [nearbySectionY, setNearbySectionY] = useState(0);
+  // Falls back to the raw window height until the ScrollView's own onLayout
+  // fires, so the preview panel starts close to its final size right away
+  // instead of snapping from "no gap" to "full gap" a frame later.
+  const effectiveViewportHeight = scrollViewportHeight || windowHeight;
+
+  const scrollToNearbyRides = useCallback(() => {
+    scrollViewRef.current?.scrollTo({ y: Math.max(0, nearbySectionY - 80), animated: true });
+  }, [nearbySectionY]);
 
   // GPS-based nearby/all mode — see useCurrentLocation.ts. Foreground-only,
   // never tracked in the background, never saved to Firestore.
@@ -534,6 +564,10 @@ export default function HomeScreen() {
 
   const listHeader = (
     <View>
+      {/* Header + hero + action cards, measured as one block so the
+          "Nearby rides" title row below can be pinned to the bottom of the
+          first screen (see aboveFoldHeight/scrollViewportHeight above). */}
+      <View onLayout={(e) => setAboveFoldHeight(e.nativeEvent.layout.height)}>
       {/* Top brand row: logo + wordmark on the left, notification icons on
           the right (Instagram/Facebook style). */}
       <View style={styles.topBar}>
@@ -543,10 +577,6 @@ export default function HomeScreen() {
             style={styles.logo}
             resizeMode="contain"
           />
-          <View>
-            <Text style={styles.brandTitle}>Take Me</Text>
-            <Text style={styles.brandTagline}>{t("home.communityRides")}</Text>
-          </View>
         </View>
 
         <View style={styles.topBarIcons}>
@@ -582,224 +612,249 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* --- Hero: gradient card, no custom illustration — depth comes from
-          the gradient + soft decorative circles + icon-row buttons. --- */}
-      <View style={styles.heroWrap}>
-        <LinearGradient
-          colors={["#FFB870", "#F58220", "#D8541F"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.hero}
-        >
-          <View style={styles.heroBlobOne} pointerEvents="none" />
-          <View style={styles.heroBlobTwo} pointerEvents="none" />
-          <Ionicons
-            name="car-sport"
-            size={140}
-            color="rgba(255,255,255,0.12)"
-            style={styles.heroWatermark}
-          />
+      {/* Page headline + subtitle — sit above the hero image itself (plain
+          page background), not overlaid on the photo. */}
+      <View style={styles.heroPageTextBlock}>
+        <PhysicalDirectionalBlockText style={styles.heroTitle}>
+          {t("home.whereToGo")}
+        </PhysicalDirectionalBlockText>
 
-          <DirectionalRow style={styles.heroBadge}>
-            <Ionicons name="sparkles" size={13} color="#FFFFFF" />
-            <DirectionalText style={styles.heroBadgeText}>
-              {t("home.connectingPeople")}
-            </DirectionalText>
-          </DirectionalRow>
-
-          <PhysicalDirectionalBlockText style={styles.heroTitle}>
-            {t("home.whereToGo")}
-          </PhysicalDirectionalBlockText>
-
-          <PhysicalDirectionalBlockText style={styles.heroDescription}>
-            {t("home.heroDescription")}
-          </PhysicalDirectionalBlockText>
-
-          <Pressable
-            style={({ pressed }) => [pressed && styles.heroRowPressed]}
-            onPress={() => router.push("/booking/ride-category" as any)}
-          >
-            <DirectionalRow style={styles.heroRow}>
-              <View style={styles.heroRowIcon}>
-                <Ionicons name="search" size={18} color="#F58220" />
-              </View>
-              <View style={styles.heroRowText}>
-                <Text
-                  style={[
-                    styles.heroRowTitle,
-                    {
-                      width: "100%",
-                      textAlign: isRTL ? "right" : "left",
-                      writingDirection: isRTL ? "rtl" : "ltr",
-                    },
-                  ]}
-                >
-                  {t("home.findARide")}
-                </Text>
-                <Text
-                  style={[
-                    styles.heroRowSubtitle,
-                    {
-                      width: "100%",
-                      textAlign: isRTL ? "right" : "left",
-                      writingDirection: isRTL ? "rtl" : "ltr",
-                    },
-                  ]}
-                >
-                  {t("home.findARideSubtitle")}
-                </Text>
-              </View>
-              <View style={styles.heroRowArrow}>
-                <Ionicons
-                  name={isRTL ? "arrow-back" : "arrow-forward"}
-                  size={16}
-                  color="#F58220"
-                />
-              </View>
-            </DirectionalRow>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [
-              pressed && styles.heroRowPressed,
-              checkingDriver && styles.outlineButtonDisabled,
-            ]}
-            onPress={handleBecomeDriver}
-            disabled={checkingDriver}
-          >
-            <DirectionalRow style={[styles.heroRow, styles.heroRowSecondary]}>
-              <View style={styles.heroRowIcon}>
-                {checkingDriver ? (
-                  <ActivityIndicator size="small" color="#F58220" />
-                ) : (
-                  <Ionicons name="car-sport-outline" size={18} color="#F58220" />
-                )}
-              </View>
-              <View style={styles.heroRowText}>
-                <Text
-                  style={[
-                    styles.heroRowTitle,
-                    {
-                      width: "100%",
-                      textAlign: isRTL ? "right" : "left",
-                      writingDirection: isRTL ? "rtl" : "ltr",
-                    },
-                  ]}
-                >
-                  {t("home.becomeADriver")}
-                </Text>
-                <Text
-                  style={[
-                    styles.heroRowSubtitle,
-                    {
-                      width: "100%",
-                      textAlign: isRTL ? "right" : "left",
-                      writingDirection: isRTL ? "rtl" : "ltr",
-                    },
-                  ]}
-                >
-                  {t("home.becomeADriverSubtitle")}
-                </Text>
-              </View>
-              <View style={styles.heroRowArrow}>
-                <Ionicons
-                  name={isRTL ? "arrow-back" : "arrow-forward"}
-                  size={16}
-                  color="#F58220"
-                />
-              </View>
-            </DirectionalRow>
-          </Pressable>
-        </LinearGradient>
+        <PhysicalDirectionalBlockText style={styles.heroDescription}>
+          {t("home.heroDescription")}
+        </PhysicalDirectionalBlockText>
       </View>
 
-      {/* --- Trips near you ------------------------------------------- */}
-      <View style={styles.feedSection}>
-        <View style={styles.feedHeader}>
-          <DirectionalRow style={styles.feedTitleRow}>
-            <View style={styles.feedTitleIcon}>
-              <Ionicons name="navigate" size={16} color="#F58220" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <PhysicalDirectionalBlockText style={styles.feedTitle}>
-                {effectiveMode === "nearby"
-                  ? t("home.nearbyRides")
-                  : t("home.allAvailableRides")}
-              </PhysicalDirectionalBlockText>
-              <PhysicalDirectionalBlockText style={styles.feedSubtitle}>
-                {effectiveMode === "nearby"
-                  ? t("home.withinRadius", { radius: NEARBY_RIDE_RADIUS_KM })
-                  : t("home.allRidesEverywhere")}
-              </PhysicalDirectionalBlockText>
-            </View>
+      {/* --- Hero: the real illustration (assets/images/hero-car.png) as the
+          card's background image — car + road + pin live inside the photo
+          itself, never redrawn in code, shown clean with no overlay. --- */}
+      <View style={styles.heroWrap}>
+        <ImageBackground
+          source={require("../../assets/images/hero-car.png")}
+          resizeMode="cover"
+          style={styles.hero}
+          imageStyle={styles.heroBgImage}
+        />
+      </View>
 
-            {filter !== "all" ? (
-              <Pressable onPress={() => setFilter("all")}>
-                <DirectionalRow style={styles.viewAllChip}>
-                  <DirectionalText style={styles.viewAllChipText}>
-                    {t("common.viewAll")}
-                  </DirectionalText>
-                  <Ionicons
-                    name={isRTL ? "arrow-back" : "arrow-forward"}
-                    size={13}
-                    color="#F58220"
-                  />
-                </DirectionalRow>
-              </Pressable>
-            ) : null}
+      {/* --- Two big action cards, below (not inside) the hero card --- */}
+      <View style={styles.actionCardsWrap}>
+        <Pressable
+          style={({ pressed }) => [pressed && styles.heroRowPressed]}
+          onPress={() => router.push("/booking/ride-category" as any)}
+        >
+          <DirectionalRow style={styles.actionCard}>
+            <View style={styles.actionCardIcon}>
+              <Ionicons name="search" size={20} color="#F58220" />
+            </View>
+            <View style={styles.heroRowText}>
+              <Text
+                style={[
+                  styles.actionCardTitle,
+                  {
+                    width: "100%",
+                    textAlign: isRTL ? "right" : "left",
+                    writingDirection: isRTL ? "rtl" : "ltr",
+                  },
+                ]}
+              >
+                {t("home.findARide")}
+              </Text>
+              <Text
+                style={[
+                  styles.heroRowSubtitle,
+                  {
+                    width: "100%",
+                    textAlign: isRTL ? "right" : "left",
+                    writingDirection: isRTL ? "rtl" : "ltr",
+                  },
+                ]}
+              >
+                {t("home.findARideSubtitle")}
+              </Text>
+            </View>
+            <View style={styles.actionCardArrow}>
+              <Ionicons
+                name={isRTL ? "arrow-back" : "arrow-forward"}
+                size={16}
+                color="#F58220"
+              />
+            </View>
           </DirectionalRow>
+        </Pressable>
 
-          {/* Nearby / All toggle */}
-          <DirectionalRow style={styles.modeRow}>
-            <Pressable
-              onPress={handlePressNearbyTab}
+        <Pressable
+          style={({ pressed }) => [
+            pressed && styles.heroRowPressed,
+            checkingDriver && styles.outlineButtonDisabled,
+          ]}
+          onPress={handleBecomeDriver}
+          disabled={checkingDriver}
+        >
+          <DirectionalRow style={styles.actionCard}>
+            <View style={styles.actionCardIcon}>
+              {checkingDriver ? (
+                <ActivityIndicator size="small" color="#F58220" />
+              ) : (
+                <Ionicons name="car-sport-outline" size={20} color="#F58220" />
+              )}
+            </View>
+            <View style={styles.heroRowText}>
+              <Text
+                style={[
+                  styles.actionCardTitle,
+                  {
+                    width: "100%",
+                    textAlign: isRTL ? "right" : "left",
+                    writingDirection: isRTL ? "rtl" : "ltr",
+                  },
+                ]}
+              >
+                {t("home.becomeADriver")}
+              </Text>
+              <Text
+                style={[
+                  styles.heroRowSubtitle,
+                  {
+                    width: "100%",
+                    textAlign: isRTL ? "right" : "left",
+                    writingDirection: isRTL ? "rtl" : "ltr",
+                  },
+                ]}
+              >
+                {t("home.becomeADriverSubtitle")}
+              </Text>
+            </View>
+            <View style={styles.actionCardArrow}>
+              <Ionicons
+                name={isRTL ? "arrow-back" : "arrow-forward"}
+                size={16}
+                color="#F58220"
+              />
+            </View>
+          </DirectionalRow>
+        </Pressable>
+      </View>
+      </View>
+
+      {/* "Nearby rides" preview panel — a light-beige panel that fills
+          whatever's left of the first screen below the header/hero/action
+          cards (minHeight bounds it to the remaining space, so it still
+          always sits flush above the tab bar). The title row is centered
+          in that space rather than glued to the very bottom, so it doesn't
+          read as one big empty block under it — some breathing room above
+          and below instead of all of it below. Only the icon/title/
+          subtitle/chevron row show here; the filters/ride cards start below
+          it, off-screen until the user scrolls or taps the chevron. */}
+      <View
+        style={{
+          borderTopWidth: 1,
+          borderTopColor: "#EFE3D6",
+          marginTop: 6,
+          paddingTop: 20,
+          paddingBottom: 24,
+          paddingHorizontal: 20,
+          minHeight: Math.max(0, effectiveViewportHeight - aboveFoldHeight),
+          justifyContent: "center",
+        }}
+      >
+        {/* Nearby / All toggle — moved above the "Nearby rides" title so
+            it's visible right away, not tucked below the fold. */}
+        <DirectionalRow style={[styles.modeRow, { marginTop: 0, marginBottom: 14 }]}>
+          <Pressable onPress={handlePressNearbyTab}>
+            <DirectionalRow
+              style={[
+                styles.modeButton,
+                mode === "nearby" && styles.modeButtonActive,
+              ]}
             >
-              <DirectionalRow
+              <Ionicons
+                name="navigate"
+                size={14}
+                color={mode === "nearby" ? "#FFFFFF" : "#7C5F46"}
+              />
+              <DirectionalText
                 style={[
-                  styles.modeButton,
-                  mode === "nearby" && styles.modeButtonActive,
+                  styles.modeButtonText,
+                  mode === "nearby" && styles.modeButtonTextActive,
                 ]}
               >
-                <Ionicons
-                  name="navigate"
-                  size={14}
-                  color={mode === "nearby" ? "#FFFFFF" : "#7C5F46"}
-                />
-                <DirectionalText
-                  style={[
-                    styles.modeButtonText,
-                    mode === "nearby" && styles.modeButtonTextActive,
-                  ]}
-                >
-                  {t("home.nearby")}
-                </DirectionalText>
-              </DirectionalRow>
-            </Pressable>
+                {t("home.nearby")}
+              </DirectionalText>
+            </DirectionalRow>
+          </Pressable>
 
-            <Pressable onPress={() => setMode("all")}>
-              <DirectionalRow
+          <Pressable onPress={() => setMode("all")}>
+            <DirectionalRow
+              style={[
+                styles.modeButton,
+                mode === "all" && styles.modeButtonActive,
+              ]}
+            >
+              <Ionicons
+                name="globe-outline"
+                size={14}
+                color={mode === "all" ? "#FFFFFF" : "#7C5F46"}
+              />
+              <DirectionalText
                 style={[
-                  styles.modeButton,
-                  mode === "all" && styles.modeButtonActive,
+                  styles.modeButtonText,
+                  mode === "all" && styles.modeButtonTextActive,
                 ]}
               >
-                <Ionicons
-                  name="globe-outline"
-                  size={14}
-                  color={mode === "all" ? "#FFFFFF" : "#7C5F46"}
-                />
-                <DirectionalText
-                  style={[
-                    styles.modeButtonText,
-                    mode === "all" && styles.modeButtonTextActive,
-                  ]}
-                >
-                  {t("home.allRides")}
+                {t("home.allRides")}
+              </DirectionalText>
+            </DirectionalRow>
+          </Pressable>
+        </DirectionalRow>
+
+        <DirectionalRow style={styles.feedTitleRow}>
+          <View style={styles.feedTitleIcon}>
+            <Ionicons name="navigate" size={16} color="#F58220" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <PhysicalDirectionalBlockText style={styles.feedTitle}>
+              {effectiveMode === "nearby"
+                ? t("home.nearbyRides")
+                : t("home.allAvailableRides")}
+            </PhysicalDirectionalBlockText>
+            <PhysicalDirectionalBlockText style={styles.feedSubtitle}>
+              {effectiveMode === "nearby"
+                ? t("home.withinRadius", { radius: NEARBY_RIDE_RADIUS_KM })
+                : t("home.allRidesEverywhere")}
+            </PhysicalDirectionalBlockText>
+          </View>
+
+          {filter !== "all" ? (
+            <Pressable onPress={() => setFilter("all")}>
+              <DirectionalRow style={styles.viewAllChip}>
+                <DirectionalText style={styles.viewAllChipText}>
+                  {t("common.viewAll")}
                 </DirectionalText>
+                <Ionicons
+                  name={isRTL ? "arrow-back" : "arrow-forward"}
+                  size={13}
+                  color="#F58220"
+                />
               </DirectionalRow>
             </Pressable>
-          </DirectionalRow>
+          ) : null}
 
+          <Pressable
+            style={styles.nearbyChevronButton}
+            onPress={scrollToNearbyRides}
+            hitSlop={8}
+          >
+            <Ionicons name="chevron-down" size={20} color="#F58220" />
+          </Pressable>
+        </DirectionalRow>
+      </View>
+
+      {/* Everything below the title row. A direct child of listHeader's own
+          root View (same level as the header/hero/action-cards block
+          above), so its onLayout y is already relative to the ScrollView's
+          content — exactly the coordinate space scrollTo's y expects. */}
+      <View onLayout={(e) => setNearbySectionY(e.nativeEvent.layout.y)}>
+        <View style={{ paddingHorizontal: 20, marginBottom: 14 }}>
           {/* Location state banners — only relevant while the user is trying
               to use Nearby mode; "All rides" always works regardless. */}
           {mode === "nearby" && locationState === "checking" ? (
@@ -894,17 +949,20 @@ export default function HomeScreen() {
           ) : null}
         </View>
 
-        <FlatList
+        <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          data={visibleFilterKeys}
-          keyExtractor={(key) => key}
           contentContainerStyle={[styles.filterRow, { paddingRight: 28 }]}
-          renderItem={({ item: key }) => {
+        >
+          {visibleFilterKeys.map((key) => {
             const active = filter === key;
 
             return (
-              <Pressable style={[styles.filterChip, { marginRight: 8 }]} onPress={() => setFilter(key)}>
+              <Pressable
+                key={key}
+                style={[styles.filterChip, { marginRight: 8 }]}
+                onPress={() => setFilter(key)}
+              >
                 {active ? (
                   <LinearGradient
                     colors={["#FFB870", "#F58220"]}
@@ -928,21 +986,21 @@ export default function HomeScreen() {
                 </Text>
               </Pressable>
             );
-          }}
-        />
+          })}
+        </ScrollView>
 
         {filter === "school" ? (
-          <FlatList
+          <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            data={visibleSchoolDirectionOptions}
-            keyExtractor={(option) => option.key}
             contentContainerStyle={styles.schoolDirectionRow}
-            renderItem={({ item: option }) => {
+          >
+            {visibleSchoolDirectionOptions.map((option) => {
               const optionActive = schoolDirectionFilter === option.key;
 
               return (
                 <Pressable
+                  key={option.key}
                   style={[
                     styles.schoolDirectionChip,
                     optionActive && styles.schoolDirectionChipActive,
@@ -959,8 +1017,8 @@ export default function HomeScreen() {
                   </Text>
                 </Pressable>
               );
-            }}
-          />
+            })}
+          </ScrollView>
         ) : null}
 
         {feedLoading ? (
@@ -975,49 +1033,51 @@ export default function HomeScreen() {
 
   return (
     <DirectionalScreen style={styles.page}>
-      <FlatList
-        data={feedLoading ? [] : visibleFeedItems}
-        keyExtractor={(item) => `${item.category}-${item.id}`}
-        renderItem={({ item }) => (
-          <View style={styles.feedItemWrap}>
-            <TripFeedCard
-              item={item}
-              onPressBook={() => handleBookPress(item)}
-              onPressDriver={() => {
-                if (!item.providerId) return;
-                setReviewsDriverId(item.providerId);
-                setReviewsDriverName(item.providerName);
-              }}
-              distanceKm={item.distanceKm}
-            />
-          </View>
-        )}
-        ListHeaderComponent={listHeader}
-        ListEmptyComponent={
-          !feedLoading ? (
-            <View style={styles.emptyFeedBox}>
-              <Ionicons name="search-outline" size={32} color="#8B7B6B" />
-              <Text style={styles.emptyFeedText}>
-                {effectiveMode === "nearby"
-                  ? t("home.noNearbyRides", { radius: NEARBY_RIDE_RADIUS_KM })
-                  : t("home.noAvailableRides")}
-              </Text>
-              {effectiveMode === "nearby" && allItemsSorted.length > 0 ? (
-                <Pressable
-                  style={styles.bannerButton}
-                  onPress={() => setMode("all")}
-                >
-                  <Text style={styles.bannerButtonText}>{t("home.showAllRides")}</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : null
-        }
+      <ScrollView
+        ref={scrollViewRef}
+        onLayout={(e) => setScrollViewportHeight(e.nativeEvent.layout.height)}
         contentContainerStyle={styles.scroll}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
-      />
+      >
+        {listHeader}
+
+        {!feedLoading && visibleFeedItems.length === 0 ? (
+          <View style={styles.emptyFeedBox}>
+            <Ionicons name="search-outline" size={32} color="#8B7B6B" />
+            <Text style={styles.emptyFeedText}>
+              {effectiveMode === "nearby"
+                ? t("home.noNearbyRides", { radius: NEARBY_RIDE_RADIUS_KM })
+                : t("home.noAvailableRides")}
+            </Text>
+            {effectiveMode === "nearby" && allItemsSorted.length > 0 ? (
+              <Pressable
+                style={styles.bannerButton}
+                onPress={() => setMode("all")}
+              >
+                <Text style={styles.bannerButtonText}>{t("home.showAllRides")}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
+        {!feedLoading &&
+          visibleFeedItems.map((item) => (
+            <View key={`${item.category}-${item.id}`} style={styles.feedItemWrap}>
+              <TripFeedCard
+                item={item}
+                onPressBook={() => handleBookPress(item)}
+                onPressDriver={() => {
+                  if (!item.providerId) return;
+                  setReviewsDriverId(item.providerId);
+                  setReviewsDriverName(item.providerName);
+                }}
+                distanceKm={item.distanceKm}
+              />
+            </View>
+          ))}
+      </ScrollView>
 
       <Modal
         visible={!!dayPickerItem}
@@ -1133,21 +1193,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   logo: {
-    // Source art is 516x422 (not square) — size by aspect ratio and use
-    // resizeMode="contain" above so it's never cropped/squished.
-    width: 54,
-    height: 44,
-  },
-  brandTitle: {
-    fontSize: 20,
-    fontWeight: "900",
-    color: "#F58220",
-    lineHeight: 22,
-  },
-  brandTagline: {
-    fontSize: 12,
-    color: "#8A7A6C",
-    fontWeight: "600",
+    // Combined pin+map + "Takeme" wordmark image (aspect ~3.18:1).
+    width: 127,
+    height: 40,
   },
   topBarIcons: {
     flexDirection: "row",
@@ -1175,9 +1223,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 8,
   },
+  // hero-car.png is a square image whose empty cream area sits in its own
+  // upper-left corner; minHeight is generous enough that resizeMode="cover"
+  // doesn't have to crop away the car/road/pin on typical phone widths.
   hero: {
     borderRadius: 28,
     padding: 22,
+    minHeight: 300,
+    justifyContent: "flex-start",
     overflow: "hidden",
     shadowColor: "#D8541F",
     shadowOpacity: 0.35,
@@ -1185,106 +1238,83 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 6,
   },
-  heroBlobOne: {
-    position: "absolute",
-    top: -40,
-    right: -30,
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    backgroundColor: "rgba(255,255,255,0.10)",
+  heroBgImage: {
+    borderRadius: 28,
   },
-  heroBlobTwo: {
-    position: "absolute",
-    bottom: -50,
-    left: -40,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: "rgba(255,255,255,0.07)",
-  },
-  heroWatermark: {
-    position: "absolute",
-    top: 10,
-    right: -10,
-    transform: [{ rotate: "-12deg" }],
-  },
-  heroBadge: {
-    flexDirection: "row",
-    alignSelf: "flex-start",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(255,255,255,0.22)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
+  heroPageTextBlock: {
+    paddingHorizontal: 20,
+    marginTop: 14,
     marginBottom: 14,
   },
-  heroBadgeText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    fontSize: 12,
-  },
   heroTitle: {
-    fontSize: 30,
+    fontSize: 26,
     fontWeight: "900",
-    color: "#FFFFFF",
-    lineHeight: 36,
-    marginBottom: 10,
+    color: "#000000",
+    lineHeight: 31,
+    marginBottom: 8,
   },
   heroDescription: {
-    fontSize: 14.5,
+    fontSize: 15.5,
     lineHeight: 21,
-    color: "rgba(255,255,255,0.92)",
-    marginBottom: 20,
+    color: "#6B5B4E",
   },
-  heroRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "rgba(255,255,255,0.96)",
-    borderRadius: 18,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 10,
-  },
-  heroRowSecondary: {
-    backgroundColor: "rgba(255,255,255,0.85)",
-  },
+
   heroRowPressed: {
     opacity: 0.85,
   },
-  heroRowIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: "#FFF2E8",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   heroRowText: {
     flex: 1,
-  },
-  heroRowTitle: {
-    fontSize: 15,
-    fontWeight: "900",
-    color: "#111827",
   },
   heroRowSubtitle: {
     fontSize: 12,
     color: "#7C5F46",
     marginTop: 1,
   },
-  heroRowArrow: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+  outlineButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  // --- Action cards (Find a Ride / Become a Driver) — separate white
+  // shadowed cards BELOW the hero card, not nested inside it. ---
+  actionCardsWrap: {
+    paddingHorizontal: 20,
+    gap: 12,
+    marginBottom: 24,
+  },
+  actionCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  actionCardIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
     backgroundColor: "#FFF2E8",
     alignItems: "center",
     justifyContent: "center",
   },
-  outlineButtonDisabled: {
-    opacity: 0.6,
+  actionCardTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  actionCardArrow: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#FFF2E8",
+    alignItems: "center",
+    justifyContent: "center",
   },
   iconBadge: {
     position: "absolute",
@@ -1352,6 +1382,19 @@ const styles = StyleSheet.create({
     color: "#F58220",
     fontWeight: "800",
     fontSize: 12.5,
+  },
+  nearbyChevronButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#FBF7F1",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 6,
+    elevation: 2,
   },
   noAreaBanner: {
     flexDirection: "row",
