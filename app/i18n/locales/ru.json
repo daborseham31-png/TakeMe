@@ -906,7 +906,7 @@
     "categories": {
       "school": {
         "title": "Школа",
-        "desc": "Поездки в школу или университет"
+        "desc": "Поездки в школу"
       },
       "workErrands": {
         "title": "Работа и поручения",
@@ -1171,10 +1171,10 @@
     "cannotCancelInvalidDeparture": "Дата или время этой поездки недоступны, поэтому отменить её здесь сейчас нельзя."
   },
   "school": {
-    "headerTitle": "Школьная поездка",
-    "subtitle": "Забронируйте поездку в школу или университет",
-    "schoolNameLabel": "Название школы / университета",
-    "schoolNamePlaceholder": "Выберите школу или университет",
+    "headerTitle": "Школа",
+    "subtitle": "Забронируйте поездку в школу",
+    "schoolNameLabel": "Название школы",
+    "schoolNamePlaceholder": "Выберите школу",
     "toPlaceholder": "Введите город назначения"
   },
   "schoolTrip": {

@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 
+import { getCategoryMeta } from "../booking/bookingsLib";
 import IsraelLocationAutocomplete from "../booking/IsraelLocationAutocomplete";
 import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { IsraelLocation } from "../booking/israelLocations";
@@ -27,9 +28,12 @@ import {
 import WeeklyDaysCard from "../driver/create/WeeklyDaysCard";
 import { useTranslation } from "react-i18next";
 import {
+  DirectionalRow,
   DirectionalScreen,
+  DirectionalText,
   PhysicalDirectionalBlockText,
 } from "../i18n/DirectionalPrimitives";
+import { translateCategoryLabel } from "../i18n/formatters";
 import { useLanguage } from "../i18n/LanguageProvider";
 
 const LANGUAGES_LIST = [
@@ -84,6 +88,9 @@ const isTimeAvailableForDate = (dateText: string, timeText: string) => {
 export default function PersonalRideScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
+  // Same compact icon+label chip the driver-side create/RideForm.tsx header
+  // already uses, instead of a big emoji+bold-title block.
+  const meta = getCategoryMeta("personal");
   // Manual matching field ("Nazareth") — this is what driver search compares
   // against driver.from/driver.to. It is NEVER auto-filled with an exact GPS
   // address, and using "Use my current location" below never touches it.
@@ -320,14 +327,19 @@ export default function PersonalRideScreen() {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
-        </Pressable>
+        <DirectionalRow style={styles.topRow}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
+          </Pressable>
 
-        <View style={styles.header}>
-          <Text style={styles.headerEmoji}>🚗</Text>
-          <Text style={styles.title}>{t("rideCategory.categories.personal.title")}</Text>
-        </View>
+          <DirectionalRow style={[styles.categoryBadge, { backgroundColor: `${meta.color}18` }]}>
+            <Ionicons name={meta.icon} size={15} color={meta.color} />
+            <DirectionalText style={[styles.categoryBadgeText, { color: meta.color }]}>
+              {translateCategoryLabel("personal", meta.label, t)}
+            </DirectionalText>
+          </DirectionalRow>
+        </DirectionalRow>
+
         <PhysicalDirectionalBlockText style={styles.subtitle}>
           {t("rideCategory.categories.personal.desc")}
         </PhysicalDirectionalBlockText>
@@ -576,28 +588,33 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 40,
   },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 4,
+  },
   backButton: {
     width: 40,
     height: 40,
     justifyContent: "center",
-    marginBottom: 4,
   },
-  header: {
+  categoryBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
   },
-  headerEmoji: {
-    fontSize: 26,
-  },
-  title: {
-    fontSize: 30,
+  categoryBadgeText: {
+    fontSize: 13.5,
     fontWeight: "900",
-    color: "#111827",
   },
   subtitle: {
     fontSize: 15,
-    color: "#7C5F46",
+    fontWeight: "800",
+    color: "#000000",
     marginTop: 6,
     marginBottom: 24,
   },

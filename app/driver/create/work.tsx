@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -50,6 +50,12 @@ export default function WorkJobScreen() {
   const { driverName, phone, driverAge, languages } = useDriverAccount();
 
   const [loading, setLoading] = useState(false);
+  // Synchronous re-entrancy lock — the eligibility/suspension checks below
+  // are awaited BEFORE setLoading(true) ever runs, so the submit button's
+  // own disabled={loading} isn't enough to stop a fast double-tap from
+  // starting handleSubmit twice and creating two identical workJobs docs.
+  // A ref updates immediately (no render/batching delay), unlike state.
+  const submittingRef = useRef(false);
 
   const [jobTitle, setJobTitle] = useState("");
   const [jobDescription, setJobDescription] = useState("");
@@ -77,6 +83,17 @@ export default function WorkJobScreen() {
   const [workersNeeded, setWorkersNeeded] = useState("1");
 
   const handleSubmit = async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+
+    try {
+      await submitWorkJob();
+    } finally {
+      submittingRef.current = false;
+    }
+  };
+
+  const submitWorkJob = async () => {
     const user = auth.currentUser;
 
     if (!user) {

@@ -910,7 +910,7 @@
     "categories": {
       "school": {
         "title": "المدرسة",
-        "desc": "رحلات إلى المدرسة أو الجامعة"
+        "desc": "رحلات إلى المدرسة"
       },
       "workErrands": {
         "title": "عمل ومشاوير",
@@ -1176,9 +1176,9 @@
   },
   "school": {
     "headerTitle": "رحلة مدرسية",
-    "subtitle": "احجز رحلة إلى المدرسة أو الجامعة",
-    "schoolNameLabel": "اسم المدرسة / الجامعة",
-    "schoolNamePlaceholder": "اختر المدرسة أو الجامعة",
+    "subtitle": "احجز رحلة إلى المدرسة",
+    "schoolNameLabel": "اسم المدرسة",
+    "schoolNamePlaceholder": "اختر المدرسة",
     "toPlaceholder": "أدخل مدينة الوجهة"
   },
   "schoolTrip": {

@@ -730,6 +730,10 @@ export default function DirectionSearchForm() {
         ))}
       </View>
 
+      <PhysicalDirectionalBlockText style={localStyles.formSubtitle}>
+        {t("school.subtitle")}
+      </PhysicalDirectionalBlockText>
+
       <View style={styles.card}>
         {mode === "roundTrip" ? (
           <DirectionalRow style={localStyles.sectionHeader}>
@@ -836,7 +840,7 @@ export default function DirectionSearchForm() {
       </View>
 
       {mode === "roundTrip" ? (
-        <View style={styles.card}>
+        <View style={[styles.card, { marginTop: 18 }]}>
           <DirectionalRow style={localStyles.sectionHeader}>
             <Ionicons name="arrow-down-circle-outline" size={18} color="#3B82F6" />
             <PhysicalDirectionalBlockText style={[localStyles.sectionTitle, { flex: 1 }]}>
@@ -973,6 +977,13 @@ export default function DirectionSearchForm() {
 }
 
 const localStyles = {
+  formSubtitle: {
+    fontSize: 15,
+    fontWeight: "800" as const,
+    color: "#111827",
+    marginTop: 12,
+    marginBottom: 18,
+  },
   childrenBox: {
     marginTop: 16,
     paddingTop: 14,

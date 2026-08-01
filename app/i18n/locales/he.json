@@ -900,7 +900,7 @@
     "categories": {
       "school": {
         "title": "בית ספר",
-        "desc": "נסיעות לבית ספר או אוניברסיטה"
+        "desc": "נסיעות לבית ספר"
       },
       "workErrands": {
         "title": "עבודה ושליחויות",
@@ -1166,9 +1166,9 @@
   },
   "school": {
     "headerTitle": "נסיעת בית ספר",
-    "subtitle": "הזמן נסיעה לבית ספר או לאוניברסיטה",
-    "schoolNameLabel": "שם בית הספר / האוניברסיטה",
-    "schoolNamePlaceholder": "בחר את בית הספר או האוניברסיטה",
+    "subtitle": "הזמן נסיעה לבית ספר",
+    "schoolNameLabel": "שם בית הספר",
+    "schoolNamePlaceholder": "בחר את בית הספר",
     "toPlaceholder": "הזן עיר יעד"
   },
   "schoolTrip": {

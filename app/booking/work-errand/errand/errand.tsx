@@ -21,7 +21,13 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
-import { DirectionalScreen } from "../../../i18n/DirectionalPrimitives";
+import { getCategoryMeta } from "../../bookingsLib";
+import {
+  DirectionalRow,
+  DirectionalScreen,
+  DirectionalText,
+} from "../../../i18n/DirectionalPrimitives";
+import { translateCategoryLabel } from "../../../i18n/formatters";
 import { useLanguage } from "../../../i18n/LanguageProvider";
 import DriverReviewsSection from "../../DriverReviewsSection";
 import { getDisplayedDriverId } from "../../driverReviewsLib";
@@ -99,6 +105,7 @@ const isTodayOrFuture = (dateText: string) => {
 export default function ErrandsScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
+  const meta = getCategoryMeta("errands");
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -249,24 +256,24 @@ export default function ErrandsScreen() {
   return (
     <DirectionalScreen style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons
-            name={isRTL ? "arrow-forward" : "arrow-back"}
-            size={25}
-            color="#7A5C4B"
-          />
-        </Pressable>
+        <DirectionalRow style={styles.topRow}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons
+              name={isRTL ? "arrow-forward" : "arrow-back"}
+              size={25}
+              color="#7A5C4B"
+            />
+          </Pressable>
 
-        <View style={styles.pageHeader}>
-          <View style={styles.headerIconCircle}>
-            <Text style={styles.headerEmoji}>📍</Text>
-          </View>
+          <DirectionalRow style={[styles.categoryBadge, { backgroundColor: `${meta.color}18` }]}>
+            <Ionicons name={meta.icon} size={15} color={meta.color} />
+            <DirectionalText style={[styles.categoryBadgeText, { color: meta.color }]}>
+              {translateCategoryLabel("errands", meta.label, t)}
+            </DirectionalText>
+          </DirectionalRow>
+        </DirectionalRow>
 
-          <View>
-            <Text style={styles.title}>{t("workErrand.errandsTitle")}</Text>
-            <Text style={styles.subtitle}>{t("workErrand.errandsSubtitle")}</Text>
-          </View>
-        </View>
+        <Text style={styles.subtitle}>{t("workErrand.errandsSubtitle")}</Text>
 
         {visibleDrivers.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -519,38 +526,33 @@ const styles = StyleSheet.create({
     color: "#7A5C4B",
     fontWeight: "800",
   },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 14,
+  },
   backButton: {
     width: 45,
     height: 40,
     justifyContent: "center",
-    marginBottom: 18,
   },
-  pageHeader: {
+  categoryBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
-    marginBottom: 28,
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
   },
-  headerIconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "#FFF3E6",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerEmoji: {
-    fontSize: 28,
-  },
-  title: {
-    fontSize: 34,
+  categoryBadgeText: {
+    fontSize: 13.5,
     fontWeight: "900",
-    color: "#111827",
-    marginBottom: 3,
   },
   subtitle: {
     fontSize: 16,
     color: "#7A5C4B",
+    marginBottom: 14,
   },
   emptyCard: {
     backgroundColor: "#FFFFFF",

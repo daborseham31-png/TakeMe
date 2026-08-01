@@ -15,11 +15,14 @@ import MapView, { Marker, Region } from "react-native-maps";
 import { useTranslation } from "react-i18next";
 
 import KeyboardSafeScreen from "../../components/KeyboardSafeScreen";
+import { getCategoryMeta } from "../bookingsLib";
 import {
+  DirectionalRow,
   DirectionalScreen,
+  DirectionalText,
   PhysicalDirectionalBlockText,
 } from "../../i18n/DirectionalPrimitives";
-import { translateProblemType } from "../../i18n/formatters";
+import { translateCategoryLabel, translateProblemType } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { positionEnd } from "../../i18n/rtl";
 import { createRoadsideRequest } from "./roadsideLib";
@@ -66,6 +69,7 @@ const ProblemIcon: React.FC<{
 export default function RoadsideHelpScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
+  const meta = getCategoryMeta("roadside");
   const mapRef = useRef<MapView | null>(null);
 
   const [marker, setMarker] = useState({
@@ -231,14 +235,19 @@ export default function RoadsideHelpScreen() {
   return (
     <DirectionalScreen style={styles.page}>
       <KeyboardSafeScreen contentContainerStyle={styles.scroll}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
-        </Pressable>
+        <DirectionalRow style={styles.topRow}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
+          </Pressable>
 
-        <View style={styles.header}>
-          <Text style={styles.headerEmoji}>🔧</Text>
-          <Text style={styles.title}>{t("rideCategory.categories.help.title")}</Text>
-        </View>
+          <DirectionalRow style={[styles.categoryBadge, { backgroundColor: `${meta.color}18` }]}>
+            <Ionicons name={meta.icon} size={15} color={meta.color} />
+            <DirectionalText style={[styles.categoryBadgeText, { color: meta.color }]}>
+              {translateCategoryLabel("roadside", meta.label, t)}
+            </DirectionalText>
+          </DirectionalRow>
+        </DirectionalRow>
+
         <PhysicalDirectionalBlockText style={styles.subtitle}>
           {t("roadsideHelp.subtitle")}
         </PhysicalDirectionalBlockText>
@@ -391,24 +400,28 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 40,
   },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 4,
+  },
   backButton: {
     width: 40,
     height: 40,
     justifyContent: "center",
-    marginBottom: 4,
   },
-  header: {
+  categoryBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
   },
-  headerEmoji: {
-    fontSize: 26,
-  },
-  title: {
-    fontSize: 30,
+  categoryBadgeText: {
+    fontSize: 13.5,
     fontWeight: "900",
-    color: "#111827",
   },
   subtitle: {
     fontSize: 15,
