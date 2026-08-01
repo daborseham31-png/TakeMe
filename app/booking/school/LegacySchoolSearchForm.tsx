@@ -31,8 +31,7 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 
-import { getCategoryMeta } from "../bookingsLib";
-import { translateCategoryLabel } from "../../i18n/formatters";
+import { PhysicalDirectionalBlockText } from "../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
@@ -42,8 +41,6 @@ import SchoolAutocomplete from "../SchoolAutocomplete";
 import { getLocalizedSchoolName, SchoolLocation } from "../schools";
 import WeeklyDaysCard from "../../driver/create/WeeklyDaysCard";
 import { validateWeeklyRowsAnyFutureDate, WeekDayRow } from "../weeklyBookingLib";
-
-const SCHOOL_CATEGORY_META = getCategoryMeta("school");
 
 const LANGUAGES_LIST = [
   { key: "ar", label: "العربية" },
@@ -226,23 +223,9 @@ export default function LegacySchoolSearchForm() {
       contentContainerStyle={styles.scroll}
       keyboardShouldPersistTaps="handled"
     >
-      <View style={styles.categoryPillRow}>
-        <View
-          style={[
-            styles.categoryPill,
-            { backgroundColor: `${SCHOOL_CATEGORY_META.color}18` },
-          ]}
-        >
-          <Ionicons
-            name={SCHOOL_CATEGORY_META.icon}
-            size={14}
-            color={SCHOOL_CATEGORY_META.color}
-          />
-          <Text style={[styles.categoryPillText, { color: SCHOOL_CATEGORY_META.color }]}>
-            {translateCategoryLabel("school", SCHOOL_CATEGORY_META.label, t)}
-          </Text>
-        </View>
-      </View>
+      <PhysicalDirectionalBlockText style={styles.formSubtitle}>
+        {t("school.subtitle")}
+      </PhysicalDirectionalBlockText>
 
       <View style={styles.card}>
         <IsraelLocationAutocomplete
@@ -392,21 +375,11 @@ const styles = StyleSheet.create({
   scroll: {
     paddingBottom: 40,
   },
-  categoryPillRow: {
-    flexDirection: "row",
-    marginBottom: 12,
-  },
-  categoryPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 14,
-  },
-  categoryPillText: {
-    fontWeight: "900",
-    fontSize: 13,
+  formSubtitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 18,
   },
   card: {
     backgroundColor: "#FFFFFF",

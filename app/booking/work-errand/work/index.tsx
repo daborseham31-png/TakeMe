@@ -14,7 +14,13 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
-import { DirectionalScreen } from "../../../i18n/DirectionalPrimitives";
+import { getCategoryMeta } from "../../bookingsLib";
+import {
+  DirectionalRow,
+  DirectionalScreen,
+  DirectionalText,
+} from "../../../i18n/DirectionalPrimitives";
+import { translateCategoryLabel } from "../../../i18n/formatters";
 import { useLanguage } from "../../../i18n/LanguageProvider";
 import { ltrContentStyle, paddingEnd } from "../../../i18n/rtl";
 import DriverReviewsSection from "../../DriverReviewsSection";
@@ -69,6 +75,7 @@ const isTodayOrFuture = (dateText: string) => {
 export default function FindWorkScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
+  const meta = getCategoryMeta("workErrands");
   const [listings, setListings] = useState<JobListing[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -202,15 +209,22 @@ export default function FindWorkScreen() {
   return (
     <DirectionalScreen style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons
-            name={isRTL ? "arrow-forward" : "arrow-back"}
-            size={24}
-            color="#7A665C"
-          />
-        </Pressable>
+        <DirectionalRow style={styles.topRow}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons
+              name={isRTL ? "arrow-forward" : "arrow-back"}
+              size={24}
+              color="#7A665C"
+            />
+          </Pressable>
 
-        <Text style={styles.title}>{t("workErrand.findWorkTitle")}</Text>
+          <DirectionalRow style={[styles.categoryBadge, { backgroundColor: `${meta.color}18` }]}>
+            <Ionicons name={meta.icon} size={15} color={meta.color} />
+            <DirectionalText style={[styles.categoryBadgeText, { color: meta.color }]}>
+              {translateCategoryLabel("workErrands", meta.label, t)}
+            </DirectionalText>
+          </DirectionalRow>
+        </DirectionalRow>
 
         <Text style={styles.subtitle}>{t("workErrand.findWorkSubtitle")}</Text>
 
@@ -226,16 +240,7 @@ export default function FindWorkScreen() {
               <View key={listing.id} style={styles.card}>
                 <View style={styles.header}>
                   <View style={[styles.leftHeader, paddingEnd(10, isRTL)]}>
-                    <Text style={styles.name}>
-                      {listing.name}{" "}
-                      <Text style={styles.gender}>
-                        {listing.gender === "male" ? "♂" : "♀"}
-                      </Text>
-                    </Text>
-
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{listing.jobTypeEn}</Text>
-                    </View>
+                    <Text style={styles.name}>{listing.jobTypeEn}</Text>
                   </View>
 
                   <View style={styles.ratingBox}>
@@ -256,6 +261,15 @@ export default function FindWorkScreen() {
                 </View>
 
                 <Text style={styles.description}>{listing.descriptionEn}</Text>
+
+                <View style={styles.employerRow}>
+                  <Text style={styles.employerName}>
+                    {listing.name}{" "}
+                    <Text style={styles.gender}>
+                      {listing.gender === "male" ? "♂" : "♀"}
+                    </Text>
+                  </Text>
+                </View>
 
                 <View style={styles.detailsGrid}>
                   <View style={[styles.detail, paddingEnd(6, isRTL)]}>
@@ -370,18 +384,28 @@ const styles = StyleSheet.create({
     color: "#7A5C4B",
     fontWeight: "800",
   },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 6,
+  },
   backButton: {
     width: 45,
     height: 40,
     justifyContent: "center",
-    marginBottom: 6,
   },
-  title: {
-    fontSize: 30,
+  categoryBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+  },
+  categoryBadgeText: {
+    fontSize: 13.5,
     fontWeight: "900",
-    color: "#111827",
-    textAlign: "center",
-    marginTop: 5,
   },
   subtitle: {
     fontSize: 16,
@@ -433,24 +457,19 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "900",
     color: "#111827",
-    marginBottom: 8,
   },
   gender: {
     color: "#7A665C",
     fontSize: 14,
     fontWeight: "400",
   },
-  badge: {
-    alignSelf: "flex-start",
-    backgroundColor: "#2F9B95",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
+  employerRow: {
+    marginBottom: 16,
   },
-  badgeText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "800",
+  employerName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#7A5C4B",
   },
   ratingBox: {
     flexDirection: "row",
@@ -470,7 +489,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#7A5C4B",
     lineHeight: 20,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   detailsGrid: {
     flexDirection: "row",

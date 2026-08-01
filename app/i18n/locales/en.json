@@ -895,7 +895,7 @@
     "categories": {
       "school": {
         "title": "School",
-        "desc": "Rides to school or university"
+        "desc": "Rides to school"
       },
       "workErrands": {
         "title": "Work & Errands",
@@ -1160,10 +1160,10 @@
     "cannotCancelInvalidDeparture": "This trip's date or time is unavailable, so it can't be cancelled here right now."
   },
   "school": {
-    "headerTitle": "School Ride",
-    "subtitle": "Book a ride to school or university",
-    "schoolNameLabel": "School / University Name",
-    "schoolNamePlaceholder": "Select the school or university",
+    "headerTitle": "School",
+    "subtitle": "Book a ride to school",
+    "schoolNameLabel": "School Name",
+    "schoolNamePlaceholder": "Select the school",
     "toPlaceholder": "Enter destination city"
   },
   "schoolTrip": {
