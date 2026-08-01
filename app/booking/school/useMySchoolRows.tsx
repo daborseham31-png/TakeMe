@@ -984,7 +984,7 @@ export default function useMySchoolRows({
         {legNeedsRating(booking) ? (
           <>
             <Pressable style={styles.rateButton} onPress={() => openRatingModal(booking)}>
-              <Ionicons name="star-outline" size={14} color="#F58220" />
+              <Ionicons name="star-outline" size={17} color="#FFFFFF" />
               <Text style={styles.rateButtonText}>{t("schoolTrip.rateDriverButton")}</Text>
             </Pressable>
 
@@ -2098,20 +2098,28 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   trackButtonText: { color: "#FFFFFF", fontWeight: "900", fontSize: 12.5 },
+  // Same size/shape as bookings.tsx's own primaryButton (Personal Ride's
+  // "Rate driver" button) — full-width, filled, same radius/padding/font —
+  // so this looks identical to Personal Ride instead of this card's
+  // otherwise-compact outlined action-button sizing.
   rateButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderColor: "#F58220",
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    alignSelf: "flex-start",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#F58220",
+    borderRadius: 14,
+    paddingVertical: 14,
     marginTop: 8,
   },
-  rateButtonText: { color: "#F58220", fontWeight: "900", fontSize: 12.5 },
-  rateDriverHint: { fontSize: 12, color: "#F58220", fontWeight: "600", marginTop: 6 },
+  rateButtonText: { color: "#FFFFFF", fontWeight: "900", fontSize: 15 },
+  rateDriverHint: {
+    color: "#F58220",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 8,
+  },
   // Same size/shape as bookings.tsx's own driver "Start Ride" button —
   // full-width, same radius/padding/font/disabled-gray — so "Start/Continue
   // Trip" looks identical to Personal Ride's "Start Ride".

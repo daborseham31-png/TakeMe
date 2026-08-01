@@ -60,6 +60,14 @@ import {
 } from "./driverViolationsLib";
 import { normalizeTime, timeToMinutes } from "../driver/create/driverHelpers";
 import { calculateDistanceKm } from "./homeFeedLib";
+import {
+  DriverRouteInput,
+  getRouteMatchesForCandidates,
+  isValidLatLng,
+  projectOntoCorridor,
+  RouteMatchResult,
+} from "./routeMatchLib";
+import { getSchoolTripRouteEndpoints } from "./schoolRouteMatchLib";
 import { notify } from "./work-errand/workErrandLib";
 
 // ---------------------------------------------------------------------------
@@ -1356,6 +1364,40 @@ const fetchActiveSchoolTrips = async (
   return snap.docs.map((d) => normalizeSchoolTrip(d.id, d.data()));
 };
 
+// Temporary development-only diagnostics for a School candidate the local
+// route-matching algorithm rejected — never shown in the UI, never includes
+// student names/child codes/phone numbers/addresses, only derived matching
+// metrics plus the trip's own already-public schoolId/direction. Reuses
+// routeMatchLib.ts's own exported projectOntoCorridor rather than
+// reimplementing the projection math here, purely to surface the progress
+// values RouteMatchResult doesn't itself carry.
+const logRejectedSchoolRouteCandidate = (
+  trip: SchoolTrip,
+  match: RouteMatchResult,
+  origin: LatLng,
+  destination: LatLng,
+  pickup: LatLng,
+) => {
+  const pickupProjection = projectOntoCorridor(origin, destination, pickup);
+
+  // eslint-disable-next-line no-console
+  console.log("[routeMatch] rejected school candidate", {
+    tripId: trip.id,
+    schoolId: trip.schoolId,
+    direction: trip.direction,
+    rejectionReason: match.reason,
+    corridorDistanceKm: match.pickupDistanceFromRouteKm,
+    approximateDetourKm: match.approximateDetourKm,
+    detourRatio: match.detourRatio,
+    pickupProgress: pickupProjection.progress,
+    // D is never a separate point in this search today (see
+    // SchoolTripSearchCriteria's single `destination` field, which is
+    // really B here) — destination progress is always 1 (the corridor's
+    // own endpoint C), not worth a second projection call.
+    destinationProgress: 1,
+  });
+};
+
 const passesCapacityAndRoute = (
   trip: SchoolTrip,
   criteria: SchoolTripSearchCriteria,
@@ -1368,8 +1410,30 @@ const passesCapacityAndRoute = (
   // driver STARTS (fromLocation) or along the route to school. Return
   // (from_school): the parent's destination should be near where the driver
   // ENDS (toLocation) or along the route from school.
-  const routeStart = trip.direction === "to_school" ? trip.fromLocation : trip.schoolLocation;
-  const routeEnd = trip.direction === "to_school" ? trip.schoolLocation : trip.toLocation;
+  const { origin: routeStart, destination: routeEnd } = getSchoolTripRouteEndpoints(trip);
+
+  // Local route-matching (see routeMatchLib.ts) — reused, never duplicated.
+  // Runs the SAME corridor/direction/approximate-detour pipeline Personal
+  // Ride's driverresults.tsx uses, whenever every coordinate involved is a
+  // valid number. Falls back to the original near-route-line check
+  // (isDestinationNearRoute) only when a coordinate is genuinely
+  // missing/invalid — never a hard rejection just because a coordinate
+  // happens to be absent, and never a crash/empty screen either.
+  if (isValidLatLng(routeStart) && isValidLatLng(routeEnd) && isValidLatLng(criteria.destination)) {
+    const candidate: DriverRouteInput = {
+      tripId: trip.id,
+      origin: routeStart,
+      destination: routeEnd,
+    };
+
+    const [result] = getRouteMatchesForCandidates([candidate], { pickup: criteria.destination });
+
+    if (__DEV__ && !result.eligible) {
+      logRejectedSchoolRouteCandidate(trip, result, routeStart, routeEnd, criteria.destination);
+    }
+
+    return result.eligible;
+  }
 
   return isDestinationNearRoute(criteria.destination, routeStart, routeEnd);
 };

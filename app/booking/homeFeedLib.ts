@@ -31,6 +31,13 @@ import {
 import { db } from "../../firebase";
 import { LocationNames } from "./locationSearch";
 import type { PickupLocation } from "./PickupLocationPicker";
+import {
+  DriverRouteInput,
+  getRouteMatchesForCandidates,
+  LatLng,
+  PassengerRouteQuery,
+  RouteMatchResult,
+} from "./routeMatchLib";
 import { normalizeSchoolTripDirection } from "./schoolTripsLib";
 import { getDriverDayTrips, WeeklyDriverDay } from "./weeklyBookingLib";
 
@@ -114,6 +121,15 @@ export type FeedItem = {
   // "nearby" and only ever show up in "All rides".
   originLatitude: number | null;
   originLongitude: number | null;
+
+  // Destination coordinates — "personal"/"school" only (driverRoutes.toLat/
+  // toLng, already written at creation by RideForm.tsx). Used by
+  // routeMatchLib.ts's fully local/free geometric matching (straight-line
+  // corridor A->C, no paid routing service) — see toDriverRouteInput below.
+  // Null for every other category and for any driverRoutes doc that
+  // predates coordinate-saving.
+  destinationLatitude: number | null;
+  destinationLongitude: number | null;
 
   isWeekly: boolean;
   // Only the days that still have room — used for the weekly day-picker.
@@ -328,6 +344,9 @@ const normalizeDriverRouteItem = (id: string, data: any): FeedItem | null => {
     originLatitude: typeof data.fromLat === "number" ? data.fromLat : null,
     originLongitude: typeof data.fromLng === "number" ? data.fromLng : null,
 
+    destinationLatitude: typeof data.toLat === "number" ? data.toLat : null,
+    destinationLongitude: typeof data.toLng === "number" ? data.toLng : null,
+
     isWeekly,
     availableWeeklyDays,
 
@@ -392,6 +411,9 @@ const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
 
     originLatitude: typeof data.locationLat === "number" ? data.locationLat : null,
     originLongitude: typeof data.locationLng === "number" ? data.locationLng : null,
+
+    destinationLatitude: null,
+    destinationLongitude: null,
 
     isWeekly: false,
     availableWeeklyDays: [],
@@ -471,6 +493,9 @@ const normalizeErrandJobItem = (
 
     originLatitude: typeof data.locationLat === "number" ? data.locationLat : null,
     originLongitude: typeof data.locationLng === "number" ? data.locationLng : null,
+
+    destinationLatitude: null,
+    destinationLongitude: null,
 
     isWeekly: false,
     availableWeeklyDays: [],
@@ -558,6 +583,9 @@ const normalizeSchoolTripItem = (id: string, data: any): FeedItem | null => {
       typeof data.fromLocation?.latitude === "number" ? data.fromLocation.latitude : null,
     originLongitude:
       typeof data.fromLocation?.longitude === "number" ? data.fromLocation.longitude : null,
+
+    destinationLatitude: null,
+    destinationLongitude: null,
 
     isWeekly: false,
     availableWeeklyDays: [],
@@ -656,6 +684,88 @@ export const filterNearbyItems = (
       item.distanceKm !== null && item.distanceKm <= NEARBY_RIDE_RADIUS_KM,
   );
 
+// ---------------------------------------------------------------------------
+// Route-based / detour-aware matching (see routeMatchLib.ts) — fully local,
+// free, synchronous geometric approximation (straight-line corridor A->C,
+// Haversine distance — no network call, no API key, no paid routing
+// service). An ADDITIVE layer on top of the plain origin-distance filtering
+// above, scoped to "personal" listings only. Every other category, and any
+// "personal" item missing origin/destination coordinates, keeps using the
+// existing distanceKm <= NEARBY_RIDE_RADIUS_KM rule above — unchanged
+// fallback behavior, not a new rule (requirement: preserve legacy behavior
+// only when coordinates are missing).
+// ---------------------------------------------------------------------------
+
+export type FeedItemWithRouteMatch = FeedItemWithDistance & {
+  routeMatch: RouteMatchResult | null;
+};
+
+// Maps a FeedItem into routeMatchLib.ts's minimal DriverRouteInput shape.
+// Only ever meaningful for "personal" (driverRoutes-backed) items with real
+// origin+destination coordinates — everything else maps to null, and the
+// caller below simply never computes a route match for it (falls back to
+// the plain distance rule instead).
+const toDriverRouteInput = (item: FeedItem): DriverRouteInput | null => {
+  if (item.category !== "personal") return null;
+  if (item.originLatitude === null || item.originLongitude === null) return null;
+  if (item.destinationLatitude === null || item.destinationLongitude === null) return null;
+
+  return {
+    tripId: item.id,
+    origin: { latitude: item.originLatitude, longitude: item.originLongitude },
+    destination: { latitude: item.destinationLatitude, longitude: item.destinationLongitude },
+  };
+};
+
+// Computes local route matches for every eligible "personal" item in
+// `items` against the passenger's pickup point. Returns a Map from tripId ->
+// RouteMatchResult; an item with no entry (every non-"personal" category, or
+// a "personal" item missing coordinates) simply wasn't a candidate. Pure and
+// synchronous — safe to call directly from a render-time useMemo, never
+// throws.
+export function computeRouteMatchesForPersonalRides(
+  items: FeedItem[],
+  passengerPickup: LatLng,
+): Map<string, RouteMatchResult> {
+  const candidates = items
+    .map(toDriverRouteInput)
+    .filter((input): input is DriverRouteInput => input !== null);
+
+  if (candidates.length === 0) return new Map();
+
+  const query: PassengerRouteQuery = { pickup: passengerPickup };
+  const results = getRouteMatchesForCandidates(candidates, query);
+
+  return new Map(results.map((result) => [result.tripId, result]));
+}
+
+// Merges a previously-computed route-match Map onto each item — never
+// mutates the input array. Items with no entry get routeMatch: null.
+export const attachRouteMatches = (
+  items: FeedItemWithDistance[],
+  routeMatches: Map<string, RouteMatchResult>,
+): FeedItemWithRouteMatch[] =>
+  items.map((item) => ({ ...item, routeMatch: routeMatches.get(item.id) || null }));
+
+// Nearby-eligibility, now route-match-aware: a "personal" item with a route
+// match uses that match's own `eligible` flag, which already encodes the
+// corridor/direction/detour checks — crucially, NEVER origin-to-pickup
+// distance, so a driver whose origin is far from the passenger can still
+// show up here as long as the pickup is close to the driver's A->C corridor
+// and the resulting approximate detour is small. Every other item (every
+// other category, or a "personal" item with no usable coordinates) falls
+// back to the plain distanceKm rule.
+export const filterNearbyOrRouteMatchedItems = (
+  items: FeedItemWithRouteMatch[],
+): FeedItemWithRouteMatch[] =>
+  items.filter((item) => {
+    if (item.category === "personal" && item.routeMatch) {
+      return item.routeMatch.eligible;
+    }
+
+    return item.distanceKm !== null && item.distanceKm <= NEARBY_RIDE_RADIUS_KM;
+  });
+
 // Combines a feed item's real scheduled date + START time into one numeric
 // timestamp, using explicit year/month/day/hour/minute components (never
 // `new Date(dateString)`) so it parses identically on iOS and Android — same
@@ -692,10 +802,8 @@ const getFeedItemStartTimestamp = (item: FeedItem): number => {
 // carried on every item for DISPLAY only; it must never affect this order.
 // Tie-break (same date+start time) falls back to createdAt, then id, purely
 // for a stable/deterministic order — never the primary key.
-export const sortFeedItems = (
-  items: FeedItemWithDistance[],
-): FeedItemWithDistance[] =>
-  [...items].sort((a, b) => {
+export function sortFeedItems<T extends FeedItemWithDistance>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
     const aTime = getFeedItemStartTimestamp(a);
     const bTime = getFeedItemStartTimestamp(b);
     if (aTime !== bTime) return aTime - bTime;
@@ -706,6 +814,7 @@ export const sortFeedItems = (
 
     return a.id.localeCompare(b.id);
   });
+}
 
 export const FEED_PAGE_SIZE = 20;
 
@@ -864,17 +973,28 @@ export const buildQuickRideNav = (
 // getDriverDayTrips/WeeklyDriverDay in weeklyBookingLib.ts, which already
 // carry dayKey/dayName/date/time/price; only `seats` is overridden here to
 // the passenger's own request (defaulting to 1, same reasoning as above).
+// childEntries — School only (see home.tsx's dayPickerChildEntries/
+// handleChildSelectionContinue's weekly branch) — one seat per selected
+// child on EVERY chosen day, in the same { localId, childId, childName }
+// shape buildSchoolTripNav already forwards; ride-payment.tsx's existing
+// isSchool-gated createWeeklyBookings call already writes childId/
+// childName/childEntries onto every generated day's booking doc, so nothing
+// downstream of this needs to change. Always undefined/empty for weekly
+// Personal Ride.
 export const buildWeeklyRideNav = (
   item: FeedItem,
   chosenDays: WeeklyDriverDay[],
   pickupLocation: PickupLocation,
+  childEntries?: { localId: string; childId?: string; childName?: string }[] | null,
 ): FeedNavTarget => {
+  const seatsPerDay = childEntries && childEntries.length > 0 ? childEntries.length : 1;
+
   const selectedWeeklyDays = chosenDays.map((day) => ({
     dayKey: day.dayKey,
     dayName: day.dayName,
     date: day.date,
     time: day.time,
-    seats: 1,
+    seats: seatsPerDay,
     price: day.price,
   }));
 
@@ -903,6 +1023,10 @@ export const buildWeeklyRideNav = (
       remainingWeeklyDays: JSON.stringify([]),
 
       ...pickupNavParams(pickupLocation),
+
+      ...(childEntries && childEntries.length > 0
+        ? { childEntries: JSON.stringify(childEntries) }
+        : {}),
 
       source: "home_feed",
     },
@@ -936,9 +1060,16 @@ export const buildErrandBookNav = (item: FeedItem): FeedNavTarget => ({
 // the pickup field for a return search either: the real pickup point is the
 // school itself, not something the passenger picks (see trip-confirm.tsx's
 // own comment on this).
+// childEntries — the child(ren) picked on Home's own child-select step (see
+// home.tsx's childSelectItem/handleChildSelectionContinue) — forwarded in
+// the exact { localId, childId, childName } shape trip-confirm.tsx already
+// parses from DirectionSearchForm's flow (SchoolBookingChildEntry,
+// schoolTripsLib.ts), so seat count/child-linking downstream (ride-payment,
+// the booking write) work identically regardless of entry point.
 export const buildSchoolTripNav = (
   item: FeedItem,
   pickupLocation: PickupLocation | null,
+  childEntries?: { localId: string; childId?: string; childName?: string }[] | null,
 ): FeedNavTarget => ({
   pathname: "/booking/school/trip-confirm",
   params: {
@@ -946,5 +1077,8 @@ export const buildSchoolTripNav = (
     seats: "1",
     roundTrip: "false",
     ...(pickupLocation ? pickupNavParams(pickupLocation) : {}),
+    ...(childEntries && childEntries.length > 0
+      ? { childEntries: JSON.stringify(childEntries) }
+      : {}),
   },
 });

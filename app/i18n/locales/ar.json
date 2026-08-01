@@ -240,6 +240,7 @@
     "weeklyTripDays": "أيام الرحلة الأسبوعية",
     "chooseDaysLabel": "اختر الأيام",
     "weeklyHintRange": "يشمل الحجز الأسبوعي أسبوعًا واحدًا من الأحد إلى السبت. لا يمكن اختيار أيام مضت.",
+    "weeklyHintAnyDate": "اختر أي تاريخ قادم لكل يوم. لا يمكن اختيار أيام مضت.",
     "nextWeekAvailable": "أصبح حجز الأسبوع القادم متاحًا الآن.",
     "nextWeekOpensSaturday": "يفتح حجز الأسبوع القادم يوم السبت الساعة 07:00.",
     "thisWeek": "هذا الأسبوع",
@@ -375,6 +376,7 @@
     "loadingReviews": "جارٍ تحميل التقييمات...",
     "couldNotLoadReviews": "تعذّر تحميل التقييمات.",
     "noReviewsYet": "لا توجد تقييمات بعد.",
+    "noWrittenReviewsYet": "لا توجد تقييمات مكتوبة بعد.",
     "missingLanguageTitle": "لغة ناقصة",
     "missingLanguageMessage": "لغتك غير موجودة في ملفك الشخصي.",
     "tripCreated": "تم إنشاء رحلتك بنجاح.",
@@ -1336,7 +1338,12 @@
     "selectCityPlaceholder": "ابحث عن مدينة أو منطقة المدرسة",
     "cityRequired": "الرجاء اختيار منطقة المدرسة.",
     "selectCityFirstMessage": "اختر منطقة المدرسة أولاً",
-    "schoolCityMismatchError": "هذه المدرسة لا تنتمي إلى منطقة المدرسة المختارة."
+    "schoolCityMismatchError": "هذه المدرسة لا تنتمي إلى منطقة المدرسة المختارة.",
+    "selectChildScreenTitle": "لمن هذه الرحلة؟",
+    "selectChildScreenSubtitle": "اختر الطفل أو الأطفال الذين تخص هذه الرحلة المدرسية.",
+    "selectedChildrenCount_one": "تم اختيار {{count}}",
+    "selectedChildrenCount_other": "تم اختيار {{count}}",
+    "noChildrenAddedTitle": "لم تتم إضافة أي أطفال بعد"
   },
   "driverCreate": {
     "newTripTitle": "إنشاء رحلة جديدة",
@@ -1699,6 +1706,8 @@
     "submitReportButton": "إرسال البلاغ",
     "payCashDirectlyMessage": "يرجى دفع ₪{{amount}} مباشرة إلى {{name}} نقدًا.",
     "bitStaysPendingNote": "تبقى الدفعة معلقة حتى يتم تأكيدها خارج التطبيق.",
+    "newRequestNotifTitle": "طلب مساعدة على الطريق قريب منك",
+    "newRequestNotifMessage": "راكب بالقرب من مسارك بحاجة إلى مساعدة.",
     "helperOnTheWayNotifTitle": "مساعدك في الطريق",
     "helperOnTheWayNotifMessage": "{{name}} في الطريق لمساعدتك.",
     "helperArrivedNotifTitle": "وصل مساعدك",

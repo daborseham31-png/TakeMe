@@ -161,24 +161,41 @@ export default function VerifyLicenseScreen() {
 
     setSubmitting(true);
 
+    // Collection path, doc id, and payload are all fixed up front so the
+    // catch block below can log EXACTLY what was attempted — never just the
+    // fact that it failed.
+    const collectionPath = "users";
+    const docId = user.uid;
+    const writeData = {
+      isDriver: true,
+      licenseIsValid: true,
+      licenseNumber: licenseResult.licenseNumber,
+      licenseExpiryDate: licenseResult.expiryDate,
+      licenseCategories: licenseResult.licenseCategories,
+      spokenLanguages,
+      driverVerificationStatus: "ai_verified",
+      updatedAt: serverTimestamp(),
+    };
+
     try {
-      await setDoc(
-        doc(db, "users", user.uid),
-        {
-          isDriver: true,
-          licenseIsValid: true,
-          licenseNumber: licenseResult.licenseNumber,
-          licenseExpiryDate: licenseResult.expiryDate,
-          licenseCategories: licenseResult.licenseCategories,
-          spokenLanguages,
-          driverVerificationStatus: "ai_verified",
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
+      await setDoc(doc(db, collectionPath, docId), writeData, { merge: true });
 
       router.replace("/driver/add-route" as any);
     } catch (error: any) {
+      // Never swallow the original Firebase error — log everything needed
+      // to debug a "Missing or insufficient permissions" write: the exact
+      // path/doc/uid, the data that was attempted, and the SDK's own error
+      // code (e.g. "permission-denied"), not just error.message.
+      console.log("verify-license write failed", {
+        feature: "verify-license.handleVerify",
+        collectionPath,
+        docId,
+        authUid: auth.currentUser?.uid,
+        data: writeData,
+        code: error?.code,
+        message: error?.message,
+      });
+
       Alert.alert(t("common.error"), error?.message || t("validation.couldNotSaveLicense"));
     } finally {
       setSubmitting(false);

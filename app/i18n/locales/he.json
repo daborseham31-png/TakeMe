@@ -232,6 +232,7 @@
     "weeklyTripDays": "ימי הנסיעה השבועית",
     "chooseDaysLabel": "בחר ימים",
     "weeklyHintRange": "הזמנה שבועית מכסה שבוע אחד מראשון עד שבת. לא ניתן לבחור ימים שכבר עברו.",
+    "weeklyHintAnyDate": "בחרו כל תאריך עתידי לכל יום. לא ניתן לבחור ימים שכבר עברו.",
     "nextWeekAvailable": "הזמנת השבוע הבא זמינה כעת.",
     "nextWeekOpensSaturday": "הזמנת השבוע הבא נפתחת בשבת בשעה 07:00.",
     "thisWeek": "השבוע",
@@ -368,6 +369,7 @@
     "loadingReviews": "טוען ביקורות...",
     "couldNotLoadReviews": "לא ניתן היה לטעון את הביקורות.",
     "noReviewsYet": "אין עדיין ביקורות.",
+    "noWrittenReviewsYet": "אין עדיין ביקורות כתובות.",
     "missingLanguageTitle": "שפה חסרה",
     "missingLanguageMessage": "השפה שלך חסרה בפרופיל שלך.",
     "tripCreated": "הנסיעה שלך נוצרה בהצלחה.",
@@ -1326,7 +1328,12 @@
     "selectCityPlaceholder": "חפש את עיר/אזור בית הספר",
     "cityRequired": "נא לבחור את אזור בית הספר.",
     "selectCityFirstMessage": "בחר את אזור בית הספר תחילה",
-    "schoolCityMismatchError": "בית הספר הזה אינו שייך לאזור בית הספר שנבחר."
+    "schoolCityMismatchError": "בית הספר הזה אינו שייך לאזור בית הספר שנבחר.",
+    "selectChildScreenTitle": "עבור מי הנסיעה הזו?",
+    "selectChildScreenSubtitle": "בחרו את הילד או הילדים שעבורם מיועדת הזמנת נסיעת בית הספר הזו.",
+    "selectedChildrenCount_one": "{{count}} נבחרו",
+    "selectedChildrenCount_other": "{{count}} נבחרו",
+    "noChildrenAddedTitle": "עדיין לא נוספו ילדים"
   },
   "driverCreate": {
     "newTripTitle": "יצירת נסיעה חדשה",
@@ -1686,6 +1693,8 @@
     "submitReportButton": "שלח דיווח",
     "payCashDirectlyMessage": "יש לשלם ₪{{amount}} ישירות ל-{{name}} במזומן.",
     "bitStaysPendingNote": "התשלום נשאר ממתין עד שיאושר מחוץ לאפליקציה.",
+    "newRequestNotifTitle": "בקשת עזרה בדרכים בקרבתך",
+    "newRequestNotifMessage": "נוסע בקרבת המסלול שלך זקוק לעזרה.",
     "helperOnTheWayNotifTitle": "העוזר שלך בדרך",
     "helperOnTheWayNotifMessage": "{{name}} בדרך לעזור לך.",
     "helperArrivedNotifTitle": "העוזר שלך הגיע",

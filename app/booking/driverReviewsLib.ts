@@ -70,10 +70,13 @@ export const loadDriverReviews = async (
             data.passengerName || data.reviewerName || data.userName || "",
           ).trim() || "Passenger",
         rating: Number(data.rating || data.stars || 0),
-        comment:
-          String(
-            data.comment || data.reviewComment || data.text || "",
-          ).trim() || "No comment.",
+        // Left as "" when the passenger left no written comment — callers
+        // decide how to display that (e.g. DriverReviewsSection skips
+        // commentless reviews and falls back to a "no written reviews"
+        // message instead of rendering a blank/placeholder line).
+        comment: String(
+          data.comment || data.reviewComment || data.text || "",
+        ).trim(),
         createdAtSeconds: getCreatedAtSeconds(data.createdAt),
       };
     })

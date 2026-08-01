@@ -229,6 +229,7 @@
     "weeklyTripDays": "Weekly Trip Days",
     "chooseDaysLabel": "Choose Days",
     "weeklyHintRange": "Weekly booking covers one Sunday-to-Saturday week at a time. Past days can't be selected.",
+    "weeklyHintAnyDate": "Choose any upcoming date for each day. Past days can't be selected.",
     "nextWeekAvailable": "Next week booking is now available.",
     "nextWeekOpensSaturday": "Next week booking opens Saturday at 07:00.",
     "thisWeek": "This week",
@@ -364,6 +365,7 @@
     "loadingReviews": "Loading reviews...",
     "couldNotLoadReviews": "Could not load reviews.",
     "noReviewsYet": "No reviews yet.",
+    "noWrittenReviewsYet": "No written reviews yet.",
     "missingLanguageTitle": "Missing language",
     "missingLanguageMessage": "Your language is missing from your account profile.",
     "tripCreated": "Your trip was created successfully.",
@@ -1321,7 +1323,12 @@
     "selectCityPlaceholder": "Search for the school's city or area",
     "cityRequired": "Please select the school area.",
     "selectCityFirstMessage": "Select the school area first",
-    "schoolCityMismatchError": "That school does not belong to the selected school area."
+    "schoolCityMismatchError": "That school does not belong to the selected school area.",
+    "selectChildScreenTitle": "Who is this ride for?",
+    "selectChildScreenSubtitle": "Select the child or children this School Ride booking is for.",
+    "selectedChildrenCount_one": "{{count}} selected",
+    "selectedChildrenCount_other": "{{count}} selected",
+    "noChildrenAddedTitle": "No children added yet"
   },
   "driverCreate": {
     "newTripTitle": "Create a New Trip",
@@ -1680,6 +1687,8 @@
     "submitReportButton": "Submit Report",
     "payCashDirectlyMessage": "Please pay ₪{{amount}} directly to {{name}} in cash.",
     "bitStaysPendingNote": "Payment stays pending until it is confirmed outside the app.",
+    "newRequestNotifTitle": "Roadside help nearby",
+    "newRequestNotifMessage": "A passenger near your route needs help.",
     "helperOnTheWayNotifTitle": "Your helper is on the way",
     "helperOnTheWayNotifMessage": "{{name}} is on the way to help you.",
     "helperArrivedNotifTitle": "Your helper has arrived",

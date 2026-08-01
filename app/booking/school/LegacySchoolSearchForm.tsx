@@ -10,12 +10,16 @@
 // one-time booking already has its own dedicated tab ("By direction")
 // one level up, and having it duplicated inside a tab literally labeled
 // "Weekly recurring" was confusing UI, not a distinct feature. This screen
-// is now always in weekly mode; validateWeeklyRows/weeklyBookingLib.ts's
-// own rules (past-day/next-week-window/etc.) are unchanged.
+// is now always in weekly mode. The calendar (WeeklyDaysCard) uses
+// calendarVariant="anyDate" — same per-row native date picker as every
+// other weekly flow, just without the current/next-week clamp, so any
+// today-or-future date can be picked; validated with
+// validateWeeklyRowsAnyFutureDate (weeklyBookingLib.ts), the same
+// any-future-date check Personal Ride's weekly booking already uses.
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
 import {
   Alert,
@@ -33,10 +37,11 @@ import { useLanguage } from "../../i18n/LanguageProvider";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import IsraelLocationAutocomplete from "../IsraelLocationAutocomplete";
 import { IsraelLocation } from "../israelLocations";
+import PickupLocationPicker, { PickupLocation } from "../PickupLocationPicker";
 import SchoolAutocomplete from "../SchoolAutocomplete";
 import { getLocalizedSchoolName, SchoolLocation } from "../schools";
 import WeeklyDaysCard from "../../driver/create/WeeklyDaysCard";
-import { validateWeeklyRows, WeekDayRow } from "../weeklyBookingLib";
+import { validateWeeklyRowsAnyFutureDate, WeekDayRow } from "../weeklyBookingLib";
 
 const SCHOOL_CATEGORY_META = getCategoryMeta("school");
 
@@ -50,6 +55,15 @@ const LANGUAGES_LIST = [
 export default function LegacySchoolSearchForm() {
   const { t } = useTranslation();
   const { isRTL, language } = useLanguage();
+
+  // The child(ren) already confirmed on select-child.tsx before this screen
+  // ever mounted (see ride-category.tsx) — this form and DirectionSearchForm
+  // read the same `childEntries` route param (both are rendered inside the
+  // same /booking/school route, not separate routes). This legacy/weekly
+  // flow has no per-row child picker of its own, so the roster is simply
+  // carried straight through to /booking/driverresults unchanged.
+  const params = useLocalSearchParams<{ childEntries?: string }>();
+  const childEntriesParam = String(params.childEntries || "");
 
   const [fromAddress, setFromAddress] = useState("");
   const [schoolLocation, setSchoolLocation] = useState("");
@@ -67,6 +81,16 @@ export default function LegacySchoolSearchForm() {
   const [schoolQuery, setSchoolQuery] = useState("");
   const [selectedSchool, setSelectedSchool] = useState<SchoolLocation | null>(null);
   const [schoolError, setSchoolError] = useState("");
+
+  // The student's real GPS pickup/home point (B — see routeMatchLib.ts and
+  // PickupLocationPicker.tsx, the exact same shared component Personal Ride
+  // already uses) — separate from fromAddress/fromPlace above, which stay
+  // pure city-matching text. Lets driverresults.tsx run the local
+  // route-matching algorithm for weekly School searches instead of only
+  // exact from/to text matching, without ever exposing latitude/longitude
+  // fields to the user.
+  const [pickupLocation, setPickupLocation] = useState<PickupLocation | null>(null);
+  const [pickerVisible, setPickerVisible] = useState(false);
 
   const handleFromChange = (text: string) => {
     setFromAddress(text);
@@ -136,6 +160,11 @@ export default function LegacySchoolSearchForm() {
       return;
     }
 
+    if (!pickupLocation) {
+      Alert.alert(t("auth.missingDetails"), t("pickupLocation.pickupLocationRequired"));
+      return;
+    }
+
     const baseParams: Record<string, string> = {
       category: "school",
       schoolName: getLocalizedSchoolName(selectedSchool, language),
@@ -155,9 +184,18 @@ export default function LegacySchoolSearchForm() {
       }),
       genderPref,
       languages: selectedLanguages.join(","),
+      childEntries: childEntriesParam,
+      // The student's real GPS pickup point (B) — see routeMatchLib.ts.
+      // driverresults.tsx already reads these exact param names for both
+      // Personal Ride and (legacy weekly) School Ride; never rendered as
+      // raw numbers anywhere in this form's own UI.
+      pickupLat: String(pickupLocation.latitude),
+      pickupLng: String(pickupLocation.longitude),
+      pickupAddress: pickupLocation.address,
+      pickupSource: pickupLocation.source,
     };
 
-    const cleanedDays = validateWeeklyRows(weeklyRows, {
+    const cleanedDays = validateWeeklyRowsAnyFutureDate(weeklyRows, {
       requirePrice: false,
     });
 
@@ -182,6 +220,7 @@ export default function LegacySchoolSearchForm() {
   };
 
   return (
+    <>
     <KeyboardAvoidingWrapper>
     <ScrollView
       contentContainerStyle={styles.scroll}
@@ -243,6 +282,17 @@ export default function LegacySchoolSearchForm() {
           error={schoolError}
         />
 
+        <Text style={[styles.label, isRTL && styles.textRTL]}>
+          {t("pickupLocation.fieldLabel")}
+        </Text>
+        <Pressable style={styles.pickupRow} onPress={() => setPickerVisible(true)}>
+          <Ionicons name="location-outline" size={18} color="#8B7B6B" />
+          <Text style={styles.pickupRowText} numberOfLines={1}>
+            {pickupLocation?.address || t("pickupLocation.notSelectedPlaceholder")}
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color="#C7B9AC" />
+        </Pressable>
+
         <View style={styles.sectionDivider} />
 
         <WeeklyDaysCard
@@ -251,6 +301,7 @@ export default function LegacySchoolSearchForm() {
           defaultTime="07:30"
           mode="passenger"
           title={t("rides.weeklyTripDays")}
+          calendarVariant="anyDate"
         />
       </View>
 
@@ -327,6 +378,13 @@ export default function LegacySchoolSearchForm() {
       </Pressable>
     </ScrollView>
     </KeyboardAvoidingWrapper>
+
+    <PickupLocationPicker
+      visible={pickerVisible}
+      onClose={() => setPickerVisible(false)}
+      onSelect={setPickupLocation}
+    />
+    </>
   );
 }
 
@@ -385,6 +443,22 @@ const styles = StyleSheet.create({
   textRTL: {
     textAlign: "right",
     writingDirection: "rtl",
+  },
+  pickupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#FFFDFC",
+  },
+  pickupRowText: {
+    flex: 1,
+    color: "#111827",
+    fontWeight: "700",
   },
   optionRow: {
     flexDirection: "row",

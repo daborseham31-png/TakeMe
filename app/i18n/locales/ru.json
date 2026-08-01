@@ -235,6 +235,7 @@
     "weeklyTripDays": "Дни еженедельной поездки",
     "chooseDaysLabel": "Выбрать дни",
     "weeklyHintRange": "Еженедельное бронирование охватывает одну неделю (с воскресенья по субботу). Прошедшие дни выбрать нельзя.",
+    "weeklyHintAnyDate": "Выберите любую будущую дату для каждого дня. Прошедшие дни выбрать нельзя.",
     "nextWeekAvailable": "Бронирование на следующую неделю уже доступно.",
     "nextWeekOpensSaturday": "Бронирование на следующую неделю откроется в субботу в 07:00.",
     "thisWeek": "Эта неделя",
@@ -373,6 +374,7 @@
     "loadingReviews": "Загрузка отзывов...",
     "couldNotLoadReviews": "Не удалось загрузить отзывы.",
     "noReviewsYet": "Пока нет отзывов.",
+    "noWrittenReviewsYet": "Пока нет письменных отзывов.",
     "missingLanguageTitle": "Отсутствует язык",
     "missingLanguageMessage": "В профиле вашего аккаунта не указан язык.",
     "tripCreated": "Ваша поездка успешно создана.",
@@ -1332,7 +1334,12 @@
     "selectCityPlaceholder": "Найдите город или район школы",
     "cityRequired": "Пожалуйста, выберите район школы.",
     "selectCityFirstMessage": "Сначала выберите район школы",
-    "schoolCityMismatchError": "Эта школа не относится к выбранному району школы."
+    "schoolCityMismatchError": "Эта школа не относится к выбранному району школы.",
+    "selectChildScreenTitle": "Для кого эта поездка?",
+    "selectChildScreenSubtitle": "Выберите ребёнка или детей, для которых оформляется эта школьная поездка.",
+    "selectedChildrenCount_one": "Выбрано: {{count}}",
+    "selectedChildrenCount_other": "Выбрано: {{count}}",
+    "noChildrenAddedTitle": "Дети ещё не добавлены"
   },
   "driverCreate": {
     "newTripTitle": "Создать новую поездку",
@@ -1693,6 +1700,8 @@
     "submitReportButton": "Отправить жалобу",
     "payCashDirectlyMessage": "Пожалуйста, заплатите ₪{{amount}} напрямую {{name}} наличными.",
     "bitStaysPendingNote": "Платёж остаётся в ожидании, пока не будет подтверждён вне приложения.",
+    "newRequestNotifTitle": "Рядом нужна помощь на дороге",
+    "newRequestNotifMessage": "Пассажир рядом с вашим маршрутом нуждается в помощи.",
     "helperOnTheWayNotifTitle": "Ваш помощник в пути",
     "helperOnTheWayNotifMessage": "{{name}} едет к вам на помощь.",
     "helperArrivedNotifTitle": "Ваш помощник прибыл",

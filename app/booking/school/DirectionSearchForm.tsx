@@ -23,8 +23,8 @@
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
@@ -158,6 +158,59 @@ export default function DirectionSearchForm() {
     const unsub = subscribeMyChildren((next) => setMyChildren(next.filter((c) => c.active)));
     return unsub;
   }, []);
+
+  // The child(ren) the passenger already confirmed on select-child.tsx,
+  // reached from Home BEFORE this form ever mounts (see ride-category.tsx) —
+  // both this form and LegacySchoolSearchForm.tsx read the same
+  // `childEntries` route param, since they're rendered inside the same
+  // /booking/school route rather than being separate routes themselves.
+  const params = useLocalSearchParams<{ childEntries?: string }>();
+
+  const incomingChildIds = useMemo(() => {
+    try {
+      const parsed = JSON.parse(String(params.childEntries || "[]"));
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((entry: any) => String(entry?.childId || ""))
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }, [params.childEntries]);
+
+  // Applied once the matching saved profiles are available — never
+  // reapplied afterward, so a later myChildren update (e.g. the parent
+  // edits an unrelated child) can't stomp on rows the parent has since
+  // customized (a different child re-picked, a return time changed, etc).
+  const appliedIncomingChildrenRef = useRef(false);
+
+  useEffect(() => {
+    if (appliedIncomingChildrenRef.current) return;
+    if (incomingChildIds.length === 0) return;
+
+    const resolved = incomingChildIds
+      .map((childId) => myChildren.find((c) => c.id === childId))
+      .filter((profile): profile is SchoolChild => !!profile);
+
+    // Wait for the live subscription to actually contain these children —
+    // an empty/partial myChildren snapshot (still loading) must never seed
+    // a shorter roster than what the passenger actually confirmed.
+    if (resolved.length !== incomingChildIds.length) return;
+
+    appliedIncomingChildrenRef.current = true;
+
+    setSeats(String(resolved.length));
+    setChildren(
+      resolved.map((profile) => ({
+        localId: makeLocalId(),
+        childId: profile.id,
+        name: profile.childName,
+        schoolId: profile.schoolId,
+        returnCode: profile.returnCode,
+        returnTime: finishTime,
+      })),
+    );
+  }, [incomingChildIds, myChildren, finishTime]);
 
   // Saved profiles for the CURRENTLY selected school only — a profile
   // belongs to one school (schoolChildrenLib.ts), so a child saved for a

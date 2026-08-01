@@ -32,10 +32,16 @@ type Props = {
   title?: string;
   // "singleWeek" (default) is the original behavior — a per-row native date
   // picker locked to the current/next Sunday-to-Saturday week, unchanged for
-  // School and passenger booking. "fullMonth" (Personal Ride weekly
-  // creation only) replaces that with a single full-month multi-select
-  // calendar with no week restriction — see MonthCalendarPicker.
-  calendarVariant?: "singleWeek" | "fullMonth";
+  // passenger Personal Ride weekly booking and driver route creation.
+  // "fullMonth" (Personal Ride weekly creation only) replaces that with a
+  // single full-month multi-select calendar with no week restriction — see
+  // MonthCalendarPicker. "anyDate" (Weekly School Booking only) keeps the
+  // exact same per-row native date picker as "singleWeek" — same component,
+  // same row layout, same buttons — just without the current/next-week
+  // clamp: minimumDate is today (past days stay disabled) and there is no
+  // maximumDate, so the native picker's own month navigation is no longer
+  // artificially cut off after one week.
+  calendarVariant?: "singleWeek" | "fullMonth" | "anyDate";
 };
 
 // Comfortably below Firestore's own 500-write batch limit — just a sanity
@@ -67,6 +73,7 @@ export default function WeeklyDaysCard({
   const [selectedWeek, setSelectedWeek] = useState<WeekChoice>("current");
   const [showMonthCalendar, setShowMonthCalendar] = useState(false);
   const isFullMonth = calendarVariant === "fullMonth";
+  const isAnyDate = calendarVariant === "anyDate";
 
   const nextWeekOpen = isNextWeekOpen();
 
@@ -91,8 +98,12 @@ export default function WeeklyDaysCard({
     return `${y}-${m}-${d}`;
   })();
   const effectiveStartYMD = startYMD > todayYMD ? startYMD : todayYMD;
-  const minimumDate = parseYMDToStartOfDay(effectiveStartYMD);
-  const maximumDate = parseYMDToEndOfDay(endYMD);
+  // "anyDate" only disables past days (today is the floor) and never caps
+  // how far forward the native picker can navigate.
+  const minimumDate = isAnyDate
+    ? parseYMDToStartOfDay(todayYMD)
+    : parseYMDToStartOfDay(effectiveStartYMD);
+  const maximumDate = isAnyDate ? undefined : parseYMDToEndOfDay(endYMD);
 
   const updateRow = (id: string, patch: Partial<WeekDayRow>) => {
     onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -132,12 +143,22 @@ export default function WeeklyDaysCard({
       return;
     }
 
-    if (value && !isDateInAllowedWeek(value, selectedWeek)) {
-      Alert.alert(
-        t("rides.bookingUnavailableTitle"),
-        t("rides.bookingUnavailableMessage"),
-      );
-      return;
+    if (value) {
+      if (isAnyDate) {
+        if (value < todayYMD) {
+          Alert.alert(
+            t("validation.invalidDateTitle"),
+            t("validation.chooseValidDateEveryDay"),
+          );
+          return;
+        }
+      } else if (!isDateInAllowedWeek(value, selectedWeek)) {
+        Alert.alert(
+          t("rides.bookingUnavailableTitle"),
+          t("rides.bookingUnavailableMessage"),
+        );
+        return;
+      }
     }
 
     updateRow(id, { date: value });
@@ -213,6 +234,8 @@ export default function WeeklyDaysCard({
             </Text>
           ) : null}
         </>
+      ) : isAnyDate ? (
+        <Text style={styles.hint}>{t("rides.weeklyHintAnyDate")}</Text>
       ) : (
         <>
           <Text style={styles.hint}>{t("rides.weeklyHintRange")}</Text>

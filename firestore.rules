@@ -217,6 +217,37 @@ service cloud.firestore {
           newStanding.get("lastSuspensionLiftedAt", null);
     }
 
+    // Become a Driver's license OCR self-submission (app/driver/
+    // verify-license.tsx's handleVerify) — the passenger's own client sets
+    // isDriver + a pending "ai_verified" status alongside the OCR'd license
+    // fields and the languages they picked, merged onto their own
+    // users/{uid} doc. This is a NARROW carve-out of the isDriver/
+    // driverVerificationStatus lock above (the isSelf(...) && unchanged(...)
+    // branch), not a replacement for it: the new status can only ever be
+    // "ai_verified" here — never "approved" (that stays admin-only, both via
+    // the isAdmin() branch and the create rule above), never "rejected"/
+    // "suspended", and role/accountStatus/cancellationStanding can never be
+    // touched by this branch since they're simply not in the allowed key
+    // list (hasOnly below). A driver whose license just expired re-verifies
+    // through this exact same write, so the OLD driverVerificationStatus is
+    // deliberately unconstrained — only the NEW value is ever checked.
+    function isValidSelfLicenseVerification(userId) {
+      let newData = request.resource.data;
+      return isSelf(userId) &&
+        newData.diff(resource.data).affectedKeys().hasOnly([
+          "isDriver", "licenseIsValid", "licenseNumber", "licenseExpiryDate",
+          "licenseCategories", "spokenLanguages", "driverVerificationStatus",
+          "updatedAt",
+        ]) &&
+        newData.isDriver == true &&
+        newData.licenseIsValid == true &&
+        newData.driverVerificationStatus == "ai_verified" &&
+        newData.licenseNumber is string &&
+        newData.licenseExpiryDate is string &&
+        newData.licenseCategories is list &&
+        newData.spokenLanguages is list;
+    }
+
     // ---------------------------------------------------------------
     // Roadside Help — helper stage machine (Start Driving -> I've Arrived ->
     // Start Help -> Finish Help -> customer Confirm Completion -> cash-only
@@ -453,6 +484,8 @@ service cloud.firestore {
         // never touch lastSuspensionLiftedAt, which only
         // liftDriverCancellationSuspension (admin-only call site) sets.
         isValidSelfViolationStandingUpdate(userId)
+      ) || (
+        isValidSelfLicenseVerification(userId)
       );
 
       allow delete: if isAdmin() && request.auth.uid != userId;
