@@ -75,6 +75,10 @@ export default function RideCategoryScreen() {
   return (
     <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name={isRTL ? "arrow-forward" : "arrow-back"} size={24} color="#7C5F46" />
+        </Pressable>
+
         <Text style={styles.title}>{t("rideCategory.title")}</Text>
 
         <Text style={styles.subtitle}>{t("rideCategory.subtitle")}</Text>
@@ -121,8 +125,14 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: 20,
-    paddingTop: 60,
+    paddingTop: 50,
     paddingBottom: 40,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: "center",
+    marginBottom: 10,
   },
   title: {
     fontSize: 30,
