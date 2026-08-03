@@ -63,6 +63,7 @@ import {
   SchoolChildError,
 } from "./schoolChildren";
 import { lookupSchoolKiosk } from "./schoolKiosk";
+import { runNoShowDetection } from "./noShowDetection";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -440,6 +441,26 @@ const handleSchoolKioskLookup = async (request: Request, env: Env): Promise<Resp
 };
 
 export default {
+  // Driver no-show violation detection (see noShowDetection.ts's own header
+  // for the full trust model) — the cron schedule itself lives in
+  // wrangler.jsonc's `triggers.crons`. Local testing: `wrangler dev` exposes
+  // a `/cdn-cgi/handler/scheduled` route that invokes this exact handler
+  // without waiting for a real cron tick (see Wrangler's own
+  // `--test-scheduled` docs) — no separate debug HTTP route was added here
+  // to avoid an extra, always-live endpoint that could trigger real
+  // Firestore writes if ever hit unintentionally.
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      runNoShowDetection(env)
+        .then((summary) => {
+          console.log("noShowDetection run complete", summary);
+        })
+        .catch((error) => {
+          console.error("noShowDetection run failed", error instanceof Error ? error.name : "unknown");
+        }),
+    );
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });

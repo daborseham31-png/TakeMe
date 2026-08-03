@@ -130,12 +130,23 @@ export type AdminAuditAction =
   | "report_resolved"
   | "notification_sent"
   | "driver_cancellation_violation_excused"
-  | "driver_cancellation_suspension_lifted";
+  | "driver_cancellation_suspension_lifted"
+  | "appeal_approved"
+  | "appeal_rejected"
+  | "refund_confirmed";
 
 export type AdminAuditLogEntry = {
   adminId: string;
   action: AdminAuditAction;
-  targetType: "user" | "driver" | "ride" | "booking" | "report" | "notification";
+  targetType:
+    | "user"
+    | "driver"
+    | "ride"
+    | "booking"
+    | "report"
+    | "notification"
+    | "appeal"
+    | "violation";
   targetId: string;
   reason?: string;
 };

@@ -7,6 +7,16 @@
     "enabled": true,
   },
 
+  // Driver no-show violation detection (see src/noShowDetection.ts) — runs
+  // src/index.ts's `scheduled()` export every 5 minutes, independent of any
+  // user having the app open. This is the FIRST cron trigger in this
+  // project; after this change is deployed (`npx wrangler deploy` from
+  // cloudflare-worker/), confirm it's active via the Cloudflare dashboard's
+  // Workers > this worker > Triggers tab, or `npx wrangler deployments list`.
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+
   // School Kiosk static frontend (Phase 3 — see public/school-kiosk/). Served
   // directly by Cloudflare's static-asset layer for any path that matches a
   // real file here (GET /school-kiosk(/), /school-kiosk/style.css,

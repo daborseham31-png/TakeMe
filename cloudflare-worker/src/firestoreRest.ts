@@ -149,6 +149,14 @@ function toFirestoreValue(value: unknown): Record<string, unknown> {
   if (typeof value === "number") return { integerValue: String(Math.trunc(value)) };
   if (value instanceof Date) return { timestampValue: value.toISOString() };
   if (value === null || value === undefined) return { nullValue: null };
+  // Added for noShowDetection.ts's driverViolations writes (passengerIds,
+  // paymentMethods) — every element must itself be a supported scalar type
+  // (reusing this same function recursively); reading arrays back was
+  // already supported by fromFirestoreValue below, this is only the write
+  // side that was missing.
+  if (Array.isArray(value)) {
+    return { arrayValue: { values: value.map(toFirestoreValue) } };
+  }
   throw new Error("Unsupported Firestore value type.");
 }
 
@@ -294,6 +302,102 @@ export async function queryFirestoreDocuments(
       const id = name.slice(name.lastIndexOf("/") + 1);
       return { id, data: fromFirestoreFields(entry.document.fields || {}) };
     });
+}
+
+// ---------------------------------------------------------------------------
+// Bulk "field IN [...]" query, WITH pagination — added for
+// noShowDetection.ts's bulk booking fetch (see that file's header): instead
+// of one queryFirestoreDocuments call per candidate trip (which blew past
+// the Worker's per-invocation subrequest limit at ~50 candidates), this lets
+// a caller fetch every booking belonging to a bounded batch of trip ids in
+// ONE request. Firestore's IN operator supports at most 30 comparison
+// values, so callers must chunk their id list to <=30 per call (this
+// function throws loudly rather than silently dropping ids past 30, so a
+// caller that forgets to chunk fails fast instead of silently missing data).
+//
+// Pagination: `runQuery` has no separate page-token field — instead it's
+// bounded by an explicit `limit` and continued via a document-name cursor
+// (`orderBy __name__` + `startAt`), the standard Firestore REST pagination
+// pattern. IN queries don't require the orderBy to match the filtered field
+// (that constraint only applies to inequality/array-contains operators), so
+// ordering by `__name__` here needs no composite index — same "equality-only,
+// no composite index" property this file's header already documents for its
+// other queries. In practice a single ≤30-trip chunk's bookings will almost
+// always fit in one page; the loop below exists so a chunk that ever DOES
+// exceed one page is still read completely, never silently truncated.
+// ---------------------------------------------------------------------------
+
+export async function queryFirestoreDocumentsByIn(
+  env: Env,
+  collection: string,
+  fieldPath: string,
+  values: string[],
+  pageSize = 300,
+): Promise<{ documents: FirestoreQueryDocument[]; pagesFetched: number }> {
+  if (values.length === 0) return { documents: [], pagesFetched: 0 };
+  if (values.length > 30) {
+    throw new Error("queryFirestoreDocumentsByIn: values.length exceeds Firestore's 30-value IN limit.");
+  }
+
+  const accessToken = await getAccessToken(env);
+  const url = `${FIRESTORE_BASE}/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents:runQuery`;
+
+  const where = {
+    fieldFilter: {
+      field: { fieldPath },
+      op: "IN",
+      value: { arrayValue: { values: values.map((v) => ({ stringValue: v })) } },
+    },
+  };
+
+  const documents: FirestoreQueryDocument[] = [];
+  let cursorDocumentName: string | null = null;
+  let pagesFetched = 0;
+
+  while (true) {
+    const structuredQuery: Record<string, unknown> = {
+      from: [{ collectionId: collection }],
+      where,
+      orderBy: [{ field: { fieldPath: "__name__" }, direction: "ASCENDING" }],
+      limit: pageSize,
+      ...(cursorDocumentName
+        ? { startAt: { values: [{ referenceValue: cursorDocumentName }], before: false } }
+        : {}),
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ structuredQuery }),
+    });
+    pagesFetched += 1;
+
+    if (!response.ok) {
+      console.error("firestoreRest: runQuery (IN) failed", { collection, status: response.status });
+      throw new Error("Could not read from Firestore.");
+    }
+
+    const page = (await response.json()) as Array<{ document?: { name: string; fields?: Record<string, any> } }>;
+    const pageDocs = page.filter(
+      (entry): entry is { document: { name: string; fields?: Record<string, any> } } => !!entry.document,
+    );
+
+    for (const entry of pageDocs) {
+      const { name } = entry.document;
+      const id = name.slice(name.lastIndexOf("/") + 1);
+      documents.push({ id, data: fromFirestoreFields(entry.document.fields || {}) });
+    }
+
+    // Fewer than a full page means this was the last one — never assume a
+    // full page is the last page, since that would silently drop the rest.
+    if (pageDocs.length < pageSize) break;
+    cursorDocumentName = pageDocs[pageDocs.length - 1].document.name;
+  }
+
+  return { documents, pagesFetched };
 }
 
 // ---------------------------------------------------------------------------

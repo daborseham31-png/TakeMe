@@ -62,6 +62,22 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "verificationStatus", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "driverViolations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "driverId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "driverViolations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "driverId", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

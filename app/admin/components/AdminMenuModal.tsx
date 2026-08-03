@@ -49,6 +49,12 @@ const MENU_ITEMS: MenuItem[] = [
     icon: "school-outline",
     path: "/admin/school-kiosk-links",
   },
+  {
+    key: "violations",
+    labelKey: "driverNoShow.violationsAndAppeals",
+    icon: "warning-outline",
+    path: "/admin/violations",
+  },
   { key: "settings", labelKey: "admin.settings", icon: "settings-outline", path: "/admin/settings" },
 ];
 

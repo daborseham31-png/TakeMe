@@ -79,6 +79,13 @@ import {
   writeCancellationViolationIfNew,
 } from "../booking/driverViolationsLib";
 import {
+  canSubmitAppeal,
+  DriverViolation,
+  subscribeActiveViolationCount,
+  subscribeDriverViolations,
+} from "../booking/driverNoShowLib";
+import ViolationAppealModal from "../booking/ViolationAppealModal";
+import {
   arriveRide,
   cancelRideBooking,
   finishRide,
@@ -499,8 +506,23 @@ export default function BookingsScreen() {
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [tab, setTab] = useState<Tab>("passenger");
   // Shared by both Passenger and Driver — one Upcoming/In Progress/Completed
-  // tab row above the single merged list (see getBookingBucket).
-  const [bucketTab, setBucketTab] = useState<BookingBucket>("upcoming");
+  // tab row above the single merged list (see getBookingBucket). "violations"
+  // is a driver-only addition (see driverNoShowLib.ts) that reads from its
+  // own driverViolations subscription below, NOT from the combined
+  // booking/trip rows — deliberately widened locally rather than adding
+  // "violations" to bookingsLib.ts's exported BookingBucket type, since
+  // getDriverTripBucket/getPassengerTripBucket must never return it (a
+  // no-show trip is bucketed to "completed" there — see that file).
+  type DriverBucketTab = BookingBucket | "violations";
+  const [bucketTab, setBucketTab] = useState<DriverBucketTab>("upcoming");
+  // Driver no-show violations (see driverNoShowLib.ts) — a completely
+  // separate system from the driver-cancellation violation warnings this
+  // file already handles elsewhere. Both are live subscriptions, not
+  // one-shot fetches, so the Violations tab count/list and the active-count
+  // badge stay correct the instant an admin approves/rejects an appeal.
+  const [driverViolations, setDriverViolations] = useState<DriverViolation[]>([]);
+  const [activeViolationCount, setActiveViolationCount] = useState(0);
+  const [appealModalViolation, setAppealModalViolation] = useState<DriverViolation | null>(null);
   // The search bar now searches ONLY by driver name (see getRowDriverName) —
   // kept as `search`/`setSearch` since it's the same existing field/state,
   // just narrowed in scope; the variable name is unchanged to minimize the
@@ -652,6 +674,37 @@ export default function BookingsScreen() {
     });
   }, []);
 
+  // Driver no-show violations — live subscriptions (see driverNoShowLib.ts),
+  // independent of the big combined-rows effect further below since
+  // driverViolations is its own top-level collection with its own doc shape,
+  // not a re-bucketed booking/trip row. Read-only: the Cloudflare Worker's
+  // cron is the ONLY writer that may ever create a violation (see
+  // driverNoShowLib.ts's header) — this screen only ever subscribes/reads,
+  // it never attempts to write one.
+  useEffect(() => {
+    if (!uid) {
+      setDriverViolations([]);
+      setActiveViolationCount(0);
+      return;
+    }
+
+    const unsubscribeList = subscribeDriverViolations(
+      uid,
+      setDriverViolations,
+      (error) => console.warn("subscribeDriverViolations failed", error),
+    );
+    const unsubscribeCount = subscribeActiveViolationCount(
+      uid,
+      setActiveViolationCount,
+      (error) => console.warn("subscribeActiveViolationCount failed", error),
+    );
+
+    return () => {
+      unsubscribeList();
+      unsubscribeCount();
+    };
+  }, [uid]);
+
   useEffect(() => {
     const requestedTab = getParamString(params.tab);
 
@@ -661,6 +714,20 @@ export default function BookingsScreen() {
 
     if (requestedTab === "passenger") {
       setTab("passenger");
+    }
+
+    // Driver no-show violation notifications (see driverNoShowLib.ts) — jump
+    // straight to the Violations tab, not just the Driver role tab, so
+    // tapping any of these four notification types lands the driver
+    // directly on the relevant card instead of Upcoming.
+    const noShowNotificationTypes = new Set([
+      "driver_noshow_violation_created",
+      "noshow_appeal_approved",
+      "noshow_appeal_rejected",
+    ]);
+    if (noShowNotificationTypes.has(getParamString(params.type) || "")) {
+      setTab("driver");
+      setBucketTab("violations");
     }
 
     // Roadside notifications route with requestId/offerId (see spec item 8),
@@ -1489,6 +1556,14 @@ const bookedRouteIds = useMemo(() => {
   const getBookingTripLabel = (b: BookingItem) => {
     const tripStatus = (b as any).tripStatus;
 
+    // Driver no-show (see driverNoShowLib.ts) — checked before the generic
+    // "cancelled" branch since a no-show trip never gets b.status written to
+    // "cancelled" (only tripStatus is set), and needs its own clear reason
+    // text rather than reading as a plain passenger/driver cancellation.
+    if (tripStatus === "driver_no_show") {
+      return t("driverNoShow.passengerCancelledReason");
+    }
+
     if (b.status === "cancelled") {
       return t("bookings.status.cancelled");
     }
@@ -1514,7 +1589,9 @@ const bookedRouteIds = useMemo(() => {
 
   const renderBookingTripStatus = (b: BookingItem) => {
     const tripStatus = (b as any).tripStatus;
-    const cancelled = b.status === "cancelled";
+    // Driver no-show reads visually as "cancelled" (red pill) — see
+    // getBookingTripLabel above for the matching text override.
+    const cancelled = b.status === "cancelled" || tripStatus === "driver_no_show";
     const completed = !cancelled && (b.status === "completed" || tripStatus === "completed");
 
     return (
@@ -2551,7 +2628,13 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         {
           text: t("roadsideHelp.clearAllButton"),
           style: "destructive",
-          onPress: () => runClearAllBookings(clearAllScopeRows, tab, bucketTab),
+          // "violations" is a driver-only bucket added locally for the new
+          // no-show Violations tab (see DriverBucketTab above) — it reads
+          // from a separate driverViolations subscription, never from
+          // clearAllScopeRows/CombinedRow, so this cast is safe: this
+          // "Clear All" action is never meaningfully reachable while that
+          // bucket is selected.
+          onPress: () => runClearAllBookings(clearAllScopeRows, tab, bucketTab as BookingBucket),
         },
       ],
     );
@@ -3194,6 +3277,71 @@ useEffect(() => {
     </Pressable>
   );
 
+  // Driver no-show violation card (see driverNoShowLib.ts — a completely
+  // separate system from the driver cancellation-violation warnings
+  // elsewhere in this file). Mirrors renderRideCard's shell (styles.card /
+  // accentBorderStart / styles.catChip / styles.infoRow / styles.metaRow)
+  // for visual consistency with every other card in this screen.
+  const renderViolationCard = (v: DriverViolation) => {
+    const statusMeta: Record<string, { key: string; color: string }> = {
+      open: { key: "driverNoShow.statusViolationRecorded", color: "#B0413E" },
+      appeal_pending: { key: "driverNoShow.statusAppealUnderReview", color: "#B8860B" },
+      appeal_approved: { key: "driverNoShow.statusAppealApprovedRemoved", color: "#2E7D32" },
+      appeal_rejected: { key: "driverNoShow.statusAppealRejectedActive", color: "#B0413E" },
+    };
+    const meta = statusMeta[v.status] || statusMeta.open;
+    const canAppeal = canSubmitAppeal({ appealId: v.appealId, active: v.active });
+
+    return (
+      <View key={`violation-${v.id}`} style={[styles.card, accentBorderStart(4, meta.color, isRTL)]}>
+        <View style={styles.cardTop}>
+          <View style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}>
+            <Ionicons name="warning-outline" size={15} color={meta.color} />
+            <Text style={[styles.catText, { color: meta.color }]}>{t("driverNoShow.driverNoShow")}</Text>
+          </View>
+          <View style={[styles.statusPill, { backgroundColor: `${meta.color}18` }]}>
+            <Text style={[styles.statusText, { color: meta.color }]}>{t(meta.key)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Ionicons name="pricetag-outline" size={15} color="#7C5F46" />
+          <Text style={styles.infoText}>{translateCategoryLabel(v.category, v.category, t)}</Text>
+        </View>
+
+        {renderRouteLine(v.routeFrom, v.routeTo, "")}
+
+        <View style={styles.infoRow}>
+          <Ionicons name="people-outline" size={15} color="#7C5F46" />
+          <Text style={styles.infoText}>
+            {t("driverNoShow.affectedPassengers", { count: v.passengerCount })}
+          </Text>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Ionicons name="card-outline" size={15} color="#7C5F46" />
+          <Text style={styles.infoText}>{t(`driverNoShow.refundStatus.${v.refundStatus}`)}</Text>
+        </View>
+
+        {v.resolutionNote ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="chatbox-ellipses-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>{t("driverNoShow.adminDecisionNote", { note: v.resolutionNote })}</Text>
+          </View>
+        ) : null}
+
+        {canAppeal ? (
+          <Pressable
+            style={styles.violationAppealButton}
+            onPress={() => setAppealModalViolation(v)}
+          >
+            <Text style={styles.violationAppealButtonText}>{t("driverNoShow.submitAppeal")}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  };
+
   const renderPassengerDriverDetails = (r: RideBooking) => {
     const hasCarDetails =
       !!r.driverCar || !!r.driverCarColor || !!r.driverCarPlateLast3;
@@ -3300,10 +3448,17 @@ useEffect(() => {
               // Driver-only — RideStatus itself has no "in_progress" value
               // (see updateTripStatus in ride-navigation.tsx), so the badge
               // must be overridden here once the trip has actually started;
-              // Passenger's own rendering is completely untouched.
+              // Passenger's own rendering is completely untouched. Driver
+              // no-show (see driverNoShowLib.ts) is the passenger-facing
+              // exception to that: r.status never gets written to
+              // "cancelled" for a no-show (only tripStatus is set), so the
+              // badge needs the same clear-reason override the generic
+              // booking card gets from getBookingTripLabel.
               viewer === "driver" && r.tripStatus === "in_progress"
                 ? t("rides.tripInProgress")
-                : undefined,
+                : String(r.tripStatus) === "driver_no_show"
+                  ? t("driverNoShow.passengerCancelledReason")
+                  : undefined,
             )}
             {r.status === "completed"
               ? renderDeleteButton(() => confirmHideRideBooking(r, viewer))
@@ -3598,7 +3753,11 @@ useEffect(() => {
     const meta = getCategoryMeta(b.category);
     const busy = busyId === b.id;
     const tripStatus = (b as any).tripStatus;
-    const cancelled = b.status === "cancelled";
+    // Driver no-show reads as "cancelled" for styling purposes too (card
+    // grey-out) — this card only ever renders a no-show row for the
+    // PASSENGER viewer; the driver's own no-show rows are excluded from
+    // every generic bucket entirely (see getDriverTripBucket).
+    const cancelled = b.status === "cancelled" || tripStatus === "driver_no_show";
     const done = !cancelled && (b.status === "completed" || tripStatus === "completed");
     const finished = done || cancelled;
     const isSchool = b.category === "school";
@@ -5057,6 +5216,19 @@ useEffect(() => {
                         rows: unbookedTripsRows,
                         labelKey: "booking.bucketUnbookedTrips",
                       },
+                      // Driver no-show violations (see driverNoShowLib.ts) —
+                      // shows full history (including resolved appeals, per
+                      // the product spec's "keep the historical violation
+                      // visible with the status Appeal approved / Violation
+                      // removed"); the badge count below is overridden to
+                      // show only the live ACTIVE count, not this array's
+                      // full length.
+                      {
+                        key: "violations" as const,
+                        icon: "warning-outline" as const,
+                        rows: driverViolations,
+                        labelKey: "driverNoShow.violationsTab",
+                      },
                     ]
                   : []),
               ] as const
@@ -5086,7 +5258,7 @@ useEffect(() => {
                       active && styles.driverBucketButtonTextActive,
                     ]}
                   >
-                    {t(bucket.labelKey)} ({bucket.rows.length})
+                    {t(bucket.labelKey)} ({bucket.key === "violations" ? activeViolationCount : bucket.rows.length})
                   </Text>
                 </Pressable>
               );
@@ -5211,6 +5383,14 @@ useEffect(() => {
               </>
             );
           })()
+        ) : bucketTab === "violations" ? (
+          driverViolations.length === 0 ? (
+            renderBucketEmptyText("driverNoShow.noViolations")
+          ) : (
+            <View style={styles.list}>
+              {driverViolations.map((violation) => renderViolationCard(violation))}
+            </View>
+          )
         ) : (
           (() => {
             const bucketRows = bucketTab === "upcoming" ? upcomingRows : inProgressRows;
@@ -5711,6 +5891,16 @@ useEffect(() => {
           </DirectionalCard>
         </KeyboardAvoidingWrapper>
       </Modal>
+
+      {appealModalViolation ? (
+        <ViolationAppealModal
+          visible={!!appealModalViolation}
+          violationId={appealModalViolation.id}
+          tripId={appealModalViolation.tripId}
+          onClose={() => setAppealModalViolation(null)}
+          onSubmitted={() => setAppealModalViolation(null)}
+        />
+      ) : null}
     </DirectionalScreen>
   );
 }
@@ -6628,5 +6818,17 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "900",
     fontSize: 15,
+  },
+  violationAppealButton: {
+    marginTop: 12,
+    paddingVertical: 11,
+    borderRadius: 12,
+    backgroundColor: "#7C5F46",
+    alignItems: "center",
+  },
+  violationAppealButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 14,
   },
 });
