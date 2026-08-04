@@ -244,14 +244,25 @@ afterEach(() => {
 // Fixture builders
 // ---------------------------------------------------------------------------
 
-const NOW = new Date(2026, 7, 3, 23, 40, 0, 0); // Well past any 23:20 scheduled time + 15-min grace.
+// combineScheduledDateTime now interprets every stored date/time string as
+// Asia/Jerusalem wall-clock time (see noShowDetection.ts's zonedTimeToUtc —
+// this is the actual production-bug fix), so every `now`/comparison Date
+// fixture below is built as an EXPLICIT UTC instant (Date.UTC), not the
+// test runner machine's own ambient local timezone (which may not be
+// Israel) — Israel is UTC+3 (IDT) for all the August dates used here.
+// "2026-08-03 23:40 Asia/Jerusalem" = "2026-08-03 20:40 UTC".
+const NOW = new Date(Date.UTC(2026, 7, 3, 20, 40, 0, 0)); // Well past any 23:00 scheduled time + 15-min grace, Israel time.
 const DUE_DATE = "2026-08-03";
-const DUE_TIME = "23:00"; // 23:00 + 15 min grace = 23:15, well before NOW (23:40).
+const DUE_TIME = "23:00"; // 23:00 + 15 min grace = 23:15 Israel time, well before NOW (23:40 Israel).
 
 function seedDueDriverRoute(tripId: string, driverId: string, opts: { bookingType?: string } = {}) {
   seed("driverRoutes", tripId, {
     driverId,
-    date: DUE_DATE,
+    // The REAL field name production writes (see app/driver/create/
+    // RideForm.tsx) — never `date`. A dedicated test below proves the
+    // `date`-only legacy fallback separately; every other fixture uses the
+    // real field so the default test setup matches production truth.
+    tripDate: DUE_DATE,
     time: DUE_TIME,
     from: "A",
     to: "B",
@@ -308,8 +319,9 @@ describe("noShowDetection: pure helpers", () => {
   });
 
   it("evaluateSchedule returns null before the grace period elapses, non-null after", () => {
-    const before = new Date(2026, 7, 3, 23, 10, 0, 0);
-    const after = new Date(2026, 7, 3, 23, 20, 0, 0);
+    // 23:10 / 23:20 Asia/Jerusalem -> 20:10 / 20:20 UTC (see NOW's own comment above).
+    const before = new Date(Date.UTC(2026, 7, 3, 20, 10, 0, 0));
+    const after = new Date(Date.UTC(2026, 7, 3, 20, 20, 0, 0));
     expect(evaluateSchedule({ date: DUE_DATE, time: DUE_TIME }, before)).toBeNull();
     expect(evaluateSchedule({ date: DUE_DATE, time: DUE_TIME }, after)).not.toBeNull();
   });
@@ -496,7 +508,7 @@ describe("noShowDetection: behavior preservation", () => {
   it("a trip that is not yet due (grace period hasn't elapsed) creates no violation and is never queried for bookings", async () => {
     seed("driverRoutes", "route-not-due", {
       driverId: "driver-1",
-      date: "2026-08-03",
+      tripDate: "2026-08-03",
       time: "23:35", // NOW is 23:40 — grace ends 23:50, still in the future.
       from: "A",
       to: "B",
@@ -583,7 +595,10 @@ describe("noShowDetection: one malformed or failed candidate does not stop the r
     // gathering (all field access already tolerates this via `||`
     // defaults) — the real malformed-input protection here is the
     // try/catch itself; this asserts a batch with one odd-shaped doc still
-    // yields every other valid candidate.
+    // yields every other valid candidate. Deliberately uses the legacy
+    // `date` field (not `tripDate`) here too, so this also doubles as
+    // coverage for the tripDate-missing fallback alongside the malformed-
+    // bookingType case.
     seed("driverRoutes", "route-odd", {
       driverId: "driver-1",
       date: DUE_DATE,
@@ -600,5 +615,111 @@ describe("noShowDetection: one malformed or failed candidate does not stop the r
 
     expect(summary.candidatesGathered).toBe(2);
     expect(summary.violationsCreated).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: the "route-lion" production case — a Personal trip scheduled
+// 2026-08-04 00:15, still showing in Upcoming with Start Driving enabled and
+// no violation recorded when checked at 2026-08-04 14:18 Asia/Jerusalem
+// (~14 hours overdue). Root cause was TWO bugs, both covered below:
+//   1. gatherCandidates read `data.date` on driverRoutes documents, but
+//      production only ever writes `tripDate` (see RideForm.tsx) — every
+//      real Personal/Weekly candidate was silently dropped before any
+//      eligibility check ever ran.
+//   2. combineScheduledDateTime built the scheduled Date using the Workers
+//      runtime's own "local" timezone (always UTC), not Asia/Jerusalem —
+//      the actual meaning of every stored date/time string in this
+//      Israel-only product.
+// ---------------------------------------------------------------------------
+
+describe("noShowDetection: production regression — route-lion (2026-08-04 00:15 Personal trip)", () => {
+  it("field discovery: driverRoutes' real production field is tripDate, not date", async () => {
+    seed("driverRoutes", "route-tripdate-field", {
+      driverId: "driver-1",
+      tripDate: DUE_DATE, // the real field — no `date` key at all on this doc.
+      time: DUE_TIME,
+      from: "A",
+      to: "B",
+      active: true,
+      status: "booked",
+      bookingType: "personal",
+    });
+    seedBooking("bk-1", "route-tripdate-field");
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW);
+
+    expect(summary.candidatesGathered).toBe(1);
+    expect(summary.violationsCreated).toBe(1);
+  });
+
+  it("legacy fallback: a driverRoutes doc with ONLY `date` (no tripDate) is still supported", async () => {
+    seed("driverRoutes", "route-legacy-date-field", {
+      driverId: "driver-1",
+      date: DUE_DATE, // no `tripDate` at all — must still be picked up.
+      time: DUE_TIME,
+      from: "A",
+      to: "B",
+      active: true,
+      status: "booked",
+      bookingType: "personal",
+    });
+    seedBooking("bk-1", "route-legacy-date-field");
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW);
+
+    expect(summary.candidatesGathered).toBe(1);
+    expect(summary.violationsCreated).toBe(1);
+  });
+
+  it("combineScheduledDateTime interprets stored times as Asia/Jerusalem, not the runtime's own UTC", () => {
+    // 2026-08-04 00:15 Asia/Jerusalem (IDT, UTC+3) = 2026-08-03 21:15 UTC.
+    // If this were misinterpreted as a plain UTC time instead (the bug),
+    // it would come back as 2026-08-04T00:15:00.000Z — 3 hours later.
+    const scheduledAt = combineScheduledDateTime("2026-08-04", "00:15");
+    expect(scheduledAt?.toISOString()).toBe("2026-08-03T21:15:00.000Z");
+  });
+
+  it("the exact production scenario: a Personal trip at 2026-08-04 00:15, checked at 2026-08-04 14:18 Asia/Jerusalem, is an eligible no-show with one confirmed passenger", async () => {
+    // 2026-08-04 14:18 Asia/Jerusalem (IDT, UTC+3) = 2026-08-04 11:18 UTC.
+    const PRODUCTION_CHECK_TIME = new Date(Date.UTC(2026, 7, 4, 11, 18, 0, 0));
+
+    seed("driverRoutes", "route-lion", {
+      driverId: "driver-lion",
+      tripDate: "2026-08-04",
+      time: "00:15",
+      from: "Home",
+      to: "Work",
+      active: true,
+      status: "booked",
+      bookingType: "personal",
+    });
+    seedBooking("bk-lion", "route-lion", { passengerId: "passenger-lion", status: "booked" });
+
+    const summary = await runNoShowDetection(TEST_ENV, PRODUCTION_CHECK_TIME);
+
+    expect(summary.candidatesGathered).toBe(1);
+    expect(summary.candidateTripIds).toBe(1); // Correctly recognized as due.
+    expect(summary.bookingDocumentsFetched).toBe(1); // The booking WAS found this time.
+    expect(summary.eligibleNoShows).toBe(1);
+    expect(summary.violationsCreated).toBe(1);
+
+    const violation = store.find((d) => d.collection === "driverViolations" && d.id === "route-lion");
+    expect(violation).toBeDefined();
+    expect(violation?.fields.driverId).toBe("driver-lion");
+    expect(violation?.fields.passengerIds).toEqual(["passenger-lion"]);
+    expect(violation?.fields.passengerCount).toBe(1);
+    expect(violation?.fields.category).toBe("personal");
+
+    // The trip itself is what drives the mobile UI's Upcoming/Violations
+    // split (see bookingsLib.ts's getDriverTripBucket, tested separately in
+    // tests/driverNoShowCore.test.ts) — confirms the Worker actually wrote
+    // the flag that removes it from Upcoming.
+    const updatedRoute = store.find((d) => d.collection === "driverRoutes" && d.id === "route-lion");
+    expect(updatedRoute?.fields.tripStatus).toBe("driver_no_show");
+    expect(updatedRoute?.fields.active).toBe(false);
+
+    const updatedBooking = store.find((d) => d.collection === "bookings" && d.id === "bk-lion");
+    expect(updatedBooking?.fields.tripStatus).toBe("driver_no_show");
   });
 });

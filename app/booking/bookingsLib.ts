@@ -46,7 +46,7 @@ import {
   writeCancellationViolationIfNew,
 } from "./driverViolationsLib";
 
-import { isDriverNoShowTripStatus } from "./driverNoShowCore";
+import { hasScheduledDeparturePassed, isDriverNoShowTripStatus } from "./driverNoShowCore";
 
 import { notify } from "./work-errand/workErrandLib";
 
@@ -211,17 +211,33 @@ export const isTripStatusCompleted = (booking: any) =>
 export const isTripStatusActive = (booking: any) =>
   ACTIVE_TRIP_STATUSES.includes(getBookingTripStatus(booking));
 
-export const canStartTrip = (booking: any): boolean => {
+// A trip whose scheduled departure has already passed must never show as
+// startable, even on the SAME calendar day — a 00:15 trip is just as overdue
+// at 14:18 the same day as a trip whose date itself is in the past.
+// hasScheduledDeparturePassed (driverNoShowCore.ts) is the same pure check
+// the no-show system itself is built on, so "Start Driving" going away and
+// the trip eventually becoming a no-show violation 15 minutes later are
+// always consistent with each other, never two independent opinions about
+// the same moment.
+export const canStartTrip = (booking: any, now: Date = new Date()): boolean => {
   return (
     getBookingTripStatus(booking) === "booked" &&
-    getTripDateState(booking) === "today"
+    getTripDateState(booking) === "today" &&
+    !hasScheduledDeparturePassed(getBookingDateYMD(booking), getBookingTime(booking), now)
   );
 };
 
 // null when the trip can be started right now; otherwise the exact message
 // to show under the disabled Start Trip button.
-export const getStartTripBlockedReason = (booking: any): string | null => {
-  if (canStartTrip(booking)) return null;
+export const getStartTripBlockedReason = (booking: any, now: Date = new Date()): string | null => {
+  if (canStartTrip(booking, now)) return null;
+
+  if (
+    getTripDateState(booking) === "today" &&
+    hasScheduledDeparturePassed(getBookingDateYMD(booking), getBookingTime(booking), now)
+  ) {
+    return i18n.t("booking.tripDatePassed");
+  }
 
   switch (getTripDateState(booking)) {
     case "future":

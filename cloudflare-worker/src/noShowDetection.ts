@@ -90,11 +90,52 @@ function parseHM(time: string): { hour: number; minute: number } | null {
   return { hour, minute };
 }
 
+// This product is Israel-only — every stored date/time string (driverRoutes'
+// tripDate/time, schoolTrips' date/departureTime) is the driver's LOCAL
+// wall-clock entry from the Expo app on their own phone, i.e. Asia/Jerusalem.
+// Cloudflare Workers always run with UTC as the runtime's "local" timezone
+// (unlike a phone, where local IS Israel — see driverNoShowCore.ts's own
+// plain `new Date(y,m,d,h,min)` construction, which is correct there for
+// exactly that reason and is deliberately NOT changed to match this file).
+// Naively using the same plain constructor here would silently treat every
+// stored time as UTC instead of Israel time, skewing eligibility by the
+// current Israel/UTC offset (+2 or +3h depending on DST) — enough to flip a
+// borderline case's outcome even though it happened not to matter for the
+// specific 14-hours-overdue trip that surfaced this bug. Uses the standard
+// "double conversion" technique — no timezone library needed, since the
+// Workers runtime already bundles full ICU/IANA timezone data.
+const APP_TIMEZONE = "Asia/Jerusalem";
+
+function zonedTimeToUtc(year: number, month: number, day: number, hour: number, minute: number): Date {
+  const naiveUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: APP_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(naiveUtcMs));
+
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  const shownAsUtcMs = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+
+  // shownAsUtcMs - naiveUtcMs is the zone's current UTC offset (positive
+  // when ahead of UTC, e.g. +3h for Israel in summer) — subtracting it from
+  // the naive guess yields the real UTC instant for that Israel wall-clock
+  // time.
+  const offsetMs = shownAsUtcMs - naiveUtcMs;
+  return new Date(naiveUtcMs - offsetMs);
+}
+
 export function combineScheduledDateTime(date: string, time: string): Date | null {
   const ymd = parseYMD(date);
   if (!ymd) return null;
   const hm = parseHM(time) || { hour: 0, minute: 0 };
-  const combined = new Date(ymd.year, ymd.month - 1, ymd.day, hm.hour, hm.minute, 0, 0);
+  const combined = zonedTimeToUtc(ymd.year, ymd.month, ymd.day, hm.hour, hm.minute);
   return Number.isNaN(combined.getTime()) ? null : combined;
 }
 
@@ -165,7 +206,19 @@ async function gatherCandidates(env: Env, lookbackYmd: string): Promise<TripCand
     try {
       const data = route.data as Record<string, any>;
       if (!isStillOpenForNoShow(data)) continue;
-      if (!data.date || data.date < lookbackYmd) continue;
+      // driverRoutes documents are written as `tripDate` (see
+      // app/driver/create/RideForm.tsx's baseRouteFields and the "Republish
+      // Trip" path in app/(tabs)/bookings.tsx) — NEVER a plain `date` field.
+      // The original version of this file read `data.date`, which is always
+      // undefined for every real Personal/Weekly trip, so every candidate
+      // was silently dropped right here before any eligibility check ever
+      // ran (this is the actual root cause of a real overdue production
+      // trip never being detected — see the delivery report). `data.date` is
+      // kept as a fallback only in case a legacy/alternate writer ever used
+      // that name instead — never the other way around, since it's not what
+      // production actually writes.
+      const routeDate = data.tripDate || data.date;
+      if (!routeDate || routeDate < lookbackYmd) continue;
       candidates.push({
         tripId: route.id,
         tripCollection: "driverRoutes",
@@ -175,7 +228,7 @@ async function gatherCandidates(env: Env, lookbackYmd: string): Promise<TripCand
         driverId: data.driverId || "",
         from: data.from || "",
         to: data.to || "",
-        date: data.date || "",
+        date: routeDate,
         time: data.time || "",
       });
     } catch (error) {

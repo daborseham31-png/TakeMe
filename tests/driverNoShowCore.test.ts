@@ -46,6 +46,7 @@ import {
   driverViolationId,
   evaluateNoShowEligibility,
   graceDeadline,
+  hasScheduledDeparturePassed,
   isDriverNoShowTripStatus,
   isEvidenceWithinSizeLimit,
   isSupportedEvidenceMimeType,
@@ -298,6 +299,45 @@ describe("driverNoShowCore: isDriverNoShowTripStatus", () => {
     expect(isDriverNoShowTripStatus(undefined)).toBe(false);
     expect(isDriverNoShowTripStatus(null)).toBe(false);
     expect(isDriverNoShowTripStatus("")).toBe(false);
+  });
+});
+
+// Regression coverage for the "route-lion" production case (see the
+// Cloudflare Worker's own noShowDetection.test.ts for the server-side half
+// of this same scenario) — a Personal trip scheduled 2026-08-04 00:15 was
+// still showing "Start Driving" enabled when checked at 2026-08-04 14:18,
+// ~14 hours overdue. hasScheduledDeparturePassed is the exact function
+// bookingsLib.ts's canStartTrip/getStartTripBlockedReason now calls to
+// disable that button immediately once a trip is overdue.
+describe("driverNoShowCore: hasScheduledDeparturePassed", () => {
+  it("the exact production scenario: 00:15 trip checked at 14:18 the same day has passed", () => {
+    const now = new Date(2026, 7, 4, 14, 18, 0, 0);
+    expect(hasScheduledDeparturePassed("2026-08-04", "00:15", now)).toBe(true);
+  });
+
+  it("is false right up until the scheduled instant, true from that instant on", () => {
+    const oneMinuteBefore = new Date(2026, 7, 4, 0, 14, 0, 0);
+    const exactMoment = new Date(2026, 7, 4, 0, 15, 0, 0);
+    expect(hasScheduledDeparturePassed("2026-08-04", "00:15", oneMinuteBefore)).toBe(false);
+    expect(hasScheduledDeparturePassed("2026-08-04", "00:15", exactMoment)).toBe(true);
+  });
+
+  it("is false for a future trip", () => {
+    const now = new Date(2026, 7, 4, 14, 18, 0, 0);
+    expect(hasScheduledDeparturePassed("2026-08-05", "00:15", now)).toBe(false);
+  });
+
+  it("is false (never blocks) for missing/unreliable date data", () => {
+    const now = new Date(2026, 7, 4, 14, 18, 0, 0);
+    expect(hasScheduledDeparturePassed("", "00:15", now)).toBe(false);
+    expect(hasScheduledDeparturePassed(null, "00:15", now)).toBe(false);
+    expect(hasScheduledDeparturePassed("not-a-date", "00:15", now)).toBe(false);
+  });
+
+  it("defaults `now` to the real current time when not passed explicitly", () => {
+    // A trip scheduled far in the past relative to the real clock must
+    // report passed=true even with no explicit `now` argument.
+    expect(hasScheduledDeparturePassed("2020-01-01", "00:00")).toBe(true);
   });
 });
 

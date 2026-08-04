@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 
 import { auth } from "../firebase";
 import KeyboardSafeScreen from "./components/KeyboardSafeScreen";
+import SplashRouteIllustration from "./components/SplashRouteIllustration";
 import {
   DirectionalRow,
   DirectionalScreen,
@@ -113,7 +114,12 @@ export default function AppStartScreen() {
   if (loading) {
     // Responsive, proportion-based sizing (capped so it doesn't get huge on
     // tablets) instead of one fixed pixel size for every screen width.
-    const logoSize = Math.min(220, windowWidth * 0.5);
+    // SplashRouteIllustration is vector art (see that component's own
+    // header) drawn at a 400x240 viewBox — deriving height from width here
+    // keeps it undistorted at any screen size, same approach the wordmark
+    // below already used.
+    const illustrationWidth = Math.min(280, windowWidth * 0.78);
+    const illustrationHeight = illustrationWidth * (240 / 400);
     // Source wordmark art is 300x107 — derive height from width so it's
     // never stretched/distorted at any screen size.
     const wordmarkWidth = Math.min(190, windowWidth * 0.42);
@@ -121,11 +127,9 @@ export default function AppStartScreen() {
 
     return (
       <DirectionalScreen style={styles.splash}>
-        <Image
-          source={require("../assets/images/map-pin-icon.png")}
-          style={{ width: logoSize, height: logoSize, marginBottom: 12 }}
-          resizeMode="contain"
-        />
+        <View style={{ marginBottom: 12 }}>
+          <SplashRouteIllustration width={illustrationWidth} height={illustrationHeight} />
+        </View>
         <Image
           source={require("../assets/images/takeme-wordmark.png")}
           style={{ width: wordmarkWidth, height: wordmarkHeight, marginBottom: 4 }}

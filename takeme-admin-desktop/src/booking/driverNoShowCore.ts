@@ -85,6 +85,26 @@ export const combineScheduledDateTime = (date: string | null | undefined, time: 
 export const graceDeadline = (scheduledAt: Date): Date =>
   new Date(scheduledAt.getTime() + NO_SHOW_GRACE_PERIOD_MINUTES * 60 * 1000);
 
+// Whether a trip's scheduled departure has already passed as of `now` — used
+// by bookingsLib.ts's canStartTrip/getStartTripBlockedReason to disable
+// "Start Driving" the moment a trip goes overdue, well before the 15-minute
+// grace period actually turns it into a no-show violation (that's a
+// separate, later, server-side decision — see evaluateNoShowEligibility).
+// Kept here (not inline in bookingsLib.ts) so it's unit-testable without
+// importing anything Firestore/React-Native-dependent — see
+// vitest.config.ts's header. A trip with no reliable scheduled time (see
+// combineScheduledDateTime) is treated as NOT passed — never block the
+// button on unreliable/missing data.
+export const hasScheduledDeparturePassed = (
+  date: string | null | undefined,
+  time: string | null | undefined,
+  now: Date = new Date(),
+): boolean => {
+  const scheduledAt = combineScheduledDateTime(date, time);
+  if (!scheduledAt) return false;
+  return now.getTime() >= scheduledAt.getTime();
+};
+
 // ---------------------------------------------------------------------------
 // Eligibility — the 8 conditions from the product spec, as one pure
 // predicate. The caller (driverNoShowLib.ts's client-side fallback, and the
