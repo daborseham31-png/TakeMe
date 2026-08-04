@@ -27,6 +27,7 @@ import { ReportCategory } from "../admin/adminTypes";
 import { signOutAndRedirectToLogin } from "../authLib";
 import {
   DirectionalCard,
+  DirectionalRow,
   DirectionalScreen,
   PhysicalDirectionalBlockText,
 } from "../i18n/DirectionalPrimitives";
@@ -70,6 +71,7 @@ export default function ProfileScreen() {
   const [reportImage, setReportImage] = useState<string | null>(null);
   const [submittingReport, setSubmittingReport] = useState(false);
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const currentLanguageName =
     SUPPORTED_LANGUAGES.find((lang) => lang.code === language)?.nativeName ??
@@ -129,8 +131,38 @@ export default function ProfileScreen() {
     Alert.alert(t("common.success"), t("profile.profileUpdated"));
   };
 
-  const handleLogout = async () => {
-    await signOutAndRedirectToLogin();
+  // Confirmation gate — tapping "Log Out" no longer signs the user out
+  // immediately; it only does so after they explicitly confirm in the
+  // Alert below. Cancel (or dismissing the Alert, e.g. Android's back
+  // button) does nothing at all — no auth/local data is touched unless
+  // "Log Out" is the option actually pressed.
+  const handleLogout = () => {
+    Alert.alert(
+      t("profile.logOut"),
+      t("profile.logOutConfirmMessage"),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("profile.logOut"),
+          style: "destructive",
+          onPress: confirmLogout,
+        },
+      ],
+    );
+  };
+
+  const confirmLogout = async () => {
+    // Re-entrancy guard — the confirm button itself isn't disabled while
+    // the Alert is open (Alert.alert has no built-in busy state), so this
+    // stops a fast double-tap on "Log Out" from calling
+    // signOutAndRedirectToLogin twice.
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await signOutAndRedirectToLogin();
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   const pickReportPhoto = () => {
@@ -285,44 +317,70 @@ export default function ProfileScreen() {
             <Text style={styles.saveText}>{t("profile.saveChanges")}</Text>
           </Pressable>
 
-          <Pressable
-            style={styles.settingsRow}
-            onPress={() => setLanguageModalVisible(true)}
-          >
-            <View style={styles.settingsRowLeft}>
-              <Ionicons name="globe-outline" size={20} color="#7C5F46" />
-              <Text style={styles.settingsRowLabel}>{t("settings.language")}</Text>
-            </View>
-            <View style={styles.settingsRowRight}>
-              <Text style={styles.settingsRowValue}>{currentLanguageName}</Text>
+          {/* Three compact option cards, side by side — see styles.optionsRow/
+              optionCard below. Same three destinations/actions as before
+              (language modal, /saved-locations, report modal), just laid
+              out as a row of small cards instead of stacked full-width
+              rows. DirectionalRow (not a plain row View) is what makes this
+              correctly mirror for RTL languages, matching every other
+              horizontal row in this app. */}
+          <DirectionalRow style={styles.optionsRow}>
+            <Pressable
+              style={styles.optionCard}
+              onPress={() => setLanguageModalVisible(true)}
+            >
+              <View style={styles.optionIconWrap}>
+                <Ionicons name="globe-outline" size={16} color="#7C5F46" />
+              </View>
+              <Text style={styles.optionTitle} numberOfLines={2}>
+                {t("settings.language")}
+              </Text>
+              <Text style={styles.optionValue} numberOfLines={1}>
+                {currentLanguageName}
+              </Text>
               <Ionicons
                 name={isRTL ? "chevron-back" : "chevron-forward"}
-                size={18}
+                size={13}
                 color="#C7B9AC"
+                style={styles.optionChevron}
               />
-            </View>
-          </Pressable>
+            </Pressable>
 
-          <Pressable
-            style={styles.settingsRow}
-            onPress={() => router.push("/saved-locations" as any)}
-          >
-            <View style={styles.settingsRowLeft}>
-              <Ionicons name="location-outline" size={20} color="#7C5F46" />
-              <Text style={styles.settingsRowLabel}>{t("savedLocations.screenTitle")}</Text>
-            </View>
-            <Ionicons
-              name={isRTL ? "chevron-back" : "chevron-forward"}
-              size={18}
-              color="#C7B9AC"
-            />
-          </Pressable>
+            <Pressable
+              style={styles.optionCard}
+              onPress={() => router.push("/saved-locations" as any)}
+            >
+              <View style={styles.optionIconWrap}>
+                <Ionicons name="location-outline" size={16} color="#7C5F46" />
+              </View>
+              <Text style={styles.optionTitle} numberOfLines={2}>
+                {t("savedLocations.screenTitle")}
+              </Text>
+              <Ionicons
+                name={isRTL ? "chevron-back" : "chevron-forward"}
+                size={13}
+                color="#C7B9AC"
+                style={styles.optionChevron}
+              />
+            </Pressable>
 
-          <Pressable style={styles.reportButton} onPress={() => setReportVisible(true)}>
-            <Text style={styles.reportText}>{t("profile.reportProblem")}</Text>
-          </Pressable>
+            <Pressable style={styles.optionCard} onPress={() => setReportVisible(true)}>
+              <View style={styles.optionIconWrap}>
+                <Ionicons name="warning-outline" size={16} color="#7C5F46" />
+              </View>
+              <Text style={styles.optionTitle} numberOfLines={2}>
+                {t("profile.reportProblem")}
+              </Text>
+              <Ionicons
+                name={isRTL ? "chevron-back" : "chevron-forward"}
+                size={13}
+                color="#C7B9AC"
+                style={styles.optionChevron}
+              />
+            </Pressable>
+          </DirectionalRow>
 
-          <Pressable style={styles.logoutButton} onPress={handleLogout}>
+          <Pressable style={styles.logoutButton} onPress={handleLogout} disabled={loggingOut}>
             <Text style={styles.logoutText}>{t("profile.logOut")}</Text>
           </Pressable>
         </View>
@@ -543,37 +601,51 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     fontSize: 16,
   },
-  settingsRow: {
-    flexDirection: "row",
+  // Compact 3-across option cards (Language / Saved Locations / Report a
+  // Problem) — replaces the old full-width stacked settingsRow/reportButton
+  // rows. flex:1 on each card (default alignItems:"stretch" on the row)
+  // gives equal width AND equal height automatically, for any 2 of the 3
+  // titles wrapping to a different number of lines than the third.
+  optionsRow: {
+    gap: 8,
+    marginTop: 14,
+  },
+  optionCard: {
+    flex: 1,
     alignItems: "center",
-    justifyContent: "space-between",
     borderWidth: 1,
     borderColor: "#E2D8CF",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginTop: 14,
+    borderRadius: 14,
     backgroundColor: "#FFFDFC",
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    gap: 3,
   },
-  settingsRowLeft: {
-    flexDirection: "row",
+  optionIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F5EAE0",
     alignItems: "center",
-    gap: 10,
+    justifyContent: "center",
+    marginBottom: 2,
   },
-  settingsRowRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  settingsRowLabel: {
+  optionTitle: {
     fontWeight: "800",
     color: "#111827",
-    fontSize: 15,
+    fontSize: 11,
+    textAlign: "center",
+    lineHeight: 14,
+    minHeight: 28,
   },
-  settingsRowValue: {
+  optionValue: {
     color: "#7C5F46",
     fontWeight: "700",
-    fontSize: 14,
+    fontSize: 10,
+    textAlign: "center",
+  },
+  optionChevron: {
+    marginTop: 2,
   },
   logoutButton: {
     borderWidth: 1.5,
@@ -584,20 +656,6 @@ const styles = StyleSheet.create({
   },
   logoutText: {
     color: "#DC2626",
-    textAlign: "center",
-    fontWeight: "900",
-    fontSize: 16,
-  },
-  reportButton: {
-    borderWidth: 1.5,
-    borderColor: "#E2D8CF",
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 14,
-    backgroundColor: "#FFFDFC",
-  },
-  reportText: {
-    color: "#7C5F46",
     textAlign: "center",
     fontWeight: "900",
     fontSize: 16,

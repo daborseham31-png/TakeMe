@@ -539,6 +539,10 @@ export default function BookingsScreen() {
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
   const [locationQuery, setLocationQuery] = useState("");
+  // The single "Filters" entry sheet beside the search field — Category/
+  // Date/Location keep their own existing modals/state above unchanged;
+  // this just controls the new summary sheet that links out to them.
+  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
 
   // Ticks once a minute purely to force a Waiting-for-booking trip whose
   // departure time has just passed out of that section and into Expired —
@@ -5033,146 +5037,39 @@ useEffect(() => {
           </Pressable>
         </View>
 
-        <View style={styles.searchRow}>
-          <Ionicons name="search-outline" size={18} color="#8B7B6B" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder={t("booking.searchByDriverNamePlaceholder")}
-            placeholderTextColor="#8B7B6B"
-            value={search}
-            onChangeText={setSearch}
-          />
+        <View style={styles.searchFilterRow}>
+          <View style={[styles.searchRow, styles.searchRowFlex]}>
+            <Ionicons name="search-outline" size={18} color="#8B7B6B" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder={t("booking.searchByDriverNamePlaceholder")}
+              placeholderTextColor="#8B7B6B"
+              value={search}
+              onChangeText={setSearch}
+            />
 
-          {search ? (
-            <Pressable onPress={() => setSearch("")} hitSlop={8}>
-              <Ionicons name="close-circle" size={18} color="#8B7B6B" />
-            </Pressable>
-          ) : null}
-        </View>
+            {search ? (
+              <Pressable onPress={() => setSearch("")} hitSlop={8}>
+                <Ionicons name="close-circle" size={18} color="#8B7B6B" />
+              </Pressable>
+            ) : null}
+          </View>
 
-        <View style={styles.filterRow}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterRowContent}
+          {/* Category/Date/Location no longer render as separate chips here
+              — they now live inside the Filters modal below (same
+              categoryFilter/dateFilter/locationFilter state, same
+              categoryMenuOpen/dateMenuOpen/locationMenuOpen sub-modals,
+              completely unchanged). This is the one compact entry point. */}
+          <Pressable
+            style={styles.filtersButton}
+            onPress={() => setFiltersModalOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t("booking.filtersButton")}
           >
-            <View style={[styles.filterChip, categoryFilter !== "all" && styles.filterChipActive]}>
-              <Pressable
-                style={styles.filterChipBody}
-                onPress={() => setCategoryMenuOpen(true)}
-              >
-                <Ionicons
-                  name="pricetag-outline"
-                  size={14}
-                  color={categoryFilter !== "all" ? "#FFFFFF" : "#7C5F46"}
-                />
-                <Text
-                  style={[
-                    styles.filterButtonText,
-                    categoryFilter !== "all" && styles.filterButtonTextActive,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {categoryFilter === "all"
-                    ? t("booking.filterCategoryButton")
-                    : translateCategoryLabel(
-                        CATEGORY_FILTER_META_KEY[categoryFilter],
-                        getCategoryMeta(CATEGORY_FILTER_META_KEY[categoryFilter]).label,
-                        t,
-                      )}
-                </Text>
-              </Pressable>
-
-              {categoryFilter !== "all" ? (
-                <Pressable
-                  style={styles.filterChipClear}
-                  hitSlop={10}
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    setCategoryFilter("all");
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("booking.clearCategoryFilterA11y")}
-                >
-                  <Ionicons name="close" size={12} color="#FFFFFF" />
-                </Pressable>
-              ) : null}
-            </View>
-
-            <View style={[styles.filterChip, !!dateFilter && styles.filterChipActive]}>
-              <Pressable
-                style={styles.filterChipBody}
-                onPress={() => setDateMenuOpen(true)}
-              >
-                <Ionicons
-                  name="calendar-outline"
-                  size={14}
-                  color={dateFilter ? "#FFFFFF" : "#7C5F46"}
-                />
-                <Text
-                  style={[styles.filterButtonText, !!dateFilter && styles.filterButtonTextActive]}
-                  numberOfLines={1}
-                >
-                  {dateFilter ? formatLocalizedDateFromYMD(dateFilter, language) : t("booking.filterDateButton")}
-                </Text>
-              </Pressable>
-
-              {dateFilter ? (
-                <Pressable
-                  style={styles.filterChipClear}
-                  hitSlop={10}
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    setDateFilter(null);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("booking.clearDateFilterA11y")}
-                >
-                  <Ionicons name="close" size={12} color="#FFFFFF" />
-                </Pressable>
-              ) : null}
-            </View>
-
-            <View style={[styles.filterChip, !!locationFilter && styles.filterChipActive]}>
-              <Pressable
-                style={styles.filterChipBody}
-                onPress={() => {
-                  setLocationQuery("");
-                  setLocationMenuOpen(true);
-                }}
-              >
-                <Ionicons
-                  name="location-outline"
-                  size={14}
-                  color={locationFilter ? "#FFFFFF" : "#7C5F46"}
-                />
-                <Text
-                  style={[
-                    styles.filterButtonText,
-                    !!locationFilter && styles.filterButtonTextActive,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {locationFilter ? locationFilter.label : t("booking.filterLocationButton")}
-                </Text>
-              </Pressable>
-
-              {locationFilter ? (
-                <Pressable
-                  style={styles.filterChipClear}
-                  hitSlop={10}
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    setLocationFilter(null);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("booking.clearLocationFilterA11y")}
-                >
-                  <Ionicons name="close" size={12} color="#FFFFFF" />
-                </Pressable>
-              ) : null}
-            </View>
-          </ScrollView>
+            <Ionicons name="options-outline" size={18} color="#7C5F46" />
+            <Text style={styles.filtersButtonText}>{t("booking.filtersButton")}</Text>
+            {hasActiveFilters ? <View style={styles.filtersButtonBadge} /> : null}
+          </Pressable>
         </View>
 
         {/* One shared Upcoming/In Progress/Completed tab row, above every
@@ -5522,6 +5419,162 @@ useEffect(() => {
         onCancel={closeRepublishModal}
         submitting={republishSubmitting}
       />
+
+      {/* The single "Filters" entry sheet — Category/Date/Location rows
+          below HAND OFF to the SAME categoryMenuOpen/dateMenuOpen/
+          locationMenuOpen modals just below (their own state/logic is
+          completely unchanged): tapping a row closes THIS modal and opens
+          the target one in the same state update, so two <Modal>s are never
+          visible at once. RN's Modal renders via a native overlay above the
+          ENTIRE app (not just this screen — that's how it can sit above a
+          tab bar at all), and two of them open simultaneously is what was
+          leaving the whole app's touch dispatch stuck after closing either
+          one. Also only mounted in the tree at all while open (conditional
+          render, not a permanently-mounted `visible={bool}` Modal) per the
+          same reasoning. Apply Filters just closes this sheet (filters
+          already apply live as they're picked, exactly like before); Clear
+          All reuses the existing handleClearFilters unchanged. */}
+      {filtersModalOpen ? (
+        <Modal
+          visible
+          transparent
+          animationType="slide"
+          onRequestClose={() => setFiltersModalOpen(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <Pressable style={{ flex: 1 }} onPress={() => setFiltersModalOpen(false)} />
+
+            <DirectionalCard style={styles.modalSheet}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>{t("booking.filtersButton")}</Text>
+
+              <Pressable
+                style={styles.filtersModalRow}
+                onPress={() => {
+                  setFiltersModalOpen(false);
+                  setCategoryMenuOpen(true);
+                }}
+              >
+                <View style={styles.filtersModalRowLabel}>
+                  <Ionicons name="pricetag-outline" size={18} color="#7C5F46" />
+                  <Text style={styles.filtersModalRowLabelText}>{t("booking.filterCategoryButton")}</Text>
+                </View>
+                <View style={styles.filtersModalRowValue}>
+                  <Text style={[styles.filtersModalRowValueText, categoryFilter !== "all" && styles.filtersModalRowValueTextActive]} numberOfLines={1}>
+                    {categoryFilter === "all"
+                      ? t("booking.filterAllCategories")
+                      : translateCategoryLabel(
+                          CATEGORY_FILTER_META_KEY[categoryFilter],
+                          getCategoryMeta(CATEGORY_FILTER_META_KEY[categoryFilter]).label,
+                          t,
+                        )}
+                  </Text>
+                  {categoryFilter !== "all" ? (
+                    <Pressable
+                      hitSlop={10}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        setCategoryFilter("all");
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t("booking.clearCategoryFilterA11y")}
+                    >
+                      <Ionicons name="close-circle" size={18} color="#8B7B6B" />
+                    </Pressable>
+                  ) : (
+                    <Ionicons name="chevron-forward" size={16} color="#8B7B6B" />
+                  )}
+                </View>
+              </Pressable>
+
+              <Pressable
+                style={styles.filtersModalRow}
+                onPress={() => {
+                  setFiltersModalOpen(false);
+                  setDateMenuOpen(true);
+                }}
+              >
+                <View style={styles.filtersModalRowLabel}>
+                  <Ionicons name="calendar-outline" size={18} color="#7C5F46" />
+                  <Text style={styles.filtersModalRowLabelText}>{t("booking.filterDateButton")}</Text>
+                </View>
+                <View style={styles.filtersModalRowValue}>
+                  <Text style={[styles.filtersModalRowValueText, !!dateFilter && styles.filtersModalRowValueTextActive]} numberOfLines={1}>
+                    {dateFilter ? formatLocalizedDateFromYMD(dateFilter, language) : t("booking.filterAllDates")}
+                  </Text>
+                  {dateFilter ? (
+                    <Pressable
+                      hitSlop={10}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        setDateFilter(null);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t("booking.clearDateFilterA11y")}
+                    >
+                      <Ionicons name="close-circle" size={18} color="#8B7B6B" />
+                    </Pressable>
+                  ) : (
+                    <Ionicons name="chevron-forward" size={16} color="#8B7B6B" />
+                  )}
+                </View>
+              </Pressable>
+
+              <Pressable
+                style={styles.filtersModalRow}
+                onPress={() => {
+                  setFiltersModalOpen(false);
+                  setLocationQuery("");
+                  setLocationMenuOpen(true);
+                }}
+              >
+                <View style={styles.filtersModalRowLabel}>
+                  <Ionicons name="location-outline" size={18} color="#7C5F46" />
+                  <Text style={styles.filtersModalRowLabelText}>{t("booking.filterLocationButton")}</Text>
+                </View>
+                <View style={styles.filtersModalRowValue}>
+                  <Text style={[styles.filtersModalRowValueText, !!locationFilter && styles.filtersModalRowValueTextActive]} numberOfLines={1}>
+                    {locationFilter ? locationFilter.label : t("booking.filterAllLocations")}
+                  </Text>
+                  {locationFilter ? (
+                    <Pressable
+                      hitSlop={10}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        setLocationFilter(null);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t("booking.clearLocationFilterA11y")}
+                    >
+                      <Ionicons name="close-circle" size={18} color="#8B7B6B" />
+                    </Pressable>
+                  ) : (
+                    <Ionicons name="chevron-forward" size={16} color="#8B7B6B" />
+                  )}
+                </View>
+              </Pressable>
+
+              <Pressable
+                style={styles.rebookSearchButton}
+                onPress={() => setFiltersModalOpen(false)}
+              >
+                <Text style={styles.rebookSearchText}>{t("booking.applyFiltersButton")}</Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.filterClearButton, { marginTop: 10 }]}
+                onPress={() => {
+                  handleClearFilters();
+                  setFiltersModalOpen(false);
+                }}
+              >
+                <Ionicons name="close-outline" size={14} color="#F58220" />
+                <Text style={styles.filterClearButtonText}>{t("booking.clearAllFiltersButton")}</Text>
+              </Pressable>
+            </DirectionalCard>
+          </View>
+        </Modal>
+      ) : null}
 
       <Modal
         visible={categoryMenuOpen}
@@ -6005,6 +6058,76 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 20,
   },
+  // [ Search field ][ Filters button ] row — searchRowFlex overrides
+  // searchRow's own marginBottom (the wrapping row below carries it
+  // instead) and makes it share the row with the Filters button.
+  searchFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 20,
+  },
+  searchRowFlex: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  filtersButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  filtersButtonText: {
+    color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  filtersButtonBadge: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#F58220",
+  },
+  filtersModalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EFE7DE",
+  },
+  filtersModalRowLabel: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  filtersModalRowLabelText: {
+    color: "#111827",
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  filtersModalRowValue: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 1,
+    maxWidth: "50%",
+  },
+  filtersModalRowValueText: {
+    color: "#8B7B6B",
+    fontWeight: "700",
+    fontSize: 14,
+    flexShrink: 1,
+  },
+  filtersModalRowValueTextActive: {
+    color: "#F58220",
+  },
   searchInput: {
     flex: 1,
     color: "#111827",
@@ -6091,55 +6214,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   driverBucketButtonTextActive: {
-    color: "#FFFFFF",
-  },
-  filterRow: {
-    marginBottom: 16,
-  },
-  filterRowContent: {
-    flexDirection: "row",
-    gap: 10,
-    paddingHorizontal: 2,
-  },
-  filterChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    maxWidth: 190,
-    borderWidth: 1,
-    borderColor: "#E7DCD1",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-  },
-  filterChipActive: {
-    backgroundColor: "#F58220",
-    borderColor: "#F58220",
-  },
-  filterChipBody: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    flexShrink: 1,
-    minWidth: 0,
-  },
-  filterChipClear: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.35)",
-  },
-  filterButtonText: {
-    flexShrink: 1,
-    color: "#7C5F46",
-    fontWeight: "800",
-    fontSize: 12,
-  },
-  filterButtonTextActive: {
     color: "#FFFFFF",
   },
   filterClearButton: {
