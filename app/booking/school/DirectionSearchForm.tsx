@@ -1229,7 +1229,7 @@ const localStyles = {
     justifyContent: "center" as const,
     alignItems: "center" as const,
     gap: 8,
-    marginTop: 4,
+    marginTop: 18,
   },
   searchText: {
     color: "#FFFFFF",

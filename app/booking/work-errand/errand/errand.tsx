@@ -287,34 +287,14 @@ export default function ErrandsScreen() {
               return (
                 <View key={driver.id} style={styles.card}>
                   <View style={styles.header}>
-                    <View style={styles.profileRow}>
-                      <View style={styles.avatar}>
-                        <Ionicons
-                          name="person-outline"
-                          size={27}
-                          color="#F58220"
-                        />
-                      </View>
+                    <View style={styles.destinationHeaderRow}>
+                      <Text style={styles.destinationIcon}>
+                        {DESTINATION_ICONS[driver.destination] || "📍"}
+                      </Text>
 
-                      <View style={styles.profileInfo}>
-                        <Text style={styles.name}>{driver.name}</Text>
-
-                        <View style={styles.infoRow}>
-                          <Text style={styles.infoText}>
-                            {driver.gender === "male" ? "♂" : "♀"}
-                          </Text>
-
-                          <Text style={styles.dot}>•</Text>
-
-                          <Ionicons
-                            name="location-outline"
-                            size={14}
-                            color="#7A5C4B"
-                          />
-
-                          <Text style={styles.infoText}>{driver.location}</Text>
-                        </View>
-                      </View>
+                      <Text style={styles.destinationText}>
+                        {driver.destinationLabel}
+                      </Text>
                     </View>
 
                     <View style={styles.ratingBox}>
@@ -334,14 +314,34 @@ export default function ErrandsScreen() {
                     </View>
                   </View>
 
-                  <View style={styles.destinationBox}>
-                    <Text style={styles.destinationIcon}>
-                      {DESTINATION_ICONS[driver.destination] || "📍"}
-                    </Text>
+                  <View style={styles.profileRow}>
+                    <View style={styles.avatar}>
+                      <Ionicons
+                        name="person-outline"
+                        size={22}
+                        color="#F58220"
+                      />
+                    </View>
 
-                    <Text style={styles.destinationText}>
-                      {driver.destinationLabel}
-                    </Text>
+                    <View style={styles.profileInfo}>
+                      <Text style={styles.name}>{driver.name}</Text>
+
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoText}>
+                          {driver.gender === "male" ? "♂" : "♀"}
+                        </Text>
+
+                        <Text style={styles.dot}>•</Text>
+
+                        <Ionicons
+                          name="location-outline"
+                          size={14}
+                          color="#7A5C4B"
+                        />
+
+                        <Text style={styles.infoText}>{driver.location}</Text>
+                      </View>
+                    </View>
                   </View>
 
                   <View style={styles.detailsBox}>
@@ -595,19 +595,27 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
+    alignItems: "center",
     marginBottom: 12,
+  },
+  destinationHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    gap: 8,
+    marginRight: 10,
   },
   profileRow: {
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
-    gap: 10,
+    gap: 8,
+    marginBottom: 14,
   },
   avatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "#FFF3E6",
     alignItems: "center",
     justifyContent: "center",
@@ -616,10 +624,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    fontSize: 17,
-    fontWeight: "900",
+    fontSize: 14,
+    fontWeight: "700",
     color: "#111827",
-    marginBottom: 4,
+    marginBottom: 3,
   },
   infoRow: {
     flexDirection: "row",
@@ -653,25 +661,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#7A5C4B",
   },
-  destinationBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "#FFF8F0",
-    borderWidth: 1,
-    borderColor: "#FFE2C5",
-    borderRadius: 15,
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-    marginBottom: 12,
-  },
   destinationIcon: {
-    fontSize: 19,
+    fontSize: 22,
   },
   destinationText: {
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: "900",
     color: "#111827",
+    flexShrink: 1,
   },
   detailsBox: {
     flexDirection: "row",

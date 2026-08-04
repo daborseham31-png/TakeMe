@@ -18,6 +18,7 @@ import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "r
 import { useTranslation } from "react-i18next";
 
 import { auth } from "../../../firebase";
+import { getCategoryMeta } from "../../booking/bookingsLib";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import { IsraelLocation } from "../../booking/israelLocations";
@@ -45,6 +46,13 @@ import {
   validateDateAndTimeNotPassed,
 } from "./driverHelpers";
 import { recordUsedFormValues, useSavedFormValues } from "./savedFormValuesLib";
+
+// Single source of truth for "school"'s category color, shared with every
+// other place school shows up (My Bookings' catChip, school.tsx's own top
+// badge, RideForm.tsx's weekly-school submit button) — the publish button
+// below reads this instead of a separately hardcoded value, so it can never
+// silently drift from CATEGORY_META again.
+const schoolCategoryMeta = getCategoryMeta("school");
 
 const MODE_TABS: { key: DriverSchoolTripMode; labelKey: string }[] = [
   { key: "outbound_only", labelKey: "schoolTrip.outboundOnly" },
@@ -704,7 +712,7 @@ export default function SchoolTripForm({ headerTitle, headerSubtitle }: Props) {
       <Pressable
         style={[
           styles.submitButton,
-          localStyles.publishButton,
+          { backgroundColor: schoolCategoryMeta.color },
           loading && styles.submitButtonDisabled,
         ]}
         onPress={handleSubmit}
@@ -749,9 +757,6 @@ const localStyles = {
   },
   tabTextActive: {
     color: "#3B82F6",
-  },
-  publishButton: {
-    backgroundColor: "#3B82F6",
   },
   sectionHeader: {
     flexDirection: "row" as const,

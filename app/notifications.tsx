@@ -301,6 +301,14 @@ export default function NotificationsScreen() {
       return;
     }
 
+    // Admin: a driver submitted a no-show appeal — open the admin detail
+    // screen directly (see driverNoShowLib.ts's notifyAllAdminsOfNewAppeal,
+    // which sets targetPage to exactly "admin/violations/{violationId}").
+    if (n.type === "noshow_appeal_submitted" && n.targetPage) {
+      router.push(`/${n.targetPage}` as any);
+      return;
+    }
+
     const tab = getBookingTabFromNotification(n);
 
     router.push({

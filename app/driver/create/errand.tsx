@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -21,6 +21,7 @@ import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import AutocompleteTextField from "../../components/AutocompleteTextField";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
+import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { fetchDriverEligibility } from "../driverEligibility";
 import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
 import { translateCategoryLabel } from "../../i18n/formatters";
@@ -31,6 +32,7 @@ import { recordUsedFormValues, useSavedFormValues } from "./savedFormValuesLib";
 import YesNoField from "./YesNoField";
 import {
   getDigitsOnly,
+  isValidCarPlate,
   normalize,
   normalizeTime,
   styles,
@@ -72,6 +74,25 @@ export default function ErrandJobScreen() {
   const [errandPrice, setErrandPrice] = useState("");
   const savedValues = useSavedFormValues();
   const [errandSeats, setErrandSeats] = useState("1");
+
+  const [car, setCar] = useState("");
+  const [carColor, setCarColor] = useState("");
+  const [carPlate, setCarPlate] = useState("");
+
+  // Prefill from the driver's own most-recently-used vehicle, same as
+  // RideForm.tsx/work.tsx — only into fields still empty at that point.
+  const [prefilledVehicle, setPrefilledVehicle] = useState(false);
+  useEffect(() => {
+    if (prefilledVehicle) return;
+    if (!savedValues.carModels.length && !savedValues.carColors.length && !savedValues.plateNumbers.length) {
+      return;
+    }
+
+    setCar((current) => current || savedValues.carModels[0] || "");
+    setCarColor((current) => current || savedValues.carColors[0] || "");
+    setCarPlate((current) => current || savedValues.plateNumbers[0] || "");
+    setPrefilledVehicle(true);
+  }, [savedValues, prefilledVehicle]);
 
   const handleSubmit = async () => {
     const user = auth.currentUser;
@@ -118,9 +139,20 @@ export default function ErrandJobScreen() {
       !errandStartTime ||
       !errandEndTime ||
       !errandPrice ||
-      !errandSeats
+      !errandSeats ||
+      !car ||
+      !carColor ||
+      !carPlate
     ) {
       Alert.alert(t("auth.missingDetails"), t("validation.fillAllFields"));
+      return;
+    }
+
+    if (!isValidCarPlate(carPlate)) {
+      Alert.alert(
+        t("validation.invalidVehicleNumberTitle"),
+        t("validation.invalidVehicleNumber"),
+      );
       return;
     }
 
@@ -195,6 +227,10 @@ export default function ErrandJobScreen() {
 
         languages,
 
+        car,
+        carColor,
+        carPlate,
+
         canTakeKids,
         allowsPets,
 
@@ -230,7 +266,7 @@ export default function ErrandJobScreen() {
         createdAt: serverTimestamp(),
       });
 
-      recordUsedFormValues({ price: String(cleanPrice) });
+      recordUsedFormValues({ carModel: car, carColor, plateNumber: carPlate, price: String(cleanPrice) });
 
       Alert.alert(t("common.success"), t("driver.errandCreated"));
       router.replace("/(tabs)/home" as any);
@@ -392,9 +428,26 @@ export default function ErrandJobScreen() {
             onValueChange={setAllowsPets}
           />
 
+          <View style={{ height: 20 }} />
+
+          <VehicleDetailsSection
+            car={car}
+            onChangeCar={setCar}
+            carColor={carColor}
+            onChangeCarColor={setCarColor}
+            carPlate={carPlate}
+            onChangeCarPlate={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
+            savedValues={savedValues}
+          />
+
           <Pressable
             style={[
               styles.submitButton,
+              // Was previously relying on styles.submitButton's own
+              // hardcoded default (#F58220), which only coincidentally
+              // matched errands' actual category color — now explicit, so
+              // it can never silently drift from CATEGORY_META again.
+              { backgroundColor: errandCategoryMeta.color },
               loading && styles.submitButtonDisabled,
             ]}
             onPress={handleSubmit}

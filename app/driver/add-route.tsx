@@ -221,10 +221,11 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   title: {
-    fontSize: 31,
+    fontSize: 26,
     fontWeight: "900",
     color: "#111827",
-    lineHeight: 38,
+    lineHeight: 32,
+    textAlign: "center",
   },
   subtitle: {
     fontSize: 16,
@@ -232,6 +233,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 8,
     lineHeight: 22,
+    textAlign: "center",
   },
   grid: {
     flexDirection: "row",

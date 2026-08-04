@@ -23,6 +23,8 @@ import AdminSchoolKioskLinksScreen from "../admin/school-kiosk-links";
 import AdminSettingsScreen from "../admin/settings";
 import AdminUserDetailScreen from "../admin/users/[id]";
 import AdminUsersScreen from "../admin/users";
+import AdminViolationDetailScreen from "../admin/violations/[id]";
+import AdminViolationsScreen from "../admin/violations";
 import LoginScreen from "../LoginScreen";
 import { appHistory } from "./expoRouterShim";
 
@@ -59,6 +61,10 @@ export default function AppRouter() {
           <Route path="reports/:id" element={<AdminReportDetailScreen />} />
           {/* app/admin/notifications.tsx */}
           <Route path="notifications" element={<AdminNotificationsScreen />} />
+          {/* app/admin/violations.tsx */}
+          <Route path="violations" element={<AdminViolationsScreen />} />
+          {/* app/admin/violations/[id].tsx */}
+          <Route path="violations/:id" element={<AdminViolationDetailScreen />} />
           {/* app/admin/school-kiosk-links.tsx */}
           <Route path="school-kiosk-links" element={<AdminSchoolKioskLinksScreen />} />
           {/* app/admin/settings.tsx */}

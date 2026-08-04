@@ -46,6 +46,8 @@ import {
   writeCancellationViolationIfNew,
 } from "./driverViolationsLib";
 
+import { hasScheduledDeparturePassed, isDriverNoShowTripStatus } from "./driverNoShowCore";
+
 import { notify } from "./work-errand/workErrandLib";
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -209,17 +211,33 @@ export const isTripStatusCompleted = (booking: any) =>
 export const isTripStatusActive = (booking: any) =>
   ACTIVE_TRIP_STATUSES.includes(getBookingTripStatus(booking));
 
-export const canStartTrip = (booking: any): boolean => {
+// A trip whose scheduled departure has already passed must never show as
+// startable, even on the SAME calendar day — a 00:15 trip is just as overdue
+// at 14:18 the same day as a trip whose date itself is in the past.
+// hasScheduledDeparturePassed (driverNoShowCore.ts) is the same pure check
+// the no-show system itself is built on, so "Start Driving" going away and
+// the trip eventually becoming a no-show violation 15 minutes later are
+// always consistent with each other, never two independent opinions about
+// the same moment.
+export const canStartTrip = (booking: any, now: Date = new Date()): boolean => {
   return (
     getBookingTripStatus(booking) === "booked" &&
-    getTripDateState(booking) === "today"
+    getTripDateState(booking) === "today" &&
+    !hasScheduledDeparturePassed(getBookingDateYMD(booking), getBookingTime(booking), now)
   );
 };
 
 // null when the trip can be started right now; otherwise the exact message
 // to show under the disabled Start Trip button.
-export const getStartTripBlockedReason = (booking: any): string | null => {
-  if (canStartTrip(booking)) return null;
+export const getStartTripBlockedReason = (booking: any, now: Date = new Date()): string | null => {
+  if (canStartTrip(booking, now)) return null;
+
+  if (
+    getTripDateState(booking) === "today" &&
+    hasScheduledDeparturePassed(getBookingDateYMD(booking), getBookingTime(booking), now)
+  ) {
+    return i18n.t("booking.tripDatePassed");
+  }
 
   switch (getTripDateState(booking)) {
     case "future":
@@ -442,6 +460,14 @@ export type PassengerTripStatus =
   | "cancelled";
 
 export const getPassengerTripStatus = (row: any): PassengerTripStatus => {
+  // Driver no-show violation (see driverNoShowLib.ts — a completely separate
+  // system from the driver-cancellation violations above/below). The trip
+  // never happened from the passenger's side, so this reads as "cancelled"
+  // (bucketed into Completed's own cancelled section below) rather than
+  // "booked"/Upcoming. Checked before any _kind-specific branch since every
+  // kind's underlying doc gets the same tripStatus write.
+  if (isDriverNoShowTripStatus(row.tripStatus)) return "cancelled";
+
   if (row._kind === "ride") {
     // RideBooking's lifecycle lives on `.status` (booked/on_the_way/
     // arrived/completed/cancelled) — startRide/arriveRide/finishRide in
@@ -529,12 +555,29 @@ export type DriverTripStatus =
   | "driverArrived"
   | "inProgress"
   | "completed"
-  | "cancelled";
+  | "cancelled"
+  // Driver no-show violation — deliberately its OWN status, never
+  // "completed" (a missed trip was never completed) and never "cancelled"
+  // either (the driver didn't cancel it — see getDriverTripBucket, which
+  // excludes this status from every generic bucket entirely).
+  | "noShowViolation";
 
 const DRIVER_ON_THE_WAY_VALUES = ["on_the_way", "driver_on_way"];
 const DRIVER_ARRIVED_VALUES = ["arrived", "arrived_pickup"];
 
 export const getDriverTripStatus = (row: any): DriverTripStatus => {
+  // Driver no-show violation (see driverNoShowLib.ts — a completely separate
+  // system from the driver-cancellation violations elsewhere in this file).
+  // A missed trip was NEVER completed, so this must never fall through to
+  // "completed" — see getDriverTripBucket below, which excludes this status
+  // from Upcoming/In Progress/Completed/Unbooked Trips entirely. The full
+  // rich detail (route, passengers, payment/refund, appeal status) lives in
+  // the dedicated Violations tab (driverNoShowLib.ts's
+  // subscribeDriverViolations), not in this generic card. Checked before any
+  // _kind-specific branch since every kind's underlying doc gets the same
+  // tripStatus write.
+  if (isDriverNoShowTripStatus(row.tripStatus)) return "noShowViolation";
+
   // Only a published trip LISTING ("trip": driverRoutes/workJobs/errandJobs,
   // "schoolTrip": SchoolTrip) can ever be "waiting"/"expired" — every other
   // kind is, by construction, always a real booking. row.waitingForBooking
@@ -571,7 +614,14 @@ export const getDriverTripStatus = (row: any): DriverTripStatus => {
 
 export const isCancelledDriverStatus = (status: DriverTripStatus) => status === "cancelled";
 
-export const getDriverTripBucket = (row: any): BookingBucket => {
+// Driver no-show rows return null here — deliberately EXCLUDED from every
+// generic bucket (never Upcoming, never Completed, never Unbooked Trips).
+// Their only real home is the dedicated Violations tab in bookings.tsx,
+// populated from an entirely separate Firestore subscription
+// (driverNoShowLib.ts's subscribeDriverViolations), not from these generic
+// driver rows at all — so a row bucketed null here simply never renders
+// anywhere in the generic Upcoming/In Progress/Completed pipeline.
+export const getDriverTripBucket = (row: any): BookingBucket | null => {
   switch (getDriverTripStatus(row)) {
     case "waitingForBooking":
     case "expiredNoBookings":
@@ -582,6 +632,8 @@ export const getDriverTripBucket = (row: any): BookingBucket => {
       return "upcoming";
     case "inProgress":
       return "inProgress";
+    case "noShowViolation":
+      return null;
     default:
       // "completed" and "cancelled" both bucket as Completed — the UI
       // (bookings.tsx) renders cancelled rows in their own clearly

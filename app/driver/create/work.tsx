@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -20,15 +20,18 @@ import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
+import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { fetchDriverEligibility } from "../driverEligibility";
 import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
 import { translateCategoryLabel } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { backIconName } from "../../i18n/rtl";
 import DateInput, { TimeInput } from "./DateInput";
+import { recordUsedFormValues, useSavedFormValues } from "./savedFormValuesLib";
 
 import {
   getDigitsOnly,
+  isValidCarPlate,
   normalize,
   normalizeTime,
   styles,
@@ -81,6 +84,26 @@ export default function WorkJobScreen() {
 
   const [hourlyPay, setHourlyPay] = useState("");
   const [workersNeeded, setWorkersNeeded] = useState("1");
+
+  const [car, setCar] = useState("");
+  const [carColor, setCarColor] = useState("");
+  const [carPlate, setCarPlate] = useState("");
+  const savedValues = useSavedFormValues();
+
+  // Prefill from the driver's own most-recently-used vehicle, same as
+  // RideForm.tsx/errand.tsx — only into fields still empty at that point.
+  const [prefilledVehicle, setPrefilledVehicle] = useState(false);
+  useEffect(() => {
+    if (prefilledVehicle) return;
+    if (!savedValues.carModels.length && !savedValues.carColors.length && !savedValues.plateNumbers.length) {
+      return;
+    }
+
+    setCar((current) => current || savedValues.carModels[0] || "");
+    setCarColor((current) => current || savedValues.carColors[0] || "");
+    setCarPlate((current) => current || savedValues.plateNumbers[0] || "");
+    setPrefilledVehicle(true);
+  }, [savedValues, prefilledVehicle]);
 
   const handleSubmit = async () => {
     if (submittingRef.current) return;
@@ -138,9 +161,20 @@ export default function WorkJobScreen() {
       !startTime ||
       !endTime ||
       !hourlyPay ||
-      !workersNeeded
+      !workersNeeded ||
+      !car ||
+      !carColor ||
+      !carPlate
     ) {
       Alert.alert(t("auth.missingDetails"), t("validation.fillAllFields"));
+      return;
+    }
+
+    if (!isValidCarPlate(carPlate)) {
+      Alert.alert(
+        t("validation.invalidVehicleNumberTitle"),
+        t("validation.invalidVehicleNumber"),
+      );
       return;
     }
 
@@ -222,6 +256,10 @@ export default function WorkJobScreen() {
 
         languages,
 
+        car,
+        carColor,
+        carPlate,
+
         jobTitle,
         jobTitleNormalized: normalize(jobTitle),
 
@@ -271,6 +309,8 @@ export default function WorkJobScreen() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      recordUsedFormValues({ carModel: car, carColor, plateNumber: carPlate });
 
       Alert.alert(t("common.success"), t("driver.workJobCreated"));
       router.replace("/(tabs)/home" as any);
@@ -423,6 +463,18 @@ export default function WorkJobScreen() {
               </View>
             </View>
           </View>
+
+          <View style={{ height: 20 }} />
+
+          <VehicleDetailsSection
+            car={car}
+            onChangeCar={setCar}
+            carColor={carColor}
+            onChangeCarColor={setCarColor}
+            carPlate={carPlate}
+            onChangeCarPlate={(value) => setCarPlate(getDigitsOnly(value).slice(0, 9))}
+            savedValues={savedValues}
+          />
 
           <Pressable
             style={[

@@ -333,6 +333,167 @@ exports.expireStaleVerificationCodes = onSchedule("every 60 minutes", async () =
 });
 
 // ---------------------------------------------------------------------------
+// Driver NO-SHOW violation detection — DORMANT PARITY CODE, kept in sync
+// with the actually-live detection path for this feature
+// (cloudflare-worker/src/noShowDetection.ts, run via that Worker's own
+// `scheduled()` cron trigger — see that file's header for the full trust
+// model). This exports the identical "every 5 minutes" schedule and the same
+// eligibility rule (mirrors app/booking/driverNoShowCore.ts's
+// evaluateNoShowEligibility), so that IF this project is ever upgraded to
+// the Blaze plan, this function can be deployed as a second, redundant
+// detection path with no further code changes needed — exactly the same
+// "present but not currently deployed" convention this file already
+// documents at its own header for the School Child functions that were
+// moved to the Worker instead. Completely separate from the driver
+// CANCELLATION violation system elsewhere in this app.
+// ---------------------------------------------------------------------------
+
+const NO_SHOW_GRACE_PERIOD_MINUTES = 15;
+const NO_SHOW_RECONCILE_LOOKBACK_DAYS = 30;
+
+function combineNoShowScheduledDateTime(date, time) {
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ""));
+  if (!dateMatch) return null;
+
+  const timeMatch = /^(\d{1,2}):(\d{2})$/.exec(String(time || "").trim());
+  const hours = timeMatch ? Number(timeMatch[1]) : 0;
+  const minutes = timeMatch ? Number(timeMatch[2]) : 0;
+
+  const combined = new Date(
+    Number(dateMatch[1]),
+    Number(dateMatch[2]) - 1,
+    Number(dateMatch[3]),
+    hours,
+    minutes,
+  );
+  return Number.isNaN(combined.getTime()) ? null : combined;
+}
+
+async function processNoShowTripCandidate(tripDoc, tripCollection, bookingCollection, bookingTripField, category, now) {
+  const data = tripDoc.data();
+  if (!data.driverId) return null;
+  if (data.active === false || data.status === "cancelled" || data.status === "completed") return null;
+  if (data.tripStatus === "driver_no_show") return null;
+
+  const scheduledAt = combineNoShowScheduledDateTime(data.date, data.time || data.departureTime);
+  if (!scheduledAt) return null;
+
+  const gracePeriodEndedAt = new Date(scheduledAt.getTime() + NO_SHOW_GRACE_PERIOD_MINUTES * 60 * 1000);
+  if (now < gracePeriodEndedAt.getTime()) return null;
+
+  const violationRef = db.collection("driverViolations").doc(tripDoc.id);
+  const existing = await violationRef.get();
+  if (existing.exists) return null;
+
+  const bookingsSnap = await db
+    .collection(bookingCollection)
+    .where(bookingTripField, "==", tripDoc.id)
+    .where("status", "!=", "cancelled")
+    .get();
+  if (bookingsSnap.empty) return null;
+
+  const passengerIds = [];
+  const paymentMethods = new Set();
+  let paidAmount = 0;
+  bookingsSnap.forEach((b) => {
+    const bd = b.data();
+    if (bd.passengerId) passengerIds.push(bd.passengerId);
+    if (bd.paymentMethod) paymentMethods.add(bd.paymentMethod);
+    paidAmount += Number(bd.price) || 0;
+  });
+
+  const paymentMethodsArr = Array.from(paymentMethods);
+  const refundStatus =
+    paymentMethodsArr.length > 0 && paymentMethodsArr.every((m) => m === "cash")
+      ? "not_required"
+      : "manual_refund_pending";
+
+  const batch = db.batch();
+  batch.set(violationRef, {
+    driverId: data.driverId,
+    tripId: tripDoc.id,
+    bookingId: bookingsSnap.docs[0]?.id || null,
+    schoolTripId: tripCollection === "schoolTrips" ? tripDoc.id : null,
+    category,
+    violationType: "driver_no_show",
+    scheduledAt: admin.firestore.Timestamp.fromDate(scheduledAt),
+    gracePeriodEndedAt: admin.firestore.Timestamp.fromDate(gracePeriodEndedAt),
+    routeFrom: data.from || data.fromAddress || "",
+    routeTo: data.to || data.toAddress || "",
+    passengerIds,
+    passengerCount: passengerIds.length,
+    paymentMethods: paymentMethodsArr,
+    paidAmount,
+    currency: "ILS",
+    refundStatus,
+    description: "",
+    active: true,
+    status: "open",
+    appealId: null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    resolvedAt: null,
+    resolvedBy: null,
+    resolutionNote: null,
+  });
+  batch.update(tripDoc.ref, {
+    tripStatus: "driver_no_show",
+    active: false,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  bookingsSnap.forEach((b) => {
+    batch.update(b.ref, { tripStatus: "driver_no_show", updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+  });
+  batch.create(db.collection("notifications").doc(), {
+    userId: data.driverId,
+    receiverId: data.driverId,
+    senderId: null,
+    type: "driver_noshow_violation_created",
+    title: "Missed booked trip",
+    message: "A violation was recorded because a booked trip was not started or cancelled.",
+    bookingId: tripDoc.id,
+    targetTab: "driver",
+    roleTarget: "driver",
+    read: false,
+    readAt: null,
+    deleted: false,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  await batch.commit();
+  return tripDoc.id;
+}
+
+exports.detectDriverNoShowViolations = onSchedule("every 5 minutes", async () => {
+  const now = Date.now();
+  const lookbackYmd = new Date(now - NO_SHOW_RECONCILE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+
+  const [routesSnap, schoolTripsSnap] = await Promise.all([
+    db.collection("driverRoutes").where("date", ">=", lookbackYmd).get(),
+    db.collection("schoolTrips").where("date", ">=", lookbackYmd).get(),
+  ]);
+
+  for (const routeDoc of routesSnap.docs) {
+    await processNoShowTripCandidate(
+      routeDoc,
+      "driverRoutes",
+      "bookings",
+      "routeId",
+      routeDoc.data().bookingType === "weekly" ? "weekly" : "personal",
+      now,
+    ).catch((error) => console.error("detectDriverNoShowViolations: route failed", routeDoc.id, error));
+  }
+
+  for (const tripDoc of schoolTripsSnap.docs) {
+    await processNoShowTripCandidate(tripDoc, "schoolTrips", "schoolBookings", "schoolTripId", "school", now).catch(
+      (error) => console.error("detectDriverNoShowViolations: school trip failed", tripDoc.id, error),
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Driver-cancellation replacement search — when a driver cancels a
 // schoolTrips doc that already has bookings, this:
 //   1. Marks every affected (still "booked") schoolBookings doc cancelled +
@@ -611,6 +772,10 @@ function routeForNotificationType(type) {
   if (type === "trip_started") return "/booking/live-tracking";
   if (type === "school_trip_match") return "/booking/school/trip-confirm";
   if (type === "school_trip_replacement") return "/booking/school/replacement-offer";
+  if (type === "driver_noshow_violation_created") return "/(tabs)/bookings";
+  if (type === "driver_noshow_passenger_notice") return "/(tabs)/bookings";
+  if (type === "noshow_appeal_approved") return "/(tabs)/bookings";
+  if (type === "noshow_appeal_rejected") return "/(tabs)/bookings";
   return "/(tabs)/bookings";
 }
 

@@ -217,6 +217,48 @@ service cloud.firestore {
           newStanding.get("lastSuspensionLiftedAt", null);
     }
 
+    // Driver NO-SHOW violations (app/booking/driverNoShowLib.ts) — a
+    // COMPLETELY SEPARATE system from the driver-cancellation violations
+    // above (cancellationViolations). The only self-write a driver can ever
+    // make to their own driverViolations/{violationId} doc after it's
+    // created is submitting exactly one appeal (submitViolationAppeal): flip
+    // status open -> appeal_pending and set appealId, nothing else — never
+    // active/resolvedBy/resolvedAt/resolutionNote/driverId, and never a
+    // second time once appealId is already set (see the driverId ==
+    // resource.data.driverId + appealId-was-null checks below, which also
+    // block one driver appealing another driver's violation).
+    function isValidSelfNoShowAppealSubmission() {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      return isSelf(oldData.driverId) &&
+        newData.diff(oldData).affectedKeys().hasOnly(["status", "appealId", "updatedAt"]) &&
+        oldData.active == true &&
+        oldData.appealId == null &&
+        oldData.status == "open" &&
+        newData.status == "appeal_pending" &&
+        newData.appealId is string && newData.appealId.size() > 0;
+    }
+
+    // Admin resolution of a no-show violation (approveAppeal/rejectAppeal/
+    // confirmManualRefund in driverNoShowLib.ts) — an ALLOWLIST, not a blanket
+    // isAdmin() pass. An admin may only ever change the resolution/refund
+    // bookkeeping fields; every evidence field describing WHAT happened
+    // (driverId, tripId, bookingId, schoolTripId, violationType, category,
+    // scheduledAt, gracePeriodEndedAt, passengerIds, passengerCount,
+    // routeFrom/To, paymentMethods, paidAmount, currency, description,
+    // createdAt) is immutable to everyone once written by the trusted
+    // Worker — an admin resolving an appeal must never be able to rewrite
+    // the record of what actually happened.
+    function isValidAdminNoShowViolationUpdate() {
+      let changedKeys = request.resource.data.diff(resource.data).affectedKeys();
+      return changedKeys.hasOnly([
+        "status", "active", "appealId",
+        "resolvedAt", "resolvedBy", "resolutionNote",
+        "refundStatus", "refundedAt", "refundedBy", "refundReference",
+        "updatedAt"
+      ]);
+    }
+
     // Become a Driver's license OCR self-submission (app/driver/
     // verify-license.tsx's handleVerify) — the passenger's own client sets
     // isDriver + a pending "ai_verified" status alongside the OCR'd license
@@ -529,6 +571,68 @@ service cloud.firestore {
       allow read: if isAdmin() || (isSignedIn() && resource.data.reporterId == request.auth.uid);
       allow update: if isAdmin();
       allow delete: if isAdmin();
+    }
+
+    // Admin resolution of an appeal (approveAppeal/rejectAppeal) — an
+    // ALLOWLIST mirroring isValidAdminNoShowViolationUpdate() above. An
+    // admin may only ever touch the review/decision fields; the driver's
+    // own submitted evidence (violationId, driverId, tripId, reasonCategory,
+    // explanation, evidenceUrls, submittedAt, createdAt) is immutable once
+    // filed — an admin resolving an appeal must never be able to alter what
+    // the driver actually said.
+    function isValidAdminNoShowAppealUpdate() {
+      let changedKeys = request.resource.data.diff(resource.data).affectedKeys();
+      return changedKeys.hasOnly(["status", "reviewedAt", "reviewedBy", "adminDecisionNote", "updatedAt"]);
+    }
+
+    // ---------------------------------------------------------------
+    // Driver NO-SHOW violations + appeals (app/booking/driverNoShowLib.ts,
+    // cloudflare-worker/src/noShowDetection.ts) — a COMPLETELY SEPARATE
+    // system from users/{userId}/cancellationViolations above. The Cloudflare
+    // Worker's scheduled cron is the ONLY writer that may ever CREATE a
+    // violation, set tripStatus to driver_no_show, update affected booking
+    // records, or create the initial notifications — it authenticates as a
+    // Google service account via a signed OAuth2 token, not a Firebase Auth
+    // session, so those Firestore REST calls are authorized by IAM, not
+    // these rules, and bypass this `match` block entirely (same precedent as
+    // this project's existing schoolChildren.ts Worker routes). No Firebase
+    // Auth session — driver, admin, or otherwise — may ever create a
+    // driverViolations document; `allow create: if false` below is
+    // deliberate, not a placeholder. The mobile app's opportunistic check
+    // (runClientSideNoShowCheck was removed) may only ever read/subscribe —
+    // it must never attempt to write here.
+    match /driverViolations/{violationId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow create: if false;
+      allow update: if (isAdmin() && isValidAdminNoShowViolationUpdate()) || isValidSelfNoShowAppealSubmission();
+      allow delete: if false;
+    }
+
+    match /violationAppeals/{appealId} {
+      // A driver may create exactly one appeal for their OWN active
+      // violation that doesn't already have one — the get() below reads the
+      // referenced violation doc to enforce both "not someone else's
+      // violation" (test case 10) and "not a second appeal" (test case 11)
+      // at the database layer, not just in app code.
+      allow create: if isSignedIn() &&
+        request.resource.data.driverId == request.auth.uid &&
+        request.resource.data.status == "pending" &&
+        request.resource.data.reviewedBy == null &&
+        request.resource.data.reviewedAt == null &&
+        request.resource.data.explanation is string &&
+        request.resource.data.explanation.size() > 0 &&
+        get(/databases/$(database)/documents/driverViolations/$(request.resource.data.violationId))
+          .data.driverId == request.auth.uid &&
+        get(/databases/$(database)/documents/driverViolations/$(request.resource.data.violationId))
+          .data.appealId == null;
+      allow read: if isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      // Only resolution fields ever change here, and only an admin changes
+      // them (approveAppeal/rejectAppeal in driverNoShowLib.ts) — a driver
+      // can never edit their own submitted appeal (matches the product
+      // spec's "driver must not be able to edit the violation itself", and
+      // by extension, not the appeal record either, once submitted).
+      allow update: if isAdmin() && isValidAdminNoShowAppealUpdate();
+      allow delete: if false;
     }
 
     // ---------------------------------------------------------------
