@@ -29,6 +29,7 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../../firebase";
+import { isCancelledTripStatus } from "./driverViolationCore";
 import { LocationNames } from "./locationSearch";
 import type { PickupLocation } from "./PickupLocationPicker";
 import {
@@ -280,7 +281,7 @@ const normalizeDriverRouteItem = (id: string, data: any): FeedItem | null => {
 
   if (data.active === false) return null;
   if (data.isBooked === true || data.available === false) return null;
-  if (data.status === "completed" || data.status === "cancelled") return null;
+  if (data.status === "completed" || isCancelledTripStatus(data.status)) return null;
   if (data.deletedForDriver === true) return null;
 
   const isWeekly = !!data.isRecurring && Array.isArray(data.weeklyTrips);
@@ -360,6 +361,7 @@ const normalizeDriverRouteItem = (id: string, data: any): FeedItem | null => {
 const normalizeWorkJobItem = (id: string, data: any): FeedItem | null => {
   if (data.available === false) return null;
   if (data.status === "full" || data.status === "completed") return null;
+  if (isCancelledTripStatus(data.status)) return null;
   if (data.deletedForDriver === true) return null;
 
   const totalSeats = Number(
@@ -450,7 +452,7 @@ const normalizeErrandJobItem = (
   bookingCount: number,
 ): FeedItem | null => {
   if (data.deletedForDriver === true) return null;
-  if (data.status === "completed" || data.status === "cancelled") return null;
+  if (data.status === "completed" || isCancelledTripStatus(data.status)) return null;
   if (isErrandHiddenFromSearch(data.date, data.startTime, bookingCount)) return null;
 
   return {

@@ -7,6 +7,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   query,
   runTransaction,
@@ -68,14 +69,18 @@ import {
   sortMyBookings,
   translateCancellationError,
 } from "../booking/bookingsLib";
+import { computeApproxDistanceKm } from "../booking/pickupLocationCore";
 import {
   CANCELLATION_WARNING_MESSAGE_KEY,
   CancellationStandingResult,
   CancellationWarningPreview,
+  DRIVER_CANCELLED_TRIP_STATUS,
+  DriverCancellationViolation,
   evaluateDriverCancellationStanding,
   getDriverCancellationWarningPreview,
   getDriverSuspensionBlockedReason,
   readExistingCancellationViolation,
+  subscribeDriverCancellationViolations,
   writeCancellationViolationIfNew,
 } from "../booking/driverViolationsLib";
 import {
@@ -83,6 +88,7 @@ import {
   DriverViolation,
   subscribeActiveViolationCount,
   subscribeDriverViolations,
+  ViolationSource,
 } from "../booking/driverNoShowLib";
 import ViolationAppealModal from "../booking/ViolationAppealModal";
 import {
@@ -112,6 +118,7 @@ import {
   isAwaitingPayment,
   normalizeApplication,
   NormalizedApplication,
+  notify,
   rejectRequest,
   startJob,
   startState,
@@ -287,7 +294,7 @@ const tagTrip = (t: DriverTripItem): TaggedTrip => {
     ...t,
     _kind: "trip",
     activeBookingCount,
-    waitingForBooking: t.status !== "completed" && activeBookingCount === 0,
+    waitingForBooking: t.status === "ongoing" && activeBookingCount === 0,
   };
 };
 const tagBooking = (b: BookingItem): TaggedBooking => ({
@@ -516,13 +523,37 @@ export default function BookingsScreen() {
   type DriverBucketTab = BookingBucket | "violations";
   const [bucketTab, setBucketTab] = useState<DriverBucketTab>("upcoming");
   // Driver no-show violations (see driverNoShowLib.ts) — a completely
-  // separate system from the driver-cancellation violation warnings this
-  // file already handles elsewhere. Both are live subscriptions, not
+  // separate WRITE system from the driver-cancellation violations below
+  // (different collection, different creator: the Worker's cron vs. the
+  // driver's own client at cancel time), but both are shown together in the
+  // same Violations tab (see driverCancellationViolations/mergedViolations
+  // below) — a driver doesn't care which internal system produced a
+  // violation, only that it's theirs. Both are live subscriptions, not
   // one-shot fetches, so the Violations tab count/list and the active-count
-  // badge stay correct the instant an admin approves/rejects an appeal.
+  // badge stay correct the instant an admin approves/rejects an appeal or
+  // excuses a cancellation.
   const [driverViolations, setDriverViolations] = useState<DriverViolation[]>([]);
   const [activeViolationCount, setActiveViolationCount] = useState(0);
-  const [appealModalViolation, setAppealModalViolation] = useState<DriverViolation | null>(null);
+  // Driver-cancellation violations (see driverViolationCore.ts's
+  // writeCancellationViolationIfNew) — written by the driver's own client at
+  // cancel time (cancelDriverTrip/cancelGeneralBooking/cancelRideBooking/
+  // cancelApplication), stored under users/{uid}/cancellationViolations
+  // rather than the top-level driverViolations collection the no-show system
+  // uses, since firestore.rules deliberately denies EVERY client-side
+  // `create` on driverViolations (only the trusted Worker may write there —
+  // see driverNoShowLib.ts's header). Merged into the same on-screen list
+  // below rather than duplicated into driverViolations itself.
+  const [driverCancellationViolations, setDriverCancellationViolations] = useState<
+    DriverCancellationViolation[]
+  >([]);
+  // A minimal shape (never the whole violation object) since the modal only
+  // ever needs these three fields regardless of which violation system the
+  // appeal is for — see submitViolationAppeal's violationSource param.
+  const [appealModalViolation, setAppealModalViolation] = useState<{
+    id: string;
+    tripId: string;
+    violationSource: ViolationSource;
+  } | null>(null);
   // The search bar now searches ONLY by driver name (see getRowDriverName) —
   // kept as `search`/`setSearch` since it's the same existing field/state,
   // just narrowed in scope; the variable name is unchanged to minimize the
@@ -689,6 +720,7 @@ export default function BookingsScreen() {
     if (!uid) {
       setDriverViolations([]);
       setActiveViolationCount(0);
+      setDriverCancellationViolations([]);
       return;
     }
 
@@ -702,10 +734,19 @@ export default function BookingsScreen() {
       setActiveViolationCount,
       (error) => console.warn("subscribeActiveViolationCount failed", error),
     );
+    // Driver-cancellation violations — see driverCancellationViolations'
+    // own declaration above for why this is a SEPARATE collection/
+    // subscription from the two above, merged only on-screen.
+    const unsubscribeCancellationViolations = subscribeDriverCancellationViolations(
+      uid,
+      setDriverCancellationViolations,
+      (error) => console.warn("subscribeDriverCancellationViolations failed", error),
+    );
 
     return () => {
       unsubscribeList();
       unsubscribeCount();
+      unsubscribeCancellationViolations();
     };
   }, [uid]);
 
@@ -1314,6 +1355,26 @@ const bookedRouteIds = useMemo(() => {
     () => rowsForTab.filter((row) => getBucket(row) === "unbookedTrips"),
     [rowsForTab, getBucket],
   );
+
+  // The Violations tab shows BOTH violation systems together (no-show,
+  // driverViolations — see driverNoShowLib.ts; driver-cancellation,
+  // users/{uid}/cancellationViolations — see driverViolationCore.ts),
+  // merged into one chronological list and one combined active-count badge,
+  // since a driver doesn't care which internal system a violation came
+  // from. Sorted newest-first, matching each system's own subscription
+  // order individually.
+  const mergedViolationRows = useMemo(
+    () =>
+      [...driverViolations, ...driverCancellationViolations].sort(
+        (a, b) => b.createdAtSeconds - a.createdAtSeconds,
+      ),
+    [driverViolations, driverCancellationViolations],
+  );
+  const activeCancellationViolationCount = useMemo(
+    () => driverCancellationViolations.filter((v) => v.active).length,
+    [driverCancellationViolations],
+  );
+  const mergedActiveViolationCount = activeViolationCount + activeCancellationViolationCount;
 
   // Clear All's exact scope: the current role tab's FULL bucket, deliberately
   // computed from combinedPassengerRows/combinedDriverRows (never
@@ -2277,58 +2338,176 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     }
   };
 
+  // Terminal statuses for bookings/applications — anything else counts as a
+  // real, still-active booking for cancellation purposes.
+  const TERMINAL_BOOKING_STATUSES = new Set(["cancelled", "completed"]);
+  const TERMINAL_APPLICATION_STATUSES = new Set(["cancelled", "rejected", "completed"]);
+
   // "Cancel Trip" on a driver's own NOT-YET-completed listing (driverRoutes/
   // workJobs/errandJobs — Personal Ride, School Ride, and every other
-  // driver-created trip card) — the pre-departure counterpart to the trash
-  // icon on a completed one (confirmDeleteTrip above), gated by the SAME
+  // driver-created trip card) — cancels the WHOLE published listing
+  // permanently (never becomes bookable again — see
+  // DRIVER_CANCELLED_TRIP_STATUS/isCancelledTripStatus), gated by the SAME
   // 5-hour driver cancellation window every other category already uses
-  // (DRIVER_CANCEL_LOCK_HOURS — never the 2-hour passenger window). The
-  // deletedForDriver hide and the violation write (ONLY when this specific
-  // trip actually has at least one passenger/worker booking — see tagTrip's
-  // activeBookingCount) happen in the SAME transaction, exactly like
-  // cancelGeneralBooking does for an already-booked trip — never a
-  // separate, skippable step. A zero-booking listing affects nobody, so
-  // cancelling it never creates one.
+  // (DRIVER_CANCEL_LOCK_HOURS — never the 2-hour passenger window).
+  //
+  // Real, live booking/application documents are queried FRESH right before
+  // the transaction (Firestore transactions can only get-by-reference, never
+  // run a query — same accepted pattern documented in schoolTripsLib.ts's
+  // cancelSchoolTrip) — NEVER trusted from trip.activeBookingCount, which
+  // mirrors a cached counter (acceptedWorkersCount) for workJobs and is
+  // always 0 by construction for driverRoutes/errandJobs at this specific UI
+  // entry point (booked trips render as a booking/application row instead —
+  // see tagTrip's own comment), but is re-verified here regardless rather
+  // than assumed. Every affected booking/application is cancelled and its
+  // owner notified, and exactly one violation is created only when at least
+  // one real active booking/application existed — all in the SAME
+  // transaction as the listing's own cancellation, never a separate,
+  // skippable step, exactly like cancelGeneralBooking does for an
+  // already-booked trip.
   const cancelDriverTrip = async (
     trip: TaggedTrip,
   ): Promise<CancellationStandingResult | null> => {
+    if (!uid) return null;
+
     const tripRef = doc(db, trip.collectionName, trip.id);
+
+    type AffectedRecord = { ref: ReturnType<typeof doc>; ownerId: string; isApplication: boolean };
+    let affected: AffectedRecord[] = [];
+    let linkedDocs: { id: string; status: string }[] = [];
+
+    // A failed query must NEVER be silently treated as "zero bookings" —
+    // that would skip a real violation for a trip that genuinely had a
+    // passenger on it. Logged with full context, then re-thrown as-is (never
+    // swallowed) so runApp's own catch surfaces the REAL error to the driver
+    // instead of a generic message, and the cancellation itself never
+    // proceeds on an unverified booking count.
+    try {
+      if (trip.collectionName === "driverRoutes") {
+        const snap = await getDocs(query(collection(db, "bookings"), where("routeId", "==", trip.id)));
+        linkedDocs = snap.docs.map((d) => ({ id: d.id, status: String(d.data().status) }));
+        affected = snap.docs
+          .filter((d) => !TERMINAL_BOOKING_STATUSES.has(String(d.data().status)))
+          .map((d) => ({ ref: d.ref, ownerId: d.data().passengerId || "", isApplication: false }));
+      } else if (trip.collectionName === "workJobs") {
+        const snap = await getDocs(
+          query(
+            collection(db, "workApplications"),
+            where("jobId", "==", trip.id),
+            where("employerId", "==", uid),
+          ),
+        );
+        linkedDocs = snap.docs.map((d) => ({ id: d.id, status: String(d.data().status) }));
+        affected = snap.docs
+          .filter((d) => !TERMINAL_APPLICATION_STATUSES.has(String(d.data().status)))
+          .map((d) => ({ ref: d.ref, ownerId: d.data().applicantId || "", isApplication: true }));
+      } else {
+        const snap = await getDocs(
+          query(
+            collection(db, "errandApplications"),
+            where("errandId", "==", trip.id),
+            where("driverId", "==", uid),
+          ),
+        );
+        linkedDocs = snap.docs.map((d) => ({ id: d.id, status: String(d.data().status) }));
+        affected = snap.docs
+          .filter((d) => !TERMINAL_APPLICATION_STATUSES.has(String(d.data().status)))
+          .map((d) => ({ ref: d.ref, ownerId: d.data().passengerId || "", isApplication: true }));
+      }
+    } catch (error) {
+      console.error("cancelDriverTrip: failed to query linked bookings/applications — aborting cancellation (never treated as zero bookings)", {
+        tripId: trip.id,
+        collection: trip.collectionName,
+        error,
+      });
+      throw error;
+    }
+
+    const passengerBookingCount = affected.length;
+
+    console.log("cancelDriverTrip: linked bookings/applications found", {
+      tripId: trip.id,
+      collection: trip.collectionName,
+      linkedDocs,
+      activeBookingCount: passengerBookingCount,
+    });
+
     let violationCreated = false;
 
     await runTransaction(db, async (transaction) => {
       // PHASE 1 — the only read.
       const violationSnap =
-        trip.activeBookingCount > 0 && uid
+        passengerBookingCount > 0
           ? await readExistingCancellationViolation(transaction, uid, trip.collectionName, trip.id)
           : null;
 
       // PHASE 2 — every write.
       transaction.update(tripRef, {
-        deletedForDriver: true,
+        status: DRIVER_CANCELLED_TRIP_STATUS,
         updatedAt: serverTimestamp(),
       });
 
-      if (violationSnap && uid) {
+      affected.forEach(({ ref, isApplication }) => {
+        transaction.update(ref, isApplication
+          ? { status: "cancelled", cancelledAt: serverTimestamp(), cancelledBy: "driver", updatedAt: serverTimestamp() }
+          : { status: "cancelled", cancelledBy: "driver", updatedAt: serverTimestamp() });
+      });
+
+      if (violationSnap) {
         violationCreated = writeCancellationViolationIfNew(transaction, violationSnap, {
           driverId: uid,
           sourceCollection: trip.collectionName,
           sourceId: trip.id,
           sourceCategory: trip.category || "",
           scheduledDeparture: new Date(`${trip.date}T${trip.time || "00:00"}:00`),
-          passengerBookingCount: trip.activeBookingCount,
+          passengerBookingCount,
         });
       }
     });
 
+    // Best-effort — the cancellation itself already succeeded, so a notify()
+    // failure must never be reported back to the caller as a failed
+    // cancellation (same pattern as every other cancel function in this
+    // codebase — see cancelGeneralBooking in bookingsLib.ts).
+    await Promise.all(
+      affected.map(({ ownerId }) =>
+        ownerId
+          ? notify({
+              receiverId: ownerId,
+              type: "cancelled",
+              title: t("schoolTrip.bookingCancelledNotificationTitle"),
+              message: `The driver cancelled "${trip.title || `${trip.from || ""} → ${trip.to || ""}`.trim() || trip.category}"`,
+              applicationId: trip.id,
+              category: trip.category,
+              status: "cancelled",
+              targetTab: "passenger",
+            }).catch((error) => {
+              console.log("cancelDriverTrip: notify failed (trip already cancelled, non-fatal)", {
+                tripId: trip.id,
+                ownerId,
+                error,
+              });
+            })
+          : Promise.resolve(),
+      ),
+    );
+
+    // Keep the driver's own routes/workJobs/errandJobs state in sync — the
+    // trip is no longer removed from the list (it now belongs in the
+    // Cancelled Trips section — see getDriverTripBucket/renderTripCard),
+    // just re-tagged so it re-buckets immediately without waiting for the
+    // next snapshot.
+    const patchStatus = (items: DriverTripItem[]) =>
+      items.map((r) => (r.id === trip.id ? { ...r, status: "cancelled" as const } : r));
     if (trip.collectionName === "driverRoutes") {
-      setRoutes((prev) => prev.filter((r) => r.id !== trip.id));
+      setRoutes(patchStatus);
     } else if (trip.collectionName === "workJobs") {
-      setWorkJobs((prev) => prev.filter((r) => r.id !== trip.id));
+      setWorkJobs(patchStatus);
     } else {
-      setErrandJobs((prev) => prev.filter((r) => r.id !== trip.id));
+      setErrandJobs(patchStatus);
     }
 
-    if (!violationCreated || !uid) return null;
+    if (!violationCreated) return null;
 
     try {
       return await evaluateDriverCancellationStanding(uid);
@@ -3337,7 +3516,81 @@ useEffect(() => {
         {canAppeal ? (
           <Pressable
             style={styles.violationAppealButton}
-            onPress={() => setAppealModalViolation(v)}
+            onPress={() => setAppealModalViolation({ id: v.id, tripId: v.tripId, violationSource: "driverViolations" })}
+          >
+            <Text style={styles.violationAppealButtonText}>{t("driverNoShow.submitAppeal")}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  };
+
+  // Driver-cancellation violation card (see driverViolationCore.ts — a
+  // completely separate WRITE path from the no-show card above, merged into
+  // the same on-screen list — see mergedViolationRows). No Appeal button
+  // here: unlike a no-show, the driver themselves chose to cancel, so
+  // there's no factual dispute to appeal — only an admin can excuse it
+  // (already handled on the admin driver-detail screen, not here).
+  const renderCancellationViolationCard = (v: DriverCancellationViolation) => {
+    // Same 4-state status pill as renderViolationCard (no-show) above —
+    // reuses the EXACT SAME i18n keys for the 3 appeal states, so a driver
+    // sees identical wording regardless of which violation system this
+    // card is about. Only the "open" (never appealed) state has its own
+    // cancellation-specific wording, since "Missed Trip Recorded" wouldn't
+    // make sense for a cancellation.
+    const statusMeta: Record<string, { key: string; color: string }> = {
+      open: { key: "driverNoShow.statusCancellationActive", color: "#B0413E" },
+      appeal_pending: { key: "driverNoShow.statusAppealUnderReview", color: "#B8860B" },
+      appeal_approved: { key: "driverNoShow.statusAppealApprovedRemoved", color: "#2E7D32" },
+      appeal_rejected: { key: "driverNoShow.statusAppealRejectedActive", color: "#B0413E" },
+    };
+    // A directly-excused (non-appeal) violation never reaches appeal_approved
+    // — adminExcused can be set true from status "open" too (see the admin
+    // Excuse button, independent of the appeal flow) — so that still needs
+    // its own excused wording rather than falling through to "open"'s.
+    const meta =
+      !v.active && v.status === "open"
+        ? { key: "driverNoShow.statusCancellationExcused", color: "#2E7D32" }
+        : statusMeta[v.status] || statusMeta.open;
+    const canAppeal = canSubmitAppeal({ appealId: v.appealId, active: v.active });
+
+    return (
+      <View key={`cancellation-violation-${v.id}`} style={[styles.card, accentBorderStart(4, meta.color, isRTL)]}>
+        <View style={styles.cardTop}>
+          <View style={[styles.catChip, { backgroundColor: `${meta.color}18` }]}>
+            <Ionicons name="close-circle-outline" size={15} color={meta.color} />
+            <Text style={[styles.catText, { color: meta.color }]}>{t("driverNoShow.driverCancellation")}</Text>
+          </View>
+          <View style={[styles.statusPill, { backgroundColor: `${meta.color}18` }]}>
+            <Text style={[styles.statusText, { color: meta.color }]}>{t(meta.key)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Ionicons name="pricetag-outline" size={15} color="#7C5F46" />
+          <Text style={styles.infoText}>{translateCategoryLabel(v.sourceCategory, v.sourceCategory, t)}</Text>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Ionicons name="people-outline" size={15} color="#7C5F46" />
+          <Text style={styles.infoText}>
+            {t("driverNoShow.affectedPassengers", { count: v.passengerBookingCount })}
+          </Text>
+        </View>
+
+        {v.lateCancellation ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="time-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>{t("admin.lateCancellationBadge")}</Text>
+          </View>
+        ) : null}
+
+        {canAppeal ? (
+          <Pressable
+            style={styles.violationAppealButton}
+            onPress={() =>
+              setAppealModalViolation({ id: v.id, tripId: v.tripId, violationSource: "cancellationViolations" })
+            }
           >
             <Text style={styles.violationAppealButtonText}>{t("driverNoShow.submitAppeal")}</Text>
           </Pressable>
@@ -3426,6 +3679,17 @@ useEffect(() => {
     const rideBlockedReason = getStartTripBlockedReason(r);
     const rideCancelBlocked =
       r.status === "booked" ? getRideCancelBlockedReason(r, viewer) : null;
+    // Driver-only — the passenger's own selected pickup point (never their
+    // live location or profile home address — only the ONE point they
+    // intentionally picked for THIS request), shown before Start/Cancel so
+    // the driver can judge whether the passenger is close enough to pick up
+    // before acting on the request. Safe on old bookings made before this
+    // field existed (pickupLocation is null) — see this feature's own
+    // "Pickup location not provided" fallback below.
+    const pickupDistanceKm =
+      viewer === "driver"
+        ? computeApproxDistanceKm(r.pickupLocation, { latitude: r.driverFromLat, longitude: r.driverFromLng })
+        : null;
 
     return (
       <View
@@ -3609,6 +3873,35 @@ useEffect(() => {
         ) : (
           <>
             {r.status === "booked" ? (
+              <View style={styles.pickupInfoBox}>
+                <View style={styles.infoRow}>
+                  <Ionicons name="location-outline" size={15} color="#7C5F46" />
+                  <Text style={styles.infoText}>
+                    {t("booking.passengerAreaLabel", {
+                      area: r.pickupLocation?.area || r.pickupLocation?.address || t("booking.pickupLocationNotProvided"),
+                    })}
+                  </Text>
+                </View>
+
+                {r.pickupLocation?.address ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="pin-outline" size={15} color="#7C5F46" />
+                    <Text style={styles.infoText}>{r.pickupLocation.address}</Text>
+                  </View>
+                ) : null}
+
+                {pickupDistanceKm !== null ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="navigate-outline" size={15} color="#7C5F46" />
+                    <Text style={styles.infoText}>
+                      {t("booking.approxDistanceFromRoute", { distance: pickupDistanceKm })}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            {r.status === "booked" ? (
               <>
                 <Pressable
                   style={[
@@ -3704,30 +3997,41 @@ useEffect(() => {
     );
   };
 
-  const renderStatus = (status: string, label?: string) => (
-    <View
-      style={[
-        styles.statusPill,
-        status === "completed" ? styles.statusDone : styles.statusOngoing,
-      ]}
-    >
-      <Ionicons
-        name={status === "completed" ? "checkmark-circle" : "time"}
-        size={13}
-        color={status === "completed" ? "#166534" : "#B86115"}
-      />
-      <Text
+  const renderStatus = (status: string, label?: string) => {
+    // Mirrors renderBookingTripStatus's exact "dead" (red) treatment for a
+    // cancelled row, so a cancelled trip listing reads identically to a
+    // cancelled booking/application anywhere else in this screen.
+    const cancelled = status === "cancelled";
+    const done = !cancelled && status === "completed";
+
+    return (
+      <View
         style={[
-          styles.statusText,
-          status === "completed"
-            ? styles.statusTextDone
-            : styles.statusTextOngoing,
+          styles.statusPill,
+          cancelled ? styles.statusDead : done ? styles.statusDone : styles.statusOngoing,
         ]}
       >
-        {label || (status === "completed" ? t("common.completed") : t("booking.statusOngoing"))}
-      </Text>
-    </View>
-  );
+        <Ionicons
+          name={cancelled ? "close-circle" : done ? "checkmark-circle" : "time"}
+          size={13}
+          color={cancelled ? "#B91C1C" : done ? "#166534" : "#B86115"}
+        />
+        <Text
+          style={[
+            styles.statusText,
+            cancelled ? styles.statusTextDead : done ? styles.statusTextDone : styles.statusTextOngoing,
+          ]}
+        >
+          {label ||
+            (cancelled
+              ? t("bookings.status.cancelled")
+              : done
+                ? t("common.completed")
+                : t("booking.statusOngoing"))}
+        </Text>
+      </View>
+    );
+  };
 
   const renderRouteLine = (from: string, to: string, place: string) => {
     if (from || to) {
@@ -3979,6 +4283,8 @@ useEffect(() => {
     const meta = getCategoryMeta(trip.category);
     const busy = busyId === trip.id;
     const done = trip.status === "completed";
+    const cancelled = trip.status === "cancelled";
+    const finished = done || cancelled;
     const daysText = trip.days.length > 0 ? trip.days.join(", ") : "";
     const waitingForBooking = trip.waitingForBooking;
     // Same distinction getDriverTripStatus uses for the Unbooked Trips
@@ -3990,14 +4296,14 @@ useEffect(() => {
     // exact 5-hour driver window every other category already uses, so a
     // trip less than 5 hours from departure never disables any OTHER
     // trip's button.
-    const cancelBlockedReason = !done
+    const cancelBlockedReason = !finished
       ? getTimeBasedCancelBlockedReason(trip, DRIVER_CANCEL_LOCK_HOURS)
       : null;
 
     return (
       <View
         key={`${trip.collectionName}-${trip.id}-${trip.date}`}
-        style={[styles.card, accentBorderStart(4, meta.color, isRTL), done && styles.cardDone]}
+        style={[styles.card, accentBorderStart(4, meta.color, isRTL), finished && styles.cardDone]}
       >
         <View style={styles.cardTop}>
           <View
@@ -4018,7 +4324,7 @@ useEffect(() => {
                   : t("booking.waitingForBookingLabel")
                 : undefined,
             )}
-            {done ? renderDeleteButton(() => confirmDeleteTrip(trip)) : null}
+            {finished ? renderDeleteButton(() => confirmDeleteTrip(trip)) : null}
           </View>
         </View>
 
@@ -4108,7 +4414,7 @@ useEffect(() => {
   </Pressable>
 ) : null}
 
-{!done &&
+{!finished &&
 !waitingForBooking &&
 !(trip.collectionName === "driverRoutes" && trip.category === "school") ? (
   <Pressable
@@ -4132,7 +4438,7 @@ useEffect(() => {
     School, Work/Errand) — matches the driver's own "cancel my listing"
     button in useMySchoolRows.tsx's renderTripCard (cancelBookingBoxButton),
     so a Personal Ride and a School listing look identical here too. */}
-{!done ? (
+{!finished ? (
   <>
     <Pressable
       style={[
@@ -4692,6 +4998,30 @@ useEffect(() => {
           </View>
         ) : null}
 
+        {/* The applicant's own selected pickup point — never their live
+            location or profile home address, only the ONE point they
+            intentionally picked for THIS request (see this feature's own
+            requirement). Shown before Accept/Reject so the employer/driver
+            can judge whether the applicant is close enough. Safe on old
+            applications made before this field existed. */}
+        {viewer === "driver" ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="location-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>
+              {t("booking.passengerAreaLabel", {
+                area: a.pickupLocation?.area || a.pickupLocation?.address || t("booking.pickupLocationNotProvided"),
+              })}
+            </Text>
+          </View>
+        ) : null}
+
+        {viewer === "driver" && a.pickupLocation?.address ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="pin-outline" size={15} color="#7C5F46" />
+            <Text style={styles.infoText}>{a.pickupLocation.address}</Text>
+          </View>
+        ) : null}
+
         {viewer === "driver" && a.status === "pending" ? (
           // Pending Accept/Reject decision: show the passenger's age instead
           // of the price/wage — the driver needs the age to decide, not the
@@ -5123,7 +5453,7 @@ useEffect(() => {
                       {
                         key: "violations" as const,
                         icon: "warning-outline" as const,
-                        rows: driverViolations,
+                        rows: mergedViolationRows,
                         labelKey: "driverNoShow.violationsTab",
                       },
                     ]
@@ -5155,7 +5485,7 @@ useEffect(() => {
                       active && styles.driverBucketButtonTextActive,
                     ]}
                   >
-                    {t(bucket.labelKey)} ({bucket.key === "violations" ? activeViolationCount : bucket.rows.length})
+                    {t(bucket.labelKey)} ({bucket.key === "violations" ? mergedActiveViolationCount : bucket.rows.length})
                   </Text>
                 </Pressable>
               );
@@ -5281,11 +5611,15 @@ useEffect(() => {
             );
           })()
         ) : bucketTab === "violations" ? (
-          driverViolations.length === 0 ? (
+          mergedViolationRows.length === 0 ? (
             renderBucketEmptyText("driverNoShow.noViolations")
           ) : (
             <View style={styles.list}>
-              {driverViolations.map((violation) => renderViolationCard(violation))}
+              {mergedViolationRows.map((violation) =>
+                violation.violationType === "driver_cancellation"
+                  ? renderCancellationViolationCard(violation)
+                  : renderViolationCard(violation),
+              )}
             </View>
           )
         ) : (
@@ -5949,6 +6283,7 @@ useEffect(() => {
         <ViolationAppealModal
           visible={!!appealModalViolation}
           violationId={appealModalViolation.id}
+          violationSource={appealModalViolation.violationSource}
           tripId={appealModalViolation.tripId}
           onClose={() => setAppealModalViolation(null)}
           onSubmitted={() => setAppealModalViolation(null)}
@@ -6384,6 +6719,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     marginBottom: 8,
+  },
+  pickupInfoBox: {
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 12,
+    backgroundColor: "#FFFDFC",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 2,
+    marginBottom: 10,
   },
   infoText: {
     color: "#3C2319",

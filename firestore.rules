@@ -546,15 +546,43 @@ service cloud.firestore {
       // driver-initiated cancellation of an already-booked trip (see
       // app/booking/driverViolationsLib.ts). The driver's own client creates
       // it at cancel time (never adminExcused:true — that flag can only ever
-      // be flipped by an admin, via excuseDriverCancellationViolation).
+      // be flipped by an admin, via excuseDriverCancellationViolation or by
+      // approveCancellationViolationAppeal below).
       match /cancellationViolations/{violationId} {
         allow read: if isAdmin() || isSelf(userId);
         allow create: if isSelf(userId) &&
           request.resource.data.driverId == userId &&
           request.resource.data.adminExcused == false;
-        allow update: if isAdmin();
+        // isAdmin() stays a blanket allow (excuse/approve/reject all write
+        // different field sets here — narrowing it would just re-derive the
+        // same trust boundary this codebase already gives every OTHER admin
+        // action). The second branch is the driver's own narrow self-write:
+        // submitting exactly one appeal (submitViolationAppeal, called with
+        // violationSource:"cancellationViolations") — same shape as
+        // isValidSelfNoShowAppealSubmission() below, for the SAME reason
+        // (driver must never be able to alter their own violation beyond
+        // flipping it into "appeal_pending").
+        allow update: if isAdmin() || isValidSelfCancellationAppealSubmission(userId);
         allow delete: if false;
       }
+    }
+
+    // Mirrors isValidSelfNoShowAppealSubmission() below field-for-field,
+    // targeting users/{userId}/cancellationViolations/{violationId} instead
+    // of driverViolations/{violationId} — see submitViolationAppeal
+    // (driverNoShowLib.ts), which writes this exact transition for both
+    // violation sources.
+    function isValidSelfCancellationAppealSubmission(userId) {
+      let oldData = resource.data;
+      let newData = request.resource.data;
+      return isSelf(userId) &&
+        oldData.driverId == userId &&
+        newData.diff(oldData).affectedKeys().hasOnly(["status", "appealId", "updatedAt"]) &&
+        oldData.active == true &&
+        oldData.appealId == null &&
+        oldData.status == "open" &&
+        newData.status == "appeal_pending" &&
+        newData.appealId is string && newData.appealId.size() > 0;
     }
 
     // ---------------------------------------------------------------
@@ -608,12 +636,36 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // One appeal doc shape shared by BOTH violation systems (see
+    // ViolationSource in driverNoShowLib.ts) — violationSource tells this
+    // rule (and the admin review screens) which violation document the
+    // appeal is actually about, since a no-show violation lives at
+    // driverViolations/{violationId} but a cancellation violation lives at
+    // users/{driverId}/cancellationViolations/{violationId} (needs its own
+    // driverId path segment, which is why the target-lookup below branches).
+    function violationAppealTargetIsValid() {
+      return request.resource.data.violationSource == "cancellationViolations"
+        ? (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)/cancellationViolations/$(request.resource.data.violationId))
+              .data.driverId == request.auth.uid &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)/cancellationViolations/$(request.resource.data.violationId))
+              .data.appealId == null
+          )
+        : (
+            get(/databases/$(database)/documents/driverViolations/$(request.resource.data.violationId))
+              .data.driverId == request.auth.uid &&
+            get(/databases/$(database)/documents/driverViolations/$(request.resource.data.violationId))
+              .data.appealId == null
+          );
+    }
+
     match /violationAppeals/{appealId} {
       // A driver may create exactly one appeal for their OWN active
-      // violation that doesn't already have one — the get() below reads the
-      // referenced violation doc to enforce both "not someone else's
-      // violation" (test case 10) and "not a second appeal" (test case 11)
-      // at the database layer, not just in app code.
+      // violation (of either system) that doesn't already have one — the
+      // get() inside violationAppealTargetIsValid() reads the referenced
+      // violation doc to enforce both "not someone else's violation" (test
+      // case 10) and "not a second appeal" (test case 11) at the database
+      // layer, not just in app code.
       allow create: if isSignedIn() &&
         request.resource.data.driverId == request.auth.uid &&
         request.resource.data.status == "pending" &&
@@ -621,16 +673,18 @@ service cloud.firestore {
         request.resource.data.reviewedAt == null &&
         request.resource.data.explanation is string &&
         request.resource.data.explanation.size() > 0 &&
-        get(/databases/$(database)/documents/driverViolations/$(request.resource.data.violationId))
-          .data.driverId == request.auth.uid &&
-        get(/databases/$(database)/documents/driverViolations/$(request.resource.data.violationId))
-          .data.appealId == null;
+        request.resource.data.violationSource in ["driverViolations", "cancellationViolations"] &&
+        violationAppealTargetIsValid();
       allow read: if isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid);
       // Only resolution fields ever change here, and only an admin changes
-      // them (approveAppeal/rejectAppeal in driverNoShowLib.ts) — a driver
-      // can never edit their own submitted appeal (matches the product
-      // spec's "driver must not be able to edit the violation itself", and
-      // by extension, not the appeal record either, once submitted).
+      // them (approveAppeal/rejectAppeal, or
+      // approveCancellationViolationAppeal/rejectCancellationViolationAppeal,
+      // in driverNoShowLib.ts/driverViolationsLib.ts) — a driver can never
+      // edit their own submitted appeal (matches the product spec's "driver
+      // must not be able to edit the violation itself", and by extension,
+      // not the appeal record either, once submitted). Same allowlist for
+      // both violation sources — the fields an admin resolution touches
+      // never differ between them.
       allow update: if isAdmin() && isValidAdminNoShowAppealUpdate();
       allow delete: if false;
     }
@@ -750,8 +804,20 @@ service cloud.firestore {
         (resource.data.applicantId == request.auth.uid ||
           resource.data.employerId == request.auth.uid));
 
+      // status must start "pending" — the same value createApplication
+      // (workErrandLib.ts) always writes — so a requester can never create
+      // an application that skips the employer's own accept/reject step
+      // (e.g. self-creating with status "accepted"). Every OTHER field
+      // (including the new pickupLocation.area/address/latitude/longitude
+      // this feature adds) stays unrestricted here, same as before — this
+      // collection has never had a full field-transition allowlist (see the
+      // comment above this match block) because createApplication is
+      // audited as the sole writer; this one addition closes the one gap
+      // that mattered for "a requester cannot alter... status... while
+      // submitting the location" (this feature's own acceptance test).
       allow create: if isSignedIn() &&
-        request.resource.data.applicantId == request.auth.uid;
+        request.resource.data.applicantId == request.auth.uid &&
+        request.resource.data.status == "pending";
 
       allow update: if isSignedIn() &&
         (resource.data.applicantId == request.auth.uid ||
@@ -765,8 +831,10 @@ service cloud.firestore {
         (resource.data.passengerId == request.auth.uid ||
           resource.data.driverId == request.auth.uid));
 
+      // Same reasoning as workApplications' own create rule above.
       allow create: if isSignedIn() &&
-        request.resource.data.passengerId == request.auth.uid;
+        request.resource.data.passengerId == request.auth.uid &&
+        request.resource.data.status == "pending";
 
       allow update: if isSignedIn() &&
         (resource.data.passengerId == request.auth.uid ||

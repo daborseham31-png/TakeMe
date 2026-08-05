@@ -314,6 +314,7 @@
     "weeklyPrefix": "Weekly: {{days}}",
     "noDriversFound": "No drivers found",
     "noDriversHint": "Try changing pickup location, destination, time, gender, language, date, or seats.",
+    "noTripsForThisDate": "No trips were found for this date.",
     "availableFor": "Available for:",
     "totalIfAllDaysBooked": "Total if all days booked: {{total}} ₪",
     "seatsAvailableSub": "Available",
@@ -428,6 +429,9 @@
     "violationsTab": "Violations",
     "noViolations": "You have no recorded violations.",
     "driverNoShow": "Driver No-Show",
+    "driverCancellation": "Cancelled by You",
+    "statusCancellationActive": "Recorded",
+    "statusCancellationExcused": "Excused by Admin",
     "affectedPassengers": "{{count}} affected passengers",
     "refundStatus": {
       "not_required": "No refund required",
@@ -1002,6 +1006,9 @@
   "booking": {
     "from": "From",
     "to": "To",
+    "passengerAreaLabel": "Passenger area: {{area}}",
+    "pickupLocationNotProvided": "Pickup location not provided",
+    "approxDistanceFromRoute": "Approx. {{distance}} km from route",
     "enterDepartureCity": "Enter departure city",
     "tripDate": "Trip Date",
     "tripTime": "Trip Time",

@@ -12,6 +12,15 @@
 // (category "school" or "personal"), sharing a `bookingGroupId` so My
 // Bookings can group them, but each day keeps its own status/paymentStatus
 // because different days can end up with different drivers.
+//
+// The dependency-free matching/date-key/Israel-timezone core (everything
+// that doesn't need react-native's Alert or a live Firestore write) lives in
+// weeklyBookingCore.ts instead — re-exported below so every existing call
+// site's import path keeps working unchanged (same split/re-export pattern
+// driverViolationsLib.ts already uses for driverViolationCore.ts). See that
+// file's own header for why the split exists: this file can't be imported
+// under this project's vitest config at all (react-native's own source uses
+// Flow syntax the Node/Vite parser rejects outright).
 // ---------------------------------------------------------------------------
 
 import {
@@ -35,19 +44,48 @@ import {
   parseDateInput,
 } from "../driver/create/driverHelpers";
 import { notify } from "./work-errand/workErrandLib";
+import {
+  buildBookingDayFromMatch,
+  computeWeeklyTotal,
+  DayKey,
+  DAY_KEY_LABEL,
+  dayKeyFromAnyYMD,
+  getAnyDateCalendarBounds,
+  getDriverDayTrips,
+  getLocalNowInIsrael,
+  isDateSelectableForAnyDate,
+  isTimeCloseEnough,
+  matchDriverWeeklyDays,
+  restoreSingleDateFromWeeklyRows,
+  seedWeeklyRowsFromSingleDate,
+  WeekDayRow,
+  WeeklyDayMatch,
+  WeeklyDriverDay,
+  WeeklyRequestDay,
+} from "./weeklyBookingCore";
+
+export {
+  buildBookingDayFromMatch,
+  computeWeeklyTotal,
+  DAY_KEY_LABEL,
+  dayKeyFromAnyYMD,
+  getAnyDateCalendarBounds,
+  getDriverDayTrips,
+  getLocalNowInIsrael,
+  isDateSelectableForAnyDate,
+  isTimeCloseEnough,
+  matchDriverWeeklyDays,
+  restoreSingleDateFromWeeklyRows,
+  seedWeeklyRowsFromSingleDate,
+};
+export type { DayKey, WeekDayRow, WeeklyDayMatch, WeeklyDriverDay, WeeklyRequestDay };
 
 // ---------------------------------------------------------------------------
-// Day keys
+// Day keys — DAY_KEYS/getDayKeyFromDate stay here (not in weeklyBookingCore)
+// since getDayFromDateText comes from driverHelpers.ts, which weeklyBooking
+// Core.ts deliberately never imports (see that file's header). dayKeyFromAny
+// YMD above is the self-contained, vitest-safe equivalent used by matching.
 // ---------------------------------------------------------------------------
-
-export type DayKey =
-  | "sunday"
-  | "monday"
-  | "tuesday"
-  | "wednesday"
-  | "thursday"
-  | "friday"
-  | "saturday";
 
 export const DAY_KEYS: DayKey[] = [
   "sunday",
@@ -58,16 +96,6 @@ export const DAY_KEYS: DayKey[] = [
   "friday",
   "saturday",
 ];
-
-export const DAY_KEY_LABEL: Record<DayKey, string> = {
-  sunday: "Sunday",
-  monday: "Monday",
-  tuesday: "Tuesday",
-  wednesday: "Wednesday",
-  thursday: "Thursday",
-  friday: "Friday",
-  saturday: "Saturday",
-};
 
 const SHORT_TO_DAYKEY: Record<string, DayKey> = {
   Sun: "sunday",
@@ -84,27 +112,6 @@ export const getDayKeyFromDate = (dateYMD: string): DayKey | "" => {
   return short ? SHORT_TO_DAYKEY[short] || "" : "";
 };
 
-const SHORT_DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-// Same idea as getDayKeyFromDate, but doesn't go through
-// normalizeDateToYMD/getDayFromDateText (which reject past dates using the
-// DEVICE's timezone) — used for weekly validation (which already checked
-// past/range itself using Israel-local time) and for display on dates that
-// may already be in the past (an existing driver trip someone is matching
-// against).
-export const dayKeyFromAnyYMD = (dateYMD: string): DayKey | "" => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateYMD || ""));
-  if (!match) return "";
-
-  const [, y, m, d] = match;
-  const date = new Date(Number(y), Number(m) - 1, Number(d));
-
-  if (Number.isNaN(date.getTime())) return "";
-
-  const short = SHORT_DAY_NAMES[date.getDay()];
-  return SHORT_TO_DAYKEY[short] || "";
-};
-
 // ---------------------------------------------------------------------------
 // Week bounds — Israel LOCAL time (Asia/Jerusalem), never UTC and never the
 // device's own timezone. Weekly booking always covers exactly one
@@ -118,7 +125,6 @@ export const dayKeyFromAnyYMD = (dateYMD: string): DayKey | "" => {
 // Saturday 07:00.
 // ---------------------------------------------------------------------------
 
-const ISRAEL_TIME_ZONE = "Asia/Jerusalem";
 const NEXT_WEEK_OPEN_MINUTES = 7 * 60; // 07:00 AM
 
 const formatYMD = (date: Date) => {
@@ -126,31 +132,6 @@ const formatYMD = (date: Date) => {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-};
-
-// "Now", as a Date object whose getFullYear/getMonth/getDate/getDay/
-// getHours/getMinutes already read back the Israel-local wall-clock values.
-// Every helper below can then just use plain Date getters — never UTC math
-// — and can't drift a day off no matter what timezone the device is in.
-export const getLocalNowInIsrael = (): Date => {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: ISRAEL_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date());
-
-  const get = (type: string) =>
-    Number(parts.find((part) => part.type === type)?.value || 0);
-
-  // A few ICU implementations report midnight as hour "24" with hour12:false.
-  const hour = get("hour") % 24;
-
-  return new Date(get("year"), get("month") - 1, get("day"), hour, get("minute"), get("second"));
 };
 
 export const getStartOfWeekSunday = (date: Date): Date => {
@@ -244,30 +225,12 @@ export const isDateInCurrentWeek = (dateText: string) =>
   isDateInAllowedWeek(dateText, "current");
 
 // ---------------------------------------------------------------------------
-// Day entry types
+// UI row shape used by WeeklyDaysCard (shared by passenger + driver forms) —
+// WeekDayRow itself is now defined in weeklyBookingCore.ts (re-exported
+// above) since seedWeeklyRowsFromSingleDate/restoreSingleDateFromWeeklyRows
+// need it there too; makeEmptyWeekDayRow stays here since nothing in the
+// pure core module needs it.
 // ---------------------------------------------------------------------------
-
-export type WeeklyRequestDay = {
-  dayKey: DayKey;
-  dayName: string;
-  date: string;
-  time: string;
-  seats: number;
-};
-
-export type WeeklyDriverDay = WeeklyRequestDay & {
-  price: number;
-  remainingSeats: number;
-};
-
-// Local UI row shape used by WeeklyDaysCard (shared by passenger + driver forms).
-export type WeekDayRow = {
-  id: string;
-  date: string;
-  time: string;
-  seats: number;
-  price: string;
-};
 
 export const makeEmptyWeekDayRow = (defaultTime: string): WeekDayRow => ({
   id: `row_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -533,141 +496,6 @@ export const validateWeeklyRowsAnyFutureDate = (
 };
 
 // ---------------------------------------------------------------------------
-// Normalize any driverRoutes doc — weekly ("has weeklyTrips") or a normal
-// single-day trip ("date"/"tripDate"/"selectedDate" + time/seats/price at
-// the top level) — into the same list of bookable day-trips. This is what
-// lets a plain one-day driver match a passenger's weekly request for that
-// one day, without ever needing to be a "weekly driver".
-// ---------------------------------------------------------------------------
-
-const normalizeDriverDayTrip = (
-  trip: any,
-  driver: any,
-): WeeklyDriverDay | null => {
-  const date = trip?.date || "";
-  if (!date) return null;
-
-  const dayKey = dayKeyFromAnyYMD(date) || "";
-  const seats = Number(trip?.seats ?? driver?.seats ?? 0) || 0;
-  const remainingSeats =
-    typeof trip?.remainingSeats === "number" ? trip.remainingSeats : seats;
-
-  return {
-    dayKey: (dayKey || "sunday") as DayKey,
-    dayName: dayKey ? DAY_KEY_LABEL[dayKey] : "",
-    date,
-    time: trip?.time || driver?.time || "",
-    seats,
-    price: Number(trip?.price ?? driver?.price ?? 0) || 0,
-    remainingSeats,
-  };
-};
-
-export const getDriverDayTrips = (driver: any): WeeklyDriverDay[] => {
-  if (Array.isArray(driver?.weeklyTrips) && driver.weeklyTrips.length > 0) {
-    return driver.weeklyTrips
-      .map((trip: any) => normalizeDriverDayTrip(trip, driver))
-      .filter((trip: WeeklyDriverDay | null): trip is WeeklyDriverDay => !!trip);
-  }
-
-  // Normal one-day driver route — a single implicit "day trip" built from
-  // its own top-level fields. bookingType/isRecurring are irrelevant here:
-  // any route with a real date can match a weekly request for that date.
-  const date =
-    driver?.date || driver?.tripDate || driver?.selectedDate || "";
-
-  if (!date) return [];
-
-  const single = normalizeDriverDayTrip({ date }, driver);
-  return single ? [single] : [];
-};
-
-// ---------------------------------------------------------------------------
-// Matching: which requested days can a given driver cover — from either a
-// weekly trips array or a normal one-day route (see getDriverDayTrips).
-// ---------------------------------------------------------------------------
-
-const timeToMinutes = (time: string) => {
-  const clean = normalizeTime(time);
-  if (!clean) return null;
-
-  const [hours, minutes] = clean.split(":").map(Number);
-  return hours * 60 + minutes;
-};
-
-export const isTimeCloseEnough = (
-  driverTime: string | undefined,
-  requestedTime: string,
-  maxDiffMinutes = 30,
-) => {
-  if (!requestedTime) return true;
-  if (!driverTime) return false;
-
-  const driverMinutes = timeToMinutes(driverTime);
-  const requestedMinutes = timeToMinutes(requestedTime);
-
-  if (driverMinutes === null || requestedMinutes === null) return false;
-
-  return Math.abs(driverMinutes - requestedMinutes) <= maxDiffMinutes;
-};
-
-export type WeeklyDayMatch = {
-  requested: WeeklyRequestDay;
-  driverDay: WeeklyDriverDay;
-};
-
-export const matchDriverWeeklyDays = (
-  driver: any,
-  requestedDays: WeeklyRequestDay[],
-  options: { maxTimeDiffMinutes?: number } = {},
-): WeeklyDayMatch[] => {
-  const driverDayTrips = getDriverDayTrips(driver);
-
-  if (driverDayTrips.length === 0) return [];
-
-  const maxDiff = options.maxTimeDiffMinutes ?? 30;
-  const matches: WeeklyDayMatch[] = [];
-
-  for (const requested of requestedDays) {
-    const driverDay = driverDayTrips.find(
-      (trip) => trip.date === requested.date,
-    );
-
-    if (!driverDay) continue;
-
-    const remaining =
-      typeof driverDay.remainingSeats === "number"
-        ? driverDay.remainingSeats
-        : driverDay.seats;
-
-    if (remaining < requested.seats) continue;
-    if (!isTimeCloseEnough(driverDay.time, requested.time, maxDiff)) continue;
-
-    matches.push({ requested, driverDay });
-  }
-
-  return matches;
-};
-
-// Turns a match into the day object that actually gets booked: driver's
-// scheduled time + price, passenger's requested seat count.
-export const buildBookingDayFromMatch = (
-  match: WeeklyDayMatch,
-): WeeklyDriverDay => ({
-  dayKey: match.driverDay.dayKey,
-  dayName: match.driverDay.dayName,
-  date: match.driverDay.date,
-  time: match.driverDay.time,
-  seats: match.requested.seats,
-  price: match.driverDay.price,
-  remainingSeats: match.driverDay.remainingSeats,
-});
-
-export const computeWeeklyTotal = (
-  days: { price: number; seats: number }[],
-) => days.reduce((sum, day) => sum + Number(day.price || 0) * Number(day.seats || 1), 0);
-
-// ---------------------------------------------------------------------------
 // Firestore: book one or more days of a single driver's weekly trip
 // ---------------------------------------------------------------------------
 
@@ -697,12 +525,22 @@ export type CreateWeeklyBookingsInput = {
   destinationDetails?: string;
   // The passenger's chosen pickup point (see PickupLocationPicker.tsx) —
   // the same point is shared by every selected day, same as from/to above.
+  // `area` is a best-effort reverse-geocoded city/area name (see
+  // resolvePickupArea in PickupLocationPicker.tsx) — display-only, never
+  // required.
   pickupLocation?: {
     latitude: number;
     longitude: number;
     address: string;
+    area?: string;
     source: "current" | "home" | "custom";
   } | null;
+  // The driver's own route origin, snapshotted so the driver's incoming-
+  // request card can show an approximate distance to the passenger's pickup
+  // point without a second Firestore read per card (see
+  // driverresults.tsx's handleBookDriver). Never required.
+  driverFromLat?: number;
+  driverFromLng?: number;
 
   // School only — the child(ren) this weekly booking is for, selected up
   // front on select-child.tsx (Home → School Ride) and carried through
@@ -881,6 +719,9 @@ export const createWeeklyBookings = async (
         schoolName: input.schoolName || null,
         destinationDetails: input.destinationDetails || null,
         pickupLocation: input.pickupLocation || null,
+        ...(typeof input.driverFromLat === "number" && typeof input.driverFromLng === "number"
+          ? { driverFromLat: input.driverFromLat, driverFromLng: input.driverFromLng }
+          : {}),
 
         childId: input.childId || null,
         childName: input.childName || null,

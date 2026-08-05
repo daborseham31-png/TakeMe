@@ -599,7 +599,15 @@ export default function RideForm({
               onChange={setWeeklyRows}
               defaultTime="09:00"
               mode="driver"
-              calendarVariant={category === "personal" ? "fullMonth" : "singleWeek"}
+              // "personal" gets the full-month multi-select calendar
+              // (MonthCalendarPicker). School gets "anyDate" — same per-row
+              // native picker as "singleWeek", but never clamped to the
+              // current/next Sunday-Saturday week (see WeeklyDaysCard's own
+              // header) — a School weekly/recurring trip is never locked to
+              // "this week only" (see this fix's own bug report: the driver
+              // was previously stuck on "singleWeek", which wrongly disabled
+              // every date past the current week's Saturday).
+              calendarVariant={category === "personal" ? "fullMonth" : "anyDate"}
             />
           )}
 

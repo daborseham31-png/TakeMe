@@ -48,6 +48,7 @@ import {
 // dependency-free core (no notify()/i18n import), not driverViolationsLib.ts
 // itself, which imports notify() FROM this file.
 import {
+  DRIVER_CANCELLED_TRIP_STATUS,
   readExistingCancellationViolation,
   writeCancellationViolationIfNew,
 } from "../driverViolationCore";
@@ -350,6 +351,11 @@ export type CustomerDetails = {
   neighborhood?: string;
   notes: string;
   location: GeoPoint;
+  // Best-effort reverse-geocoded area/city name for `location` above (see
+  // resolvePickupArea in PickupLocationPicker.tsx) — display-only, shown as
+  // "Applicant area: …" to the employer/driver reviewing this request.
+  // Never required; omit when resolution fails or hasn't finished.
+  area?: string;
   // How `location` was obtained — see PickupLocationPicker.tsx's own
   // PickupLocationSource. Duplicated as a plain union here (not imported)
   // to avoid a circular import (PickupLocationPicker.tsx itself imports
@@ -385,6 +391,20 @@ export const createApplication = async (
 
   if (source.providerId && source.providerId === me.id) {
     throw new Error(i18n.t("workErrand.cannotRequestOwnListing"));
+  }
+
+  // Defensive — the caller's own UI (apply.tsx/book.tsx) already blocks
+  // submission with no pickup point selected; this re-checks at the write
+  // layer too, so a request can never be sent with an invalid/missing
+  // pickup location no matter how it got here.
+  if (
+    !details.location ||
+    typeof details.location.latitude !== "number" ||
+    typeof details.location.longitude !== "number" ||
+    !Number.isFinite(details.location.latitude) ||
+    !Number.isFinite(details.location.longitude)
+  ) {
+    throw new Error(i18n.t("pickupLocation.pickupLocationRequired"));
   }
 
   // Sending a request never reserves a place by itself — only an accepted
@@ -432,7 +452,7 @@ export const createApplication = async (
     // legacy applicantLocation/passengerLocation fields below, never
     // replacing them (NormalizedApplication.location still reads those for
     // backward compatibility).
-    pickupLocation: { ...location, source: details.pickupSource },
+    pickupLocation: { ...location, area: details.area || "", source: details.pickupSource },
 
     startTime: source.startTime,
     endTime: source.endTime,
@@ -1251,7 +1271,7 @@ notifyOtherId =
         // "effectively taken by exactly one customer" comment elsewhere in
         // this file).
         transaction.update(doc(db, "errandJobs", current.sourceId), {
-          status: "cancelled",
+          status: DRIVER_CANCELLED_TRIP_STATUS,
           deletedForDriver: true,
           updatedAt: serverTimestamp(),
         });
@@ -1387,7 +1407,7 @@ export type NormalizedApplication = {
   // location/applicantLocation/passengerLocation for any application
   // created before this field existed, so every reader can rely on it
   // being present whenever `location` itself resolves to something.
-  pickupLocation: (GeoPoint & { source: "current" | "home" | "custom" }) | null;
+  pickupLocation: (GeoPoint & { area: string; source: "current" | "home" | "custom" }) | null;
   title: string;
   date: string;
   startTime: string;
@@ -1444,15 +1464,21 @@ export const normalizeApplication = (
   const customerName = data.applicantName || data.passengerName || "Customer";
 
   const legacyLocation = normalizeGeo(data.applicantLocation || data.passengerLocation);
+  // Never crashes on an old application written before pickupLocation/area
+  // existed — falls back to the legacy applicantLocation/passengerLocation
+  // field (no `area` on those, so "" — see this feature's own "Pickup
+  // location not provided" fallback in the request-card render), then to
+  // null when there is truly no location data of any kind on the document.
   const pickupLocation: NormalizedApplication["pickupLocation"] = data.pickupLocation
     ? {
         latitude: typeof data.pickupLocation.latitude === "number" ? data.pickupLocation.latitude : null,
         longitude: typeof data.pickupLocation.longitude === "number" ? data.pickupLocation.longitude : null,
         address: data.pickupLocation.address || "",
+        area: data.pickupLocation.area || "",
         source: data.pickupLocation.source || "custom",
       }
     : legacyLocation
-      ? { ...legacyLocation, source: "custom" }
+      ? { ...legacyLocation, area: "", source: "custom" }
       : null;
 
   const searchParts = [

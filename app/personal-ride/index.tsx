@@ -17,9 +17,18 @@ import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
 import { IsraelLocation } from "../booking/israelLocations";
 import { resolveLocationCoordinates } from "../booking/locationSearch";
 import PickupLocationPicker, { PickupLocation } from "../booking/PickupLocationPicker";
-import { validateWeeklyRows, WeekDayRow } from "../booking/weeklyBookingLib";
+import {
+  getLocalNowInIsrael,
+  validateWeeklyRows,
+  WeekDayRow,
+} from "../booking/weeklyBookingLib";
+import {
+  restoreSingleDateFromWeeklyRows,
+  seedWeeklyRowsFromSingleDate,
+} from "../booking/weeklyBookingCore";
 import DateInput, { TimeInput } from "../driver/create/DateInput";
 import {
+  formatDateToYMD,
   getDayFromDateText,
   normalizeDateToYMD,
   normalizeTime,
@@ -146,14 +155,37 @@ export default function PersonalRideScreen() {
     }
   };
 
+  // The single-date field (tripDate/tripTime) and the weekly list
+  // (weeklyRows) are two different UI shapes for the same underlying
+  // selection, never two independently-drifting sources of truth — this
+  // toggle is the ONE place they hand off to each other, so the date the
+  // passenger already picked is never silently lost switching between them
+  // (see this screen's own bug report).
   const toggleWeeklyBooking = () => {
     const nextValue = !weeklyBooking;
 
-    setWeeklyBooking(nextValue);
-
-    if (!nextValue) {
+    if (nextValue) {
+      // Turning ON — seed the weekly list with the date already selected in
+      // the single-date field (never resets/duplicates an already-built
+      // list — see seedWeeklyRowsFromSingleDate's own header).
+      const cleanDate = normalizeDateToYMD(tripDate);
+      // Israel-local "today", not the device's own timezone — see this
+      // fix's Israel-timezone requirement.
+      const todayYMD = formatDateToYMD(getLocalNowInIsrael());
+      setWeeklyRows((prev) => seedWeeklyRowsFromSingleDate(prev, cleanDate || "", tripTime, todayYMD));
+    } else {
+      // Turning OFF — the first weekly date (if any) becomes the single
+      // date again, so it's never lost either. The rest of the weekly list
+      // is cleared, since the single-date field can only ever hold one.
+      const restored = restoreSingleDateFromWeeklyRows(weeklyRows);
+      if (restored) {
+        setTripDate(restored.date);
+        if (restored.time) setTripTime(restored.time);
+      }
       setWeeklyRows([]);
     }
+
+    setWeeklyBooking(nextValue);
   };
 
   const decreaseSeats = () => {

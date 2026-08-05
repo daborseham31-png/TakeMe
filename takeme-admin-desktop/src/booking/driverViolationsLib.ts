@@ -46,6 +46,17 @@ import { auth, db } from "../../firebase";
 import i18n from "../i18n";
 import { notify } from "./work-errand/workErrandLib";
 import { writeAuditLog } from "../admin/adminAuditLib";
+import { isValidAppealExplanation } from "./driverNoShowCore";
+
+// Mirrors driverNoShowLib.ts's own ViolationStatus/driverViolationCore.ts's
+// CancellationViolationStatus on mobile exactly — appeal state for a
+// driver-cancellation violation (see approveCancellationViolationAppeal/
+// rejectCancellationViolationAppeal below). Desktop has no
+// driverViolationCore.ts of its own (that file is mobile-only — it also
+// holds the trip-cancellation WRITE logic, which desktop's admin-only UI
+// never needs), so this is defined locally instead of imported.
+export type CancellationViolationStatus = "open" | "appeal_pending" | "appeal_approved" | "appeal_rejected";
+const CANCELLATION_VIOLATION_TYPE = "driver_cancellation" as const;
 
 export type CancellationSourceCollection =
   | "bookings"
@@ -248,6 +259,12 @@ export const excuseDriverCancellationViolation = async (
 ): Promise<void> => {
   await updateDoc(doc(db, "users", driverId, "cancellationViolations", violationId), {
     adminExcused: true,
+    // Kept in sync with adminExcused — this is the field a violation's
+    // active-count/appeal-eligibility (canSubmitAppeal) actually reads. This
+    // was missing here previously (desktop's own excuse path had drifted
+    // from mobile's — see driverViolationCore.ts's writeCancellationViolationIfNew
+    // on mobile for the field this is meant to mirror).
+    active: false,
     excusedAt: serverTimestamp(),
     excusedBy: auth.currentUser?.uid || null,
     excuseReason: reason || "",
@@ -266,6 +283,102 @@ export const excuseDriverCancellationViolation = async (
     targetType: "driver",
     targetId: driverId,
     reason,
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Admin-only — appeal review for driver-cancellation violations. Mirrors
+// driverNoShowLib.ts's approveAppeal/rejectAppeal field-for-field (same
+// ViolationAppeal doc, same appeal status values) — the only real difference
+// is WHICH violation document gets updated: users/{driverId}/
+// cancellationViolations/{violationId} here, instead of the top-level
+// driverViolations/{violationId} the no-show system uses. Needs driverId as
+// its own argument (unlike approveAppeal/rejectAppeal) because that
+// subcollection path can't be derived from violationId alone.
+// ---------------------------------------------------------------------------
+
+export const approveCancellationViolationAppeal = async (
+  driverId: string,
+  violationId: string,
+  appealId: string,
+  adminNote: string,
+): Promise<void> => {
+  const adminUid = auth.currentUser?.uid || null;
+
+  await updateDoc(doc(db, "users", driverId, "cancellationViolations", violationId), {
+    status: "appeal_approved" as CancellationViolationStatus,
+    active: false,
+    adminExcused: true,
+    excusedAt: serverTimestamp(),
+    excusedBy: adminUid,
+    excuseReason: "appeal_approved",
+    excuseNote: adminNote || "",
+    updatedAt: serverTimestamp(),
+  });
+
+  await updateDoc(doc(db, "violationAppeals", appealId), {
+    status: "approved",
+    reviewedAt: serverTimestamp(),
+    reviewedBy: adminUid,
+    adminDecisionNote: adminNote || "",
+    updatedAt: serverTimestamp(),
+  });
+
+  await notify({
+    receiverId: driverId,
+    type: "cancellation_appeal_approved",
+    title: i18n.t("driverNoShow.appealApprovedTitle"),
+    message: i18n.t("driver.violationExcusedMessage"),
+    targetTab: "driver",
+  });
+
+  await writeAuditLog({
+    action: "appeal_approved",
+    targetType: "appeal",
+    targetId: appealId,
+    reason: adminNote || "",
+  });
+};
+
+export const rejectCancellationViolationAppeal = async (
+  driverId: string,
+  violationId: string,
+  appealId: string,
+  adminNote: string,
+): Promise<void> => {
+  if (!isValidAppealExplanation(adminNote)) {
+    throw new Error(i18n.t("driverNoShow.errorRejectionNoteRequired"));
+  }
+
+  const adminUid = auth.currentUser?.uid || null;
+
+  await updateDoc(doc(db, "users", driverId, "cancellationViolations", violationId), {
+    status: "appeal_rejected" as CancellationViolationStatus,
+    active: true,
+    updatedAt: serverTimestamp(),
+  });
+
+  await updateDoc(doc(db, "violationAppeals", appealId), {
+    status: "rejected",
+    reviewedAt: serverTimestamp(),
+    reviewedBy: adminUid,
+    adminDecisionNote: adminNote,
+    updatedAt: serverTimestamp(),
+  });
+
+  await notify({
+    receiverId: driverId,
+    type: "cancellation_appeal_rejected",
+    title: i18n.t("driverNoShow.appealRejectedTitle"),
+    message: i18n.t("driverNoShow.appealRejectedMessage"),
+    targetTab: "driver",
+  });
+
+  await writeAuditLog({
+    action: "appeal_rejected",
+    targetType: "appeal",
+    targetId: appealId,
+    reason: adminNote,
   });
 };
 
@@ -315,6 +428,16 @@ export const liftDriverCancellationSuspension = async (
 export type DriverCancellationViolation = {
   id: string;
   driverId: string;
+  // = sourceId — see mobile's driverViolationCore.ts's own comment; kept
+  // here too so this screen's appeal-review code can read one shared field
+  // name regardless of which app wrote the doc.
+  tripId: string;
+  violationType: typeof CANCELLATION_VIOLATION_TYPE;
+  active: boolean;
+  // Appeal state — see approveCancellationViolationAppeal/
+  // rejectCancellationViolationAppeal below.
+  status: CancellationViolationStatus;
+  appealId: string | null;
   sourceCollection: CancellationSourceCollection;
   sourceId: string;
   sourceCategory: string;
@@ -337,6 +460,11 @@ const toSeconds = (value: unknown): number => {
 const normalizeViolation = (id: string, data: Record<string, any>): DriverCancellationViolation => ({
   id,
   driverId: data.driverId || "",
+  tripId: data.tripId || data.sourceId || "",
+  violationType: CANCELLATION_VIOLATION_TYPE,
+  active: data.active !== false,
+  status: (data.status as CancellationViolationStatus) || "open",
+  appealId: data.appealId || null,
   sourceCollection: data.sourceCollection || "bookings",
   sourceId: data.sourceId || "",
   sourceCategory: data.sourceCategory || "",

@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
 import { getCategoryMeta } from "../../bookingsLib";
+import { isCancelledTripStatus } from "../../driverViolationCore";
 import {
   DirectionalRow,
   DirectionalScreen,
@@ -166,6 +167,7 @@ export default function FindWorkScreen() {
             job.remainingSeats > 0 &&
             job.status !== "full" &&
             job.status !== "completed" &&
+            !isCancelledTripStatus(job.status) &&
             !job.deletedForDriver,
         )
         .map(({ available, status, deletedForDriver, ...job }): JobListing => job)
