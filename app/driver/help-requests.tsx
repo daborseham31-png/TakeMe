@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
@@ -23,7 +23,7 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -165,9 +165,19 @@ const isCurrentlyActive = (card: HelpRequestCard): boolean =>
 export default function DriverHelpRequestsScreen() {
   const { t } = useTranslation();
   const { isRTL, language } = useLanguage();
+  const params = useLocalSearchParams();
+  // Deep link from the "roadside_help_requested" notification (see
+  // notifications.tsx's onPressNotification / roadsideLib.ts's
+  // createRoadsideRequest) — once this request's card renders below, it is
+  // scrolled to and briefly highlighted, mirroring the identical
+  // highlightOfferId pattern in roadside-help/waiting.tsx.
+  const highlightRequestId = String(params.requestId || "");
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [flashRequestId, setFlashRequestId] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const cardRefs = useRef<Record<string, View | null>>({});
 
   // Accepted requests — same roadsideRequests/{requestId} source of truth,
   // same shared card, as My Bookings -> Driver tab (see bookings.tsx).
@@ -336,6 +346,52 @@ export default function DriverHelpRequestsScreen() {
       return getSortSeconds(b) - getSortSeconds(a);
     });
   }, [acceptedRequests, notifications, myOffers]);
+
+  // Deep link from "roadside_help_requested": once this request's card is
+  // in the list, scroll to it and flash it briefly — same behavior as
+  // waiting.tsx's own highlightOfferId effect for "roadside_offer_received".
+  useEffect(() => {
+    if (!highlightRequestId) return;
+    if (!cards.some((c) => c.requestId === highlightRequestId)) return;
+
+    setFlashRequestId(highlightRequestId);
+
+    const scrollTimer = setTimeout(() => {
+      const cardNode = cardRefs.current[highlightRequestId];
+      const scrollNode = scrollRef.current as any;
+      if (!cardNode || !scrollNode) return;
+
+      cardNode.measure((
+        _x: number,
+        _y: number,
+        _w: number,
+        _h: number,
+        pageX: number,
+        pageY: number,
+      ) => {
+        scrollNode.measure((
+          _sx: number,
+          _sy: number,
+          _sw: number,
+          _sh: number,
+          _spx: number,
+          scrollPageY: number,
+        ) => {
+          scrollNode.scrollTo({
+            y: Math.max(pageY - scrollPageY - 16, 0),
+            animated: true,
+          });
+        });
+      });
+    }, 350);
+
+    const clearTimer = setTimeout(() => setFlashRequestId(null), 2600);
+
+    return () => {
+      clearTimeout(scrollTimer);
+      clearTimeout(clearTimer);
+    };
+  }, [highlightRequestId, cards]);
 
   const openOfferForm = (notification: Notification) => {
     setOfferForId(notification.id);
@@ -512,7 +568,14 @@ export default function DriverHelpRequestsScreen() {
     return (
       <View
         key={card.requestId}
-        style={[styles.card, isTerminal && styles.cardMuted]}
+        ref={(node) => {
+          cardRefs.current[card.requestId] = node;
+        }}
+        style={[
+          styles.card,
+          isTerminal && styles.cardMuted,
+          flashRequestId === card.requestId && styles.cardHighlight,
+        ]}
       >
         <View style={styles.cardHeader}>
           <View style={styles.iconBadge}>
@@ -695,6 +758,7 @@ export default function DriverHelpRequestsScreen() {
     <DirectionalScreen style={styles.page}>
       <KeyboardAvoidingWrapper>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
@@ -849,6 +913,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#FBF9F6",
     shadowOpacity: 0,
     elevation: 0,
+  },
+  cardHighlight: {
+    borderColor: "#F58220",
+    borderWidth: 2,
+    backgroundColor: "#FFF8F2",
   },
   cardHeader: {
     flexDirection: "row",

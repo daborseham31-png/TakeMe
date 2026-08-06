@@ -27,6 +27,7 @@ import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../firebase";
 import { useLanguage } from "./i18n/LanguageProvider";
+import { resolveNotificationRoute } from "./notificationRoutingCore";
 
 type BookingTab = "passenger" | "driver";
 
@@ -98,6 +99,7 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
   ride_trip_completed: "star-outline",
   trip_started: "navigate-outline",
 
+  roadside_help_requested: "construct-outline",
   roadside_offer_received: "construct-outline",
   roadside_offer_accepted: "checkmark-done-outline",
   roadside_driver_on_way: "navigate-outline",
@@ -156,57 +158,11 @@ export default function NotificationsScreen() {
   const needsPayment = (n: Notification) =>
     n.type === "request_accepted" && n.kind === "errand";
 
-  const getBookingTabFromNotification = (n: Notification): BookingTab => {
-    if (n.targetTab === "driver" || n.targetTab === "passenger") {
-      return n.targetTab;
-    }
-
-    if (n.roleTarget === "driver" || n.roleTarget === "passenger") {
-      return n.roleTarget;
-    }
-
-    if (n.openBookingTab === "driver" || n.openBookingTab === "passenger") {
-      return n.openBookingTab;
-    }
-
-    // إشعارات عادة بتوصل للسائق
-    const driverTypes = [
-      "request_received",
-      "new_booking_request",
-      "payment_confirmed",
-      "personal_ride_booking",
-      "school_ride_booking",
-      "ride_completed",
-      "roadside_offer_accepted",
-      "roadside_payment_received",
-    ];
-
-    if (driverTypes.includes(n.type || "")) {
-      return "driver";
-    }
-
-    // إشعارات عادة بتوصل للمسافر
-    const passengerTypes = [
-      "request_accepted",
-      "request_rejected",
-      "on_the_way",
-      "arrived",
-      "completed",
-      "cancelled",
-      "ride_on_the_way",
-      "ride_arrived",
-      "ride_trip_completed",
-      "roadside_driver_on_way",
-      "roadside_rating_required",
-    ];
-
-    if (passengerTypes.includes(n.type || "")) {
-      return "passenger";
-    }
-
-    return "passenger";
-  };
-
+  // The actual route decision lives in notificationRoutingCore.ts, shared
+  // with the global native push-tap handler
+  // (useGlobalNotificationRouting.ts) — this screen and that handler must
+  // never keep two separate copies of this branch chain (see that file's
+  // own header for why).
   const onPressNotification = (n: Notification) => {
     if (!n.read) {
       updateDoc(doc(db, "notifications", n.id), {
@@ -215,115 +171,10 @@ export default function NotificationsScreen() {
       }).catch(() => {});
     }
 
-    if (needsPayment(n) && n.applicationId && n.kind) {
-      router.push({
-        pathname: "/booking/payment",
-        params: {
-          kind: n.kind,
-          id: n.applicationId,
-        },
-      } as any);
-      return;
-    }
+    const route = resolveNotificationRoute(n);
+    if (!route) return;
 
-    // A driver just offered help — open Finding Help with this exact offer
-    // highlighted. Never Home, never another category.
-    if (n.type === "roadside_offer_received") {
-      router.push({
-        pathname: "/booking/roadside-help/waiting",
-        params: {
-          requestId: n.requestId || "",
-          highlightOfferId: n.offerId || "",
-        },
-      } as any);
-      return;
-    }
-
-    // A waiting parent's requested return ride was matched — open the trip
-    // details/confirm screen directly (AGENTS.md #8). Never books
-    // automatically; the parent still has to confirm on that screen.
-    if (n.type === "school_trip_match") {
-      router.push({
-        pathname: "/booking/school/trip-confirm",
-        params: {
-          tripId: n.bookingId || n.applicationId || "",
-          rideRequestId: n.requestId || "",
-          childEntryId: n.childEntryId || "",
-          childName: n.childName || "",
-          childId: n.childId || "",
-        },
-      } as any);
-      return;
-    }
-
-    // The driver verified the passenger's code and the trip has started —
-    // open Live Tracking directly (bookingId holds the TRIP id here, same
-    // convention as school_trip_match above — see
-    // verifyPassengerCodeAndStartTrip in schoolTripsLib.ts).
-    if (n.type === "trip_started") {
-      router.push({
-        pathname: "/booking/live-tracking",
-        params: {
-          id: n.bookingId || n.applicationId || "",
-          source: "schoolTrips",
-        },
-      } as any);
-      return;
-    }
-
-    // A driver cancelled a trip the parent had booked — open the
-    // replacement-offer review screen directly (never books anything
-    // automatically; the parent must explicitly accept one alternative).
-    if (n.type === "school_trip_replacement") {
-      router.push({
-        pathname: "/booking/school/replacement-offer",
-        params: {
-          offerId: n.replacementOfferId || n.applicationId || "",
-          originalBookingId: n.originalBookingId || "",
-        },
-      } as any);
-      return;
-    }
-
-    // The driver finished the help — open the Roadside Help payment page
-    // directly (never My Bookings first).
-    if (n.type === "roadside_payment_required") {
-      router.push({
-        pathname: "/booking/roadside-help/payment",
-        params: {
-          requestId: n.requestId || "",
-          offerId: n.offerId || "",
-          bookingId: n.bookingId || "",
-          amount: n.amount != null ? String(n.amount) : "",
-          category: "roadside",
-        },
-      } as any);
-      return;
-    }
-
-    // Admin: a driver submitted a no-show appeal — open the admin detail
-    // screen directly (see driverNoShowLib.ts's notifyAllAdminsOfNewAppeal,
-    // which sets targetPage to exactly "admin/violations/{violationId}").
-    if (n.type === "noshow_appeal_submitted" && n.targetPage) {
-      router.push(`/${n.targetPage}` as any);
-      return;
-    }
-
-    const tab = getBookingTabFromNotification(n);
-
-    router.push({
-      pathname: "/(tabs)/bookings",
-      params: {
-        tab,
-        bookingId: n.bookingId || "",
-        applicationId: n.applicationId || "",
-        requestId: n.requestId || "",
-        offerId: n.offerId || "",
-        category: n.category || "",
-        type: n.type || "",
-        kind: n.kind || "",
-      },
-    } as any);
+    router.push(route as any);
   };
 
   // Notification documents belong only to the receiving user (userId), so

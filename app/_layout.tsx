@@ -4,6 +4,7 @@ import React, { useEffect } from "react";
 import { ActivityIndicator, I18nManager, StyleSheet, View } from "react-native";
 
 import { LanguageProvider, useLanguage } from "./i18n/LanguageProvider";
+import { useGlobalNotificationRouting } from "./useGlobalNotificationRouting";
 
 // Blocks the very first render until the saved/detected app language has
 // finished loading — this is what prevents English text from flashing
@@ -51,10 +52,20 @@ function LanguageGate({ children }: { children: React.ReactNode }) {
   return <View style={[styles.root, { direction: isRTL ? "rtl" : "ltr" }]}>{children}</View>;
 }
 
+// Registered once, for the whole app's process lifetime, at this root level
+// — never per-screen — so a push tap routes correctly no matter which
+// screen happens to be mounted when the app was foregrounded/backgrounded/
+// launched. See useGlobalNotificationRouting.ts's own header.
+function GlobalNotificationRouting() {
+  useGlobalNotificationRouting();
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <LanguageProvider>
       <LanguageGate>
+        <GlobalNotificationRouting />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="login" />
