@@ -323,6 +323,7 @@
     "weeklyPrefix": "Еженедельно: {{days}}",
     "noDriversFound": "Водители не найдены",
     "noDriversHint": "Попробуйте изменить место посадки, пункт назначения, время, пол, язык, дату или количество мест.",
+    "noTripsForThisDate": "На эту дату поездок не найдено.",
     "availableFor": "Доступно для:",
     "totalIfAllDaysBooked": "Итого при бронировании всех дней: {{total}} ₪",
     "seatsAvailableSub": "Доступно",
@@ -437,6 +438,9 @@
     "violationsTab": "Нарушения",
     "noViolations": "У вас нет зафиксированных нарушений.",
     "driverNoShow": "Неявка водителя",
+    "driverCancellation": "Отменено вами",
+    "statusCancellationActive": "Зафиксировано",
+    "statusCancellationExcused": "Прощено администратором",
     "affectedPassengers": "{{count}} затронутых пассажиров",
     "refundStatus": {
       "not_required": "Возврат не требуется",
@@ -1013,6 +1017,9 @@
   "booking": {
     "from": "Откуда",
     "to": "Куда",
+    "passengerAreaLabel": "Район пассажира: {{area}}",
+    "pickupLocationNotProvided": "Место посадки не указано",
+    "approxDistanceFromRoute": "Примерно {{distance}} км от маршрута",
     "enterDepartureCity": "Введите город отправления",
     "tripDate": "Дата поездки",
     "tripTime": "Время поездки",

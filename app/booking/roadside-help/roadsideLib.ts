@@ -397,7 +397,12 @@ export const createRoadsideRequest = async (
         requestId: requestRef.id,
         driverId: match.driverId,
         passengerId: passenger.id,
-        targetPage: "help-requests",
+        // Full route (matches noshow_appeal_submitted's own targetPage
+        // convention — see driverNoShowLib.ts / notifications.tsx) so
+        // onPressNotification's "roadside_help_requested" branch opens the
+        // driver's EXISTING Help Requests screen (app/driver/help-
+        // requests.tsx) directly, never the general Bookings tab.
+        targetPage: "driver/help-requests",
         targetTab: "driver",
       }),
     ),

@@ -7,9 +7,11 @@ import { translateStoredDayName } from "../../i18n/formatters";
 import {
   DAY_KEY_LABEL,
   getAllowedWeeklyDateRange,
+  getAnyDateCalendarBounds,
   getDayKeyFromDate,
   getLocalNowInIsrael,
   isDateInAllowedWeek,
+  isDateSelectableForAnyDate,
   isNextWeekOpen,
   makeEmptyWeekDayRow,
   WeekChoice,
@@ -90,20 +92,23 @@ export default function WeeklyDaysCard({
   }, [nextWeekOpen]);
 
   const { startYMD, endYMD } = getAllowedWeeklyDateRange(selectedWeek);
+  const nowIsrael = getLocalNowInIsrael();
   const todayYMD = (() => {
-    const now = getLocalNowInIsrael();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
+    const y = nowIsrael.getFullYear();
+    const m = String(nowIsrael.getMonth() + 1).padStart(2, "0");
+    const d = String(nowIsrael.getDate()).padStart(2, "0");
     return `${y}-${m}-${d}`;
   })();
   const effectiveStartYMD = startYMD > todayYMD ? startYMD : todayYMD;
-  // "anyDate" only disables past days (today is the floor) and never caps
-  // how far forward the native picker can navigate.
+  // "anyDate" only disables past days (today is the floor, Israel-local —
+  // see getAnyDateCalendarBounds/isDateSelectableForAnyDate in
+  // weeklyBookingCore.ts) and never caps how far forward the native picker
+  // can navigate — no current/next-week clamp, unlike "singleWeek" below.
+  const anyDateBounds = getAnyDateCalendarBounds(nowIsrael);
   const minimumDate = isAnyDate
-    ? parseYMDToStartOfDay(todayYMD)
+    ? anyDateBounds.minimumDate
     : parseYMDToStartOfDay(effectiveStartYMD);
-  const maximumDate = isAnyDate ? undefined : parseYMDToEndOfDay(endYMD);
+  const maximumDate = isAnyDate ? anyDateBounds.maximumDate : parseYMDToEndOfDay(endYMD);
 
   const updateRow = (id: string, patch: Partial<WeekDayRow>) => {
     onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -145,7 +150,7 @@ export default function WeeklyDaysCard({
 
     if (value) {
       if (isAnyDate) {
-        if (value < todayYMD) {
+        if (!isDateSelectableForAnyDate(value, nowIsrael)) {
           Alert.alert(
             t("validation.invalidDateTitle"),
             t("validation.chooseValidDateEveryDay"),
@@ -161,7 +166,18 @@ export default function WeeklyDaysCard({
       }
     }
 
-    updateRow(id, { date: value });
+    const updatedRows = rows.map((row) => (row.id === id ? { ...row, date: value } : row));
+
+    // "anyDate" (School weekly/recurring) keeps the list chronologically
+    // sorted by date whenever a date changes — never by entry/row-add order
+    // — so "Day 1"/"Day 2"/... always reflects real date order. Only the
+    // DATE field changed above (via the map, not a fresh row); every row's
+    // own time/seats/price travels WITH it through the sort, never reset.
+    onChange(
+      isAnyDate && value
+        ? [...updatedRows].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+        : updatedRows,
+    );
   };
 
   // fullMonth mode only — tapping a date in the inline calendar toggles it

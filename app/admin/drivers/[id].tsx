@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
-import { doc, onSnapshot } from "firebase/firestore";
+import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -34,14 +34,17 @@ import {
   ADMIN_EXCUSE_REASON_LABEL_KEY,
   ADMIN_EXCUSE_REASONS,
   AdminExcuseReasonKey,
+  approveCancellationViolationAppeal,
   DriverCancellationStanding,
   DriverCancellationViolation,
   excuseDriverCancellationViolation,
   liftDriverCancellationSuspension,
   normalizeCancellationStanding,
+  rejectCancellationViolationAppeal,
   ROLLING_WINDOW_DAYS,
   subscribeDriverCancellationViolations,
 } from "../../booking/driverViolationsLib";
+import { NO_SHOW_REASON_LABEL_KEY, normalizeAppeal, ViolationAppeal } from "../../booking/driverNoShowLib";
 
 type PendingAction = { type: DriverVerificationStatus } | null;
 
@@ -71,6 +74,16 @@ export default function AdminDriverDetailScreen() {
   const [excuseReasonKey, setExcuseReasonKey] = useState<AdminExcuseReasonKey | null>(null);
   const [excuseNote, setExcuseNote] = useState("");
   const [excuseBusy, setExcuseBusy] = useState(false);
+  // Appeals for THIS driver's cancellation violations — one query covers
+  // every violation on the screen (never a per-row subscription). Matched to
+  // its violation client-side via appealsByViolationId below.
+  const [appeals, setAppeals] = useState<ViolationAppeal[]>([]);
+  const [appealAction, setAppealAction] = useState<{
+    violationId: string;
+    appealId: string;
+    type: "approve" | "reject";
+  } | null>(null);
+  const [appealBusy, setAppealBusy] = useState(false);
 
   useEffect(() => {
     if (!driverId) {
@@ -104,9 +117,24 @@ export default function AdminDriverDetailScreen() {
       () => setViolations([]),
     );
 
+    // Admin can read across drivers (isAdmin() in firestore.rules), so this
+    // is a normal query, not the driver-scoped subscribeAppealForViolation
+    // helper — that one is per-violation and would mean one listener per
+    // row here instead of one for the whole screen. Covers both violation
+    // systems' appeals for this driver (violationSource distinguishes them
+    // — see driverNoShowLib.ts); only cancellation-source appeals are
+    // actually rendered below, since no-show appeals are reviewed from
+    // app/admin/violations/[id].tsx instead.
+    const unsubscribeAppeals = onSnapshot(
+      query(collection(db, "violationAppeals"), where("driverId", "==", driverId)),
+      (snap) => setAppeals(snap.docs.map((d) => normalizeAppeal(d.id, d.data()))),
+      () => setAppeals([]),
+    );
+
     return () => {
       unsubscribe();
       unsubscribeViolations();
+      unsubscribeAppeals();
     };
   }, [driverId]);
 
@@ -160,6 +188,43 @@ export default function AdminDriverDetailScreen() {
       (v) => !v.adminExcused && (!reinstatedAtSeconds || v.createdAtSeconds >= reinstatedAtSeconds),
     ).length;
   }, [violations, standing]);
+
+  // One appeal per violation, ever (see submitViolationAppeal's deterministic
+  // appeal id) — this map lets each violation row below look its own appeal
+  // up in O(1) without a second Firestore read per row.
+  const appealsByViolationId = useMemo(() => {
+    const map = new Map<string, ViolationAppeal>();
+    appeals
+      .filter((a) => a.violationSource === "cancellationViolations")
+      .forEach((a) => map.set(a.violationId, a));
+    return map;
+  }, [appeals]);
+
+  const closeAppealAction = () => setAppealAction(null);
+
+  const runAppealDecision = async (reason: string) => {
+    if (!appealAction || appealBusy) return;
+
+    if (appealAction.type === "reject" && !reason.trim()) {
+      Alert.alert(t("common.error"), t("driverNoShow.errorRejectionNoteRequired"));
+      return;
+    }
+
+    setAppealBusy(true);
+    try {
+      if (appealAction.type === "approve") {
+        await approveCancellationViolationAppeal(driverId, appealAction.violationId, appealAction.appealId, reason.trim());
+      } else {
+        await rejectCancellationViolationAppeal(driverId, appealAction.violationId, appealAction.appealId, reason.trim());
+      }
+      closeAppealAction();
+      Alert.alert(t("admin.savedTitle"), t("driverNoShow.decisionSavedMessage"));
+    } catch (error: any) {
+      Alert.alert(t("common.error"), error?.message || t("driverNoShow.errorSubmitFailed"));
+    } finally {
+      setAppealBusy(false);
+    }
+  };
 
   const runLiftSuspension = async (reason: string) => {
     if (liftingSuspension) return;
@@ -434,61 +499,115 @@ export default function AdminDriverDetailScreen() {
             {violations.length === 0 ? (
               <Text style={styles.rowValue}>{t("admin.noViolationsYetLabel")}</Text>
             ) : (
-              violations.map((violation) => (
-                <View key={violation.id} style={styles.violationRow}>
-                  <View style={styles.violationHeader}>
-                    <Text style={styles.violationDate}>
-                      {violation.createdAtSeconds
-                        ? new Date(violation.createdAtSeconds * 1000).toLocaleDateString()
+              violations.map((violation) => {
+                // At most one appeal per violation, ever (deterministic
+                // appeal id — see submitViolationAppeal). null when the
+                // driver never appealed this one.
+                const appeal = appealsByViolationId.get(violation.id) || null;
+
+                return (
+                  <View key={violation.id} style={styles.violationRow}>
+                    <View style={styles.violationHeader}>
+                      <Text style={styles.violationDate}>
+                        {violation.createdAtSeconds
+                          ? new Date(violation.createdAtSeconds * 1000).toLocaleDateString()
+                          : "—"}
+                      </Text>
+                      <Text style={styles.violationCategory}>{violation.sourceCategory}</Text>
+                    </View>
+
+                    <Text style={styles.violationMeta}>
+                      {t("admin.violationBookingIdLabel")}: {violation.sourceId || "—"}
+                    </Text>
+                    <Text style={styles.violationMeta}>
+                      {t("admin.violationScheduledLabel")}:{" "}
+                      {violation.scheduledDepartureSeconds
+                        ? new Date(violation.scheduledDepartureSeconds * 1000).toLocaleString()
                         : "—"}
                     </Text>
-                    <Text style={styles.violationCategory}>{violation.sourceCategory}</Text>
-                  </View>
-
-                  <Text style={styles.violationMeta}>
-                    {t("admin.violationBookingIdLabel")}: {violation.sourceId || "—"}
-                  </Text>
-                  <Text style={styles.violationMeta}>
-                    {t("admin.violationScheduledLabel")}:{" "}
-                    {violation.scheduledDepartureSeconds
-                      ? new Date(violation.scheduledDepartureSeconds * 1000).toLocaleString()
-                      : "—"}
-                  </Text>
-                  <Text style={styles.violationMeta}>
-                    {t("admin.violationPassengerCountLabel")}: {violation.passengerBookingCount}
-                  </Text>
-
-                  <View style={styles.violationBadgeRow}>
-                    {violation.lateCancellation ? (
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>{t("admin.lateCancellationBadge")}</Text>
-                      </View>
-                    ) : null}
-                    {violation.adminExcused ? (
-                      <View style={[styles.badge, styles.badgeExcused]}>
-                        <Text style={styles.badgeText}>{t("admin.adminExcusedBadge")}</Text>
-                      </View>
-                    ) : null}
-                  </View>
-
-                  {!violation.adminExcused ? (
-                    <Pressable
-                      style={styles.excuseButton}
-                      onPress={() => setExcusingViolationId(violation.id)}
-                    >
-                      <Text style={styles.excuseButtonText}>{t("admin.excuseViolationButton")}</Text>
-                    </Pressable>
-                  ) : violation.excuseReason ? (
-                    <Text style={styles.violationExcuseReason}>
-                      {t(
-                        ADMIN_EXCUSE_REASON_LABEL_KEY[violation.excuseReason as AdminExcuseReasonKey] ||
-                          "admin.excuseReasonOther",
-                      )}
-                      {violation.excuseNote ? ` — ${violation.excuseNote}` : ""}
+                    <Text style={styles.violationMeta}>
+                      {t("admin.violationPassengerCountLabel")}: {violation.passengerBookingCount}
                     </Text>
-                  ) : null}
-                </View>
-              ))
+
+                    <View style={styles.violationBadgeRow}>
+                      {violation.lateCancellation ? (
+                        <View style={styles.badge}>
+                          <Text style={styles.badgeText}>{t("admin.lateCancellationBadge")}</Text>
+                        </View>
+                      ) : null}
+                      {violation.adminExcused ? (
+                        <View style={[styles.badge, styles.badgeExcused]}>
+                          <Text style={styles.badgeText}>{t("admin.adminExcusedBadge")}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+
+                    {/* The direct-Excuse shortcut stays available regardless
+                        of appeal state (an admin can still excuse outright
+                        without waiting for/reviewing an appeal) — only
+                        hidden once already excused. The excuse-reason
+                        summary line is skipped for an appeal-approved
+                        excuse, since the appeal box below already explains
+                        it (excuseReason there is the literal
+                        "appeal_approved" marker, not a real preset reason). */}
+                    {!violation.adminExcused ? (
+                      <Pressable
+                        style={styles.excuseButton}
+                        onPress={() => setExcusingViolationId(violation.id)}
+                      >
+                        <Text style={styles.excuseButtonText}>{t("admin.excuseViolationButton")}</Text>
+                      </Pressable>
+                    ) : violation.excuseReason && violation.excuseReason !== "appeal_approved" ? (
+                      <Text style={styles.violationExcuseReason}>
+                        {t(
+                          ADMIN_EXCUSE_REASON_LABEL_KEY[violation.excuseReason as AdminExcuseReasonKey] ||
+                            "admin.excuseReasonOther",
+                        )}
+                        {violation.excuseNote ? ` — ${violation.excuseNote}` : ""}
+                      </Text>
+                    ) : null}
+
+                    {appeal ? (
+                      <View style={styles.appealBox}>
+                        <Text style={styles.appealBoxTitle}>{t("driverNoShow.submitAppeal")}</Text>
+                        <Text style={styles.violationMeta}>
+                          {t("driverNoShow.appealReason")}: {t(NO_SHOW_REASON_LABEL_KEY[appeal.reasonCategory])}
+                        </Text>
+                        <Text style={styles.appealBoxExplanation}>{appeal.explanation}</Text>
+
+                        {appeal.status === "pending" ? (
+                          <View style={styles.appealButtonsRow}>
+                            <Pressable
+                              style={[styles.appealDecisionButton, styles.appealRejectButton]}
+                              onPress={() =>
+                                setAppealAction({ violationId: violation.id, appealId: appeal.id, type: "reject" })
+                              }
+                            >
+                              <Text style={styles.appealRejectButtonText}>{t("driverNoShow.rejectAppealButton")}</Text>
+                            </Pressable>
+                            <Pressable
+                              style={[styles.appealDecisionButton, styles.appealApproveButton]}
+                              onPress={() =>
+                                setAppealAction({ violationId: violation.id, appealId: appeal.id, type: "approve" })
+                              }
+                            >
+                              <Text style={styles.appealApproveButtonText}>{t("driverNoShow.approveAppealButton")}</Text>
+                            </Pressable>
+                          </View>
+                        ) : appeal.status === "approved" ? (
+                          <View style={[styles.badge, styles.badgeExcused]}>
+                            <Text style={styles.badgeText}>{t("driverNoShow.statusAppealApprovedRemoved")}</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.badge}>
+                            <Text style={styles.badgeText}>{t("driverNoShow.statusAppealRejectedActive")}</Text>
+                          </View>
+                        )}
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })
             )}
           </View>
 
@@ -543,6 +662,26 @@ export default function AdminDriverDetailScreen() {
         busy={liftingSuspension}
         onCancel={() => setLiftSuspensionModalOpen(false)}
         onConfirm={runLiftSuspension}
+      />
+
+      {/* Approve/reject a driver-cancellation appeal — mirrors
+          app/admin/violations/[id].tsx's own no-show approve/reject modal
+          exactly (same ConfirmModal, same requireReason-only-for-reject
+          shape), just targeting approveCancellationViolationAppeal/
+          rejectCancellationViolationAppeal instead. */}
+      <ConfirmModal
+        visible={!!appealAction}
+        title={
+          appealAction?.type === "approve" ? t("driverNoShow.approveAppealButton") : t("driverNoShow.rejectAppealButton")
+        }
+        message={t("admin.reasonShownToDriverPlaceholder")}
+        confirmLabel={t("admin.confirmButton")}
+        destructive={appealAction?.type === "reject"}
+        requireReason={appealAction?.type === "reject"}
+        reasonPlaceholder={t("admin.reasonShownToDriverPlaceholder")}
+        busy={appealBusy}
+        onCancel={closeAppealAction}
+        onConfirm={runAppealDecision}
       />
 
       {/* A plain ConfirmModal only ever collects one free-text reason — this
@@ -886,6 +1025,52 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontStyle: "italic",
     color: adminColors.textMuted,
+  },
+  appealBox: {
+    marginTop: 6,
+    padding: 10,
+    borderRadius: adminRadius.sm,
+    borderWidth: 1,
+    borderColor: adminColors.borderStrong,
+    backgroundColor: adminColors.page,
+    gap: 4,
+  },
+  appealBoxTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: adminColors.text,
+  },
+  appealBoxExplanation: {
+    fontSize: 12,
+    color: adminColors.text,
+  },
+  appealButtonsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 4,
+  },
+  appealDecisionButton: {
+    flex: 1,
+    borderRadius: adminRadius.sm,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  appealApproveButton: {
+    backgroundColor: adminColors.primary,
+  },
+  appealApproveButtonText: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#FFFFFF",
+  },
+  appealRejectButton: {
+    borderWidth: 1,
+    borderColor: adminColors.danger,
+  },
+  appealRejectButtonText: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: adminColors.danger,
   },
   noteInput: {
     borderWidth: 1,

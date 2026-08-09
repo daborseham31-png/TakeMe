@@ -70,12 +70,17 @@ import { DRIVER_CANCEL_LOCK_HOURS } from "./cancellationEligibility";
 import {
   cancellationViolationId,
   cancellationViolationRef,
+  CANCELLATION_VIOLATION_TYPE,
   CancellationSourceCollection,
+  CancellationViolationStatus,
+  DRIVER_CANCELLED_TRIP_STATUS,
+  isCancelledTripStatus,
   LATE_CANCELLATION_HOURS,
   readExistingCancellationViolation,
   RecordDriverCancellationViolationInput,
   writeCancellationViolationIfNew,
 } from "./driverViolationCore";
+import { canSubmitAppeal, isValidAppealExplanation } from "./driverNoShowCore";
 import { notify } from "./work-errand/workErrandLib";
 import { writeAuditLog } from "../admin/adminAuditLib";
 
@@ -88,12 +93,15 @@ import { writeAuditLog } from "../admin/adminAuditLib";
 export {
   cancellationViolationId,
   cancellationViolationRef,
+  CANCELLATION_VIOLATION_TYPE,
   DRIVER_CANCEL_LOCK_HOURS,
+  DRIVER_CANCELLED_TRIP_STATUS,
+  isCancelledTripStatus,
   LATE_CANCELLATION_HOURS,
   readExistingCancellationViolation,
   writeCancellationViolationIfNew,
 };
-export type { CancellationSourceCollection, RecordDriverCancellationViolationInput };
+export type { CancellationSourceCollection, CancellationViolationStatus, RecordDriverCancellationViolationInput };
 
 export const ROLLING_WINDOW_DAYS = 30;
 export const REPEAT_OFFENSE_WINDOW_DAYS = 60;
@@ -414,6 +422,10 @@ export const excuseDriverCancellationViolation = async (
 
   await updateDoc(doc(db, "users", driverId, "cancellationViolations", violationId), {
     adminExcused: true,
+    // Kept in sync with adminExcused — this is the field the Violations
+    // screen's active-count badge actually filters on (merged with the
+    // no-show system's own `active`, see subscribeActiveViolationCount).
+    active: false,
     excusedAt: serverTimestamp(),
     excusedBy: adminUid,
     excuseReason: reasonKey,
@@ -433,6 +445,110 @@ export const excuseDriverCancellationViolation = async (
     targetType: "driver",
     targetId: driverId,
     reason: `${reasonKey}${note ? `: ${note}` : ""}`,
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Admin-only — appeal review for driver-cancellation violations. Mirrors
+// driverNoShowLib.ts's approveAppeal/rejectAppeal field-for-field (same
+// ViolationAppeal doc, same appeal status values) — the only real difference
+// is WHICH violation document gets updated: users/{driverId}/
+// cancellationViolations/{violationId} here, instead of the top-level
+// driverViolations/{violationId} the no-show system uses. Needs driverId as
+// its own argument (unlike approveAppeal/rejectAppeal) because that
+// subcollection path can't be derived from violationId alone.
+// ---------------------------------------------------------------------------
+
+export const approveCancellationViolationAppeal = async (
+  driverId: string,
+  violationId: string,
+  appealId: string,
+  adminNote: string,
+): Promise<void> => {
+  const adminUid = auth.currentUser?.uid || null;
+
+  await updateDoc(doc(db, "users", driverId, "cancellationViolations", violationId), {
+    status: "appeal_approved" as CancellationViolationStatus,
+    // An approved appeal IS an excuse — kept in sync with the existing
+    // adminExcused/active fields so this violation stops counting toward
+    // BOTH the 6-strikes suspension ladder (adminExcused) and the
+    // Violations tab's active-count badge (active), exactly like a direct
+    // admin Excuse already does.
+    active: false,
+    adminExcused: true,
+    excusedAt: serverTimestamp(),
+    excusedBy: adminUid,
+    excuseReason: "appeal_approved",
+    excuseNote: adminNote || "",
+    updatedAt: serverTimestamp(),
+  });
+
+  await updateDoc(doc(db, "violationAppeals", appealId), {
+    status: "approved",
+    reviewedAt: serverTimestamp(),
+    reviewedBy: adminUid,
+    adminDecisionNote: adminNote || "",
+    updatedAt: serverTimestamp(),
+  });
+
+  await notify({
+    receiverId: driverId,
+    type: "cancellation_appeal_approved",
+    title: i18n.t("driverNoShow.appealApprovedTitle"),
+    message: i18n.t("driver.violationExcusedMessage"),
+    targetTab: "driver",
+  });
+
+  await writeAuditLog({
+    action: "appeal_approved",
+    targetType: "appeal",
+    targetId: appealId,
+    reason: adminNote || "",
+  });
+};
+
+export const rejectCancellationViolationAppeal = async (
+  driverId: string,
+  violationId: string,
+  appealId: string,
+  adminNote: string,
+): Promise<void> => {
+  if (!isValidAppealExplanation(adminNote)) {
+    throw new Error(i18n.t("driverNoShow.errorRejectionNoteRequired"));
+  }
+
+  const adminUid = auth.currentUser?.uid || null;
+
+  await updateDoc(doc(db, "users", driverId, "cancellationViolations", violationId), {
+    status: "appeal_rejected" as CancellationViolationStatus,
+    // The violation remains active/on-record — a rejected appeal changes
+    // nothing about standing (never re-excuses, never re-suspends on its
+    // own; the violation was already counted once at creation time).
+    active: true,
+    updatedAt: serverTimestamp(),
+  });
+
+  await updateDoc(doc(db, "violationAppeals", appealId), {
+    status: "rejected",
+    reviewedAt: serverTimestamp(),
+    reviewedBy: adminUid,
+    adminDecisionNote: adminNote,
+    updatedAt: serverTimestamp(),
+  });
+
+  await notify({
+    receiverId: driverId,
+    type: "cancellation_appeal_rejected",
+    title: i18n.t("driverNoShow.appealRejectedTitle"),
+    message: i18n.t("driverNoShow.appealRejectedMessage"),
+    targetTab: "driver",
+  });
+
+  await writeAuditLog({
+    action: "appeal_rejected",
+    targetType: "appeal",
+    targetId: appealId,
+    reason: adminNote,
   });
 };
 
@@ -487,6 +603,19 @@ export const liftDriverCancellationSuspension = async (
 export type DriverCancellationViolation = {
   id: string;
   driverId: string;
+  // Same value as sourceId — see writeCancellationViolationIfNew's own
+  // comment for why this is duplicated under the no-show system's field
+  // name too (lets the Violations screen's merged list read one shared
+  // "which trip is this about" field regardless of which system wrote it).
+  tripId: string;
+  violationType: typeof CANCELLATION_VIOLATION_TYPE;
+  active: boolean;
+  // Appeal state — same values/meaning as the no-show system's own
+  // DriverViolation.status/appealId (see driverNoShowLib.ts), read by the
+  // exact same canSubmitAppeal check and rendered with the same status pill
+  // logic in the merged Violations tab.
+  status: CancellationViolationStatus;
+  appealId: string | null;
   sourceCollection: CancellationSourceCollection;
   sourceId: string;
   sourceCategory: string;
@@ -511,6 +640,16 @@ const toSeconds = (value: unknown): number => {
 const normalizeViolation = (id: string, data: Record<string, any>): DriverCancellationViolation => ({
   id,
   driverId: data.driverId || "",
+  // Falls back to sourceId for violations written before tripId existed on
+  // this doc — never leaves the merged Violations list unable to identify
+  // which trip an older record is about.
+  tripId: data.tripId || data.sourceId || "",
+  violationType: CANCELLATION_VIOLATION_TYPE,
+  active: data.active !== false,
+  // Falls back to "open" for violations written before this field existed —
+  // never leaves an old record in an unrecognized state.
+  status: (data.status as CancellationViolationStatus) || "open",
+  appealId: data.appealId || null,
   sourceCollection: data.sourceCollection || "bookings",
   sourceId: data.sourceId || "",
   sourceCategory: data.sourceCategory || "",

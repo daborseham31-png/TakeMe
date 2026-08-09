@@ -138,9 +138,21 @@ export const NO_SHOW_REASON_LABEL_KEY: Record<NoShowAppealReasonCategory, string
 
 export type AppealStatus = "pending" | "approved" | "rejected";
 
+// Which violation system this appeal is about — "driverViolations" (the
+// no-show system, the original/default) or "cancellationViolations" (the
+// driver-cancellation system, users/{driverId}/cancellationViolations — see
+// driverViolationCore.ts). Determines which document submitViolationAppeal/
+// approveAppeal/rejectAppeal-equivalents update: driverViolations/{violationId}
+// for the former, users/{driverId}/cancellationViolations/{violationId} for
+// the latter (the cancellation-side approve/reject live in
+// driverViolationsLib.ts as approveCancellationViolationAppeal/
+// rejectCancellationViolationAppeal, since that path also needs driverId).
+export type ViolationSource = "driverViolations" | "cancellationViolations";
+
 export type ViolationAppeal = {
   id: string;
   violationId: string;
+  violationSource: ViolationSource;
   driverId: string;
   tripId: string;
   reasonCategory: NoShowAppealReasonCategory;
@@ -192,9 +204,12 @@ const normalizeViolation = (id: string, data: Record<string, any>): DriverViolat
   refundReference: data.refundReference || null,
 });
 
-const normalizeAppeal = (id: string, data: Record<string, any>): ViolationAppeal => ({
+export const normalizeAppeal = (id: string, data: Record<string, any>): ViolationAppeal => ({
   id,
   violationId: data.violationId || "",
+  // Older appeal docs (written before this field existed) are always about
+  // the original no-show system — never mis-attribute them.
+  violationSource: (data.violationSource as ViolationSource) || "driverViolations",
   driverId: data.driverId || "",
   tripId: data.tripId || "",
   reasonCategory: (data.reasonCategory as NoShowAppealReasonCategory) || "other",
@@ -264,6 +279,10 @@ export const subscribeAppealForViolation = (
 
 export type SubmitAppealInput = {
   violationId: string;
+  // Defaults to "driverViolations" (the original no-show system) so every
+  // existing call site keeps working unchanged — only a cancellation-
+  // violation appeal needs to pass "cancellationViolations" explicitly.
+  violationSource?: ViolationSource;
   tripId: string;
   reasonCategory: NoShowAppealReasonCategory;
   explanation: string;
@@ -312,9 +331,18 @@ export const submitViolationAppeal = async (input: SubmitAppealInput): Promise<s
   }
   submissionInFlight.add(input.violationId);
 
-  try {
-    const violationRef = doc(db, VIOLATIONS_COLLECTION, input.violationId);
+  const violationSource: ViolationSource = input.violationSource || "driverViolations";
+  // A cancellation violation lives under the driver's OWN users/{uid}
+  // subcollection (see driverViolationCore.ts) — the driver appealing it IS
+  // that uid, so the path never needs a separate driverId lookup, mirroring
+  // how every other self-write to this subcollection already works
+  // (writeCancellationViolationIfNew, excuseDriverCancellationViolation).
+  const violationRef =
+    violationSource === "cancellationViolations"
+      ? doc(db, "users", uid, "cancellationViolations", input.violationId)
+      : doc(db, VIOLATIONS_COLLECTION, input.violationId);
 
+  try {
     return await runTransaction(db, async (transaction) => {
       const violationSnap = await transaction.get(violationRef);
       if (!violationSnap.exists()) {
@@ -332,12 +360,17 @@ export const submitViolationAppeal = async (input: SubmitAppealInput): Promise<s
       // Deterministic appeal id (one appeal doc per violation, ever, through
       // this flow) — same idempotency shape as the violation id itself, so a
       // retried submission can never create two appeal docs for one
-      // violation even if the transaction is retried by the SDK.
-      const appealId = `appeal_${input.violationId}`;
+      // violation even if the transaction is retried by the SDK. Namespaced
+      // by source so the two violation systems' id spaces can never collide
+      // (a driverRoutes-derived cancellation violation id and a no-show
+      // violation id are generated completely differently, but this keeps
+      // it explicit rather than relying on that being permanently true).
+      const appealId = `appeal_${violationSource}_${input.violationId}`;
       const appealRef = doc(db, APPEALS_COLLECTION, appealId);
 
       transaction.set(appealRef, {
         violationId: input.violationId,
+        violationSource,
         driverId: uid,
         tripId: input.tripId,
         reasonCategory: input.reasonCategory,

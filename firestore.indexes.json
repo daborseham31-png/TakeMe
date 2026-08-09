@@ -78,6 +78,22 @@
         { "fieldPath": "driverId", "order": "ASCENDING" },
         { "fieldPath": "active", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "workApplications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jobId", "order": "ASCENDING" },
+        { "fieldPath": "employerId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "errandApplications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "errandId", "order": "ASCENDING" },
+        { "fieldPath": "driverId", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

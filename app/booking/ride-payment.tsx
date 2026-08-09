@@ -7,7 +7,7 @@ import {
   runTransaction,
   serverTimestamp,
 } from "firebase/firestore";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -29,6 +29,7 @@ import { ltrContentStyle } from "../i18n/rtl";
 import BitBadge from "./BitBadge";
 import { openBitPayment } from "./bitPayment";
 import { isDateTimeExpired } from "./homeFeedLib";
+import { resolvePickupArea } from "./PickupLocationPicker";
 import { RIDE_CATEGORY, RidePayment } from "./rideBookingLib";
 import {
   acceptReplacementOffer,
@@ -96,6 +97,47 @@ export default function RidePaymentScreen() {
     pickupLat != null && pickupLng != null && Number.isFinite(pickupLat) && Number.isFinite(pickupLng)
       ? { latitude: pickupLat, longitude: pickupLng, address: pickupAddress, source: pickupSource }
       : null;
+  // Best-effort area/city name for the SAME point above — resolved once in
+  // the background (see the useEffect below), never blocking Continue if it
+  // hasn't resolved yet or fails; the coordinates/address are the
+  // authoritative required data (see handleContinue's own validation),
+  // `pickupArea` is purely a display convenience for the driver's incoming-
+  // request card.
+  const [pickupArea, setPickupArea] = useState("");
+  // The driver's own route origin (see driverresults.tsx's handleBookDriver)
+  // — snapshotted so the driver's incoming-request card can show an
+  // approximate distance to the passenger's pickup point without a second
+  // Firestore read per card. Absent/null on routes that never had these
+  // (legacy documents, or a route without saved coordinates) — never
+  // required.
+  const driverFromLat = params.driverFromLat ? Number(params.driverFromLat) : null;
+  const driverFromLng = params.driverFromLng ? Number(params.driverFromLng) : null;
+
+  useEffect(() => {
+    if (!pickupLocation) return;
+    let cancelled = false;
+
+    resolvePickupArea(pickupLocation.latitude, pickupLocation.longitude)
+      .then((area) => {
+        if (!cancelled) setPickupArea(area);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Written onto the booking doc instead of the bare `pickupLocation` above
+  // — adds `area` (resolved in the background, may still be "" if the
+  // driver taps Continue before it resolves — never blocks submission) and
+  // never adds the field at all when there's no pickup point to begin with.
+  const pickupLocationForWrite = pickupLocation ? { ...pickupLocation, area: pickupArea } : null;
+  const driverOriginFields =
+    driverFromLat !== null && driverFromLng !== null && Number.isFinite(driverFromLat) && Number.isFinite(driverFromLng)
+      ? { driverFromLat, driverFromLng }
+      : {};
   // School only — the exact school/university name, required at trip
   // creation (see RideForm.tsx).
   const schoolName = String(params.schoolName || "");
@@ -467,7 +509,8 @@ const createBookingAfterPayment = async (
       to,
       schoolName: schoolName || null,
       destinationDetails: destinationDetails || null,
-      pickupLocation,
+      pickupLocation: pickupLocationForWrite,
+      ...driverOriginFields,
       date,
       day,
       time,
@@ -565,6 +608,19 @@ const createBookingAfterPayment = async (
       return;
     }
 
+    // Personal Ride only (never School's own three separate paths, which
+    // this same screen also handles below and which this fix doesn't
+    // touch) — the driver needs to know where the passenger actually wants
+    // to be picked up before this request can go through at all. Defensive:
+    // personal-ride/index.tsx's own search form already requires this
+    // upstream, but a request reaching this screen without it (a stale deep
+    // link, a lost/malformed param) must still be blocked here, not
+    // silently booked with no pickup point.
+    if (!isSchool && !isReplacementSource && !isSchoolTripsSource && !pickupLocation) {
+      Alert.alert(t("auth.missingDetails"), t("pickupLocation.pickupLocationRequired"));
+      return;
+    }
+
     const payment: RidePayment =
       method === "cash" ? { method: "cash" } : { method: "bit" };
 
@@ -650,7 +706,8 @@ const createBookingAfterPayment = async (
           to,
           schoolName,
           destinationDetails,
-          pickupLocation,
+          pickupLocation: pickupLocationForWrite,
+          ...driverOriginFields,
 
           // Same School-only child passthrough as createBookingAfterPayment
           // above — see schoolChildEntries's own comment.

@@ -40,6 +40,7 @@ import {
   PASSENGER_CANCEL_LOCK_HOURS,
   TripTrackingStatus,
 } from "./bookingsLib";
+import { NormalizedPickupLocation, normalizePickupLocationSafe } from "./pickupLocationCore";
 import {
   CancellationError,
   CancellationStatusInput,
@@ -49,6 +50,7 @@ import {
 
 import {
   CancellationStandingResult,
+  DRIVER_CANCELLED_TRIP_STATUS,
   evaluateDriverCancellationStanding,
   readExistingCancellationViolation,
   writeCancellationViolationIfNew,
@@ -350,15 +352,52 @@ export const cancelRideBooking = async (
     // NOW (PHASE 1, before any write below) so it can be written atomically
     // alongside the cancellation itself (see driverViolationsLib.ts's own
     // header for why this must never be a separate, skippable step).
+    if (cancelledBy === "driver") {
+      console.log("cancelRideBooking: linked booking found (driver cancel)", {
+        bookingId,
+        status: current.status,
+        driverId: current.driverId,
+        activeBookingCount: current.driverId ? 1 : 0,
+      });
+    }
+
     const violationSnap =
       cancelledBy === "driver" && current.driverId
         ? await readExistingCancellationViolation(transaction, current.driverId, "bookings", bookingId)
         : null;
 
+    // A driver cancellation also permanently retires the linked driverRoutes
+    // listing (if any) — never left bookable again — mirroring exactly what
+    // cancelGeneralBooking already does for a whole-route booking. A
+    // personal_ride booking is a direct 1:1 driver/passenger match (see this
+    // file's own header), so there is no shared seat pool to preserve for
+    // anyone else. Read (still PHASE 1) before any write below, and only
+    // updated if it still exists — a booking's routeId could in principle
+    // point at an already-deleted route.
+    const routeRef =
+      cancelledBy === "driver" && current.routeId
+        ? doc(db, "driverRoutes", current.routeId)
+        : null;
+    const routeSnap = routeRef ? await transaction.get(routeRef) : null;
+
     transaction.update(bookingRef, {
       status: "cancelled" as RideStatus,
+      // Lets the passenger's UI show "Cancelled by driver" specifically —
+      // mirrors the same field cancelGeneralBooking/cancelSchoolTrip/
+      // cancelApplication already write on their own cancelled docs.
+      cancelledBy,
       updatedAt: serverTimestamp(),
     });
+
+    if (routeSnap && routeSnap.exists()) {
+      transaction.update(routeRef!, {
+        status: DRIVER_CANCELLED_TRIP_STATUS,
+        isBooked: true,
+        available: false,
+        deletedForDriver: true,
+        updatedAt: serverTimestamp(),
+      });
+    }
 
     if (violationSnap && current.driverId) {
       driverIdForViolation = current.driverId;
@@ -714,7 +753,21 @@ export type RideBooking = {
   paymentStatus: string | null;
   cardLast4: string | null;
 
-  pickup: GeoPoint | null;
+  // The passenger's own selected pickup point (see PickupLocationPicker.tsx
+  // / ride-payment.tsx's createBookingAfterPayment, which is what actually
+  // writes this field — never data.passengerPickupLocation, which only the
+  // unused/dead createRideBooking below ever wrote). `area` is a best-
+  // effort reverse-geocoded city/area name, shown as "Passenger area: …" on
+  // the driver's incoming-request card — never required, and safely null on
+  // any booking made before this field existed (see
+  // normalizePickupLocationSafe in pickupLocationCore.ts).
+  pickupLocation: NormalizedPickupLocation | null;
+  // The driver's own route origin, snapshotted at booking time so the
+  // driver's incoming-request card can show an approximate distance to the
+  // passenger's pickup point — absent/null on any route that never had
+  // saved coordinates, or any booking made before this field existed.
+  driverFromLat: number | null;
+  driverFromLng: number | null;
 
   rating: number | null;
   reviewComment: string | null;
@@ -739,19 +792,6 @@ export type RideBooking = {
 
 const asNumber = (value: any): number | null =>
   typeof value === "number" ? value : null;
-
-const normalizeGeo = (raw: any): GeoPoint | null => {
-  if (!raw || typeof raw !== "object") return null;
-
-  const latitude = typeof raw.latitude === "number" ? raw.latitude : null;
-  const longitude = typeof raw.longitude === "number" ? raw.longitude : null;
-
-  return {
-    latitude,
-    longitude,
-    address: raw.address || "",
-  };
-};
 
 const normalizeTripStatus = (value: any): TripTrackingStatus => {
   if (
@@ -830,7 +870,9 @@ export const normalizeRideBooking = (id: string, data: any): RideBooking => {
     paymentStatus: data.paymentStatus || null,
     cardLast4: data.cardLast4 || null,
 
-    pickup: normalizeGeo(data.passengerPickupLocation),
+    pickupLocation: normalizePickupLocationSafe(data.pickupLocation),
+    driverFromLat: typeof data.driverFromLat === "number" ? data.driverFromLat : null,
+    driverFromLng: typeof data.driverFromLng === "number" ? data.driverFromLng : null,
 
     rating: asNumber(data.rating),
     reviewComment: data.reviewComment || null,

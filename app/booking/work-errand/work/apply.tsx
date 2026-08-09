@@ -17,7 +17,7 @@ import { useTranslation } from "react-i18next";
 import { DirectionalScreen } from "../../../i18n/DirectionalPrimitives";
 import { useLanguage } from "../../../i18n/LanguageProvider";
 import { paddingEnd } from "../../../i18n/rtl";
-import PickupLocationPicker, { PickupLocation } from "../../PickupLocationPicker";
+import PickupLocationPicker, { PickupLocation, resolvePickupArea } from "../../PickupLocationPicker";
 import { createApplication } from "../workErrandLib";
 
 type JobListing = {
@@ -94,6 +94,12 @@ export default function WorkApplyScreen() {
     try {
       setSubmitting(true);
 
+      // Best-effort — the SAME point already selected above, never a fresh
+      // location fix. A resolution failure/timeout must never block sending
+      // the request (see resolvePickupArea's own header) — the employer
+      // still sees the address either way.
+      const area = await resolvePickupArea(pickupLocation.latitude, pickupLocation.longitude).catch(() => "");
+
       await createApplication(
         "work",
         {
@@ -114,6 +120,7 @@ export default function WorkApplyScreen() {
             longitude: pickupLocation.longitude,
             address: pickupLocation.address,
           },
+          area,
           pickupSource: pickupLocation.source,
         },
       );

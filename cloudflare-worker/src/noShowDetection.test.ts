@@ -443,6 +443,34 @@ describe("noShowDetection: behavior preservation", () => {
     expect(summary.ineligibleSkipped).toBe(1);
   });
 
+  it("a trip the driver manually cancelled (status cancelled_by_driver) is never treated as a no-show, even with a real booking still attached", async () => {
+    // Mirrors the mobile app's DRIVER_CANCELLED_TRIP_STATUS (see
+    // app/booking/driverViolationCore.ts) — cancelDriverTrip/
+    // cancelGeneralBooking's driver branch writes this exact status on the
+    // driverRoutes doc. A driver who explicitly cancelled a trip must never
+    // ALSO get a no-show violation for the same trip once its scheduled time
+    // passes — the booking doc is included here specifically to prove
+    // isStillOpenForNoShow excludes it before any booking-count check ever
+    // runs, not merely because no booking exists.
+    seed("driverRoutes", "route-1", {
+      driverId: "driver-1",
+      tripDate: DUE_DATE,
+      time: DUE_TIME,
+      from: "A",
+      to: "B",
+      active: true,
+      status: "cancelled_by_driver",
+      bookingType: "personal",
+    });
+    seedBooking("bk-1", "route-1");
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW);
+
+    expect(summary.violationsCreated).toBe(0);
+    expect(summary.candidateTripIds).toBe(0);
+    expect(store.some((d) => d.collection === "driverViolations")).toBe(false);
+  });
+
   it("a pre-existing violation for a trip is never duplicated (requireAbsent race-guard)", async () => {
     // Simulates a violation another run/process already created for this
     // trip while the trip/booking docs themselves still look like an

@@ -318,6 +318,7 @@
     "weeklyPrefix": "שבועי: {{days}}",
     "noDriversFound": "לא נמצאו נהגים",
     "noDriversHint": "נסה לשנות את מיקום האיסוף, היעד, השעה, המגדר, השפה, התאריך או מספר המקומות.",
+    "noTripsForThisDate": "לא נמצאו נסיעות לתאריך זה.",
     "availableFor": "זמין עבור:",
     "totalIfAllDaysBooked": "סה\"כ אם כל הימים יוזמנו: {{total}} ₪",
     "seatsAvailableSub": "זמין",
@@ -432,6 +433,9 @@
     "violationsTab": "חריגות",
     "noViolations": "אין לך חריגות רשומות.",
     "driverNoShow": "אי-הגעת נהג",
+    "driverCancellation": "בוטלה על ידך",
+    "statusCancellationActive": "נרשמה",
+    "statusCancellationExcused": "טופלה על ידי המנהל",
     "affectedPassengers": "{{count}} נוסעים מושפעים",
     "refundStatus": {
       "not_required": "אין צורך בהחזר",
@@ -1007,6 +1011,9 @@
   "booking": {
     "from": "מוצא",
     "to": "יעד",
+    "passengerAreaLabel": "אזור הנוסע: {{area}}",
+    "pickupLocationNotProvided": "מיקום איסוף לא סופק",
+    "approxDistanceFromRoute": "כ-{{distance}} ק\"מ מהמסלול",
     "enterDepartureCity": "הזן עיר יציאה",
     "tripDate": "תאריך הנסיעה",
     "tripTime": "שעת הנסיעה",

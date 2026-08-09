@@ -26,6 +26,8 @@ import { useLanguage } from "../i18n/LanguageProvider";
 import { translateStoredDayName } from "../i18n/formatters";
 import { marginEnd } from "../i18n/rtl";
 import { createPassengerBooking } from "./bookingsLib";
+import { isCancelledTripStatus } from "./driverViolationCore";
+import { formatDateToYMD } from "../driver/create/driverHelpers";
 import DriverReviewsSection from "./DriverReviewsSection";
 import { getDisplayedDriverId } from "./driverReviewsLib";
 import { LocationNames, sameLocation } from "./locationSearch";
@@ -41,11 +43,13 @@ import {
 import {
   buildBookingDayFromMatch,
   computeWeeklyTotal,
+  getLocalNowInIsrael,
   matchDriverWeeklyDays,
   WeeklyDayMatch,
   WeeklyDriverDay,
   WeeklyRequestDay,
 } from "./weeklyBookingLib";
+import { dedupeSortFutureDates, groupMatchesByDate } from "./weeklyBookingCore";
 
 type DriverProfile = {
   name?: string;
@@ -68,6 +72,7 @@ type DriverRoute = {
   available?: boolean;
   bookingId?: string | null;
   bookedBy?: string | null;
+  deletedForDriver?: boolean;
   driverName?: string;
   phone?: string;
   gender?: "male" | "female";
@@ -371,6 +376,10 @@ export default function DriverResultsScreen() {
     Record<string, WeeklyDayMatch[]>
   >({});
   const [loading, setLoading] = useState(true);
+  // A failed search query is a genuine error, never "no trips found" — see
+  // this screen's own bug report. Kept separate from `drivers` staying `[]`
+  // so the UI can tell the two apart.
+  const [loadError, setLoadError] = useState(false);
   const [bookingBusy, setBookingBusy] = useState(false);
 
   const [dayPickerDriver, setDayPickerDriver] = useState<DriverRoute | null>(
@@ -439,6 +448,21 @@ export default function DriverResultsScreen() {
     requestedWeeklyDays = [];
   }
 
+  // The one shared source of truth every selected date is read from below —
+  // deduplicated, sorted chronologically, and floored to today-or-future
+  // using ISRAEL-local "now" (never the device's own timezone — see this
+  // fix's own Israel-timezone requirement), so a stale/duplicate/expired
+  // date passed in from the search form can never produce a duplicate or
+  // impossible result group. Used for BOTH the actual matching below and
+  // the results grouping further down, so the two can never disagree about
+  // which dates are being searched. See weeklyBookingCore.ts's own header
+  // for why this is the shared, unit-tested implementation rather than one
+  // written inline here.
+  const sortedRequestedDates: WeeklyRequestDay[] = dedupeSortFutureDates(
+    requestedWeeklyDays,
+    formatDateToYMD(getLocalNowInIsrael()),
+  );
+
   const selectedLanguages = String(params.languages || "")
     .split(",")
     .filter(Boolean);
@@ -451,6 +475,7 @@ export default function DriverResultsScreen() {
   const loadDrivers = async () => {
     try {
       setLoading(true);
+      setLoadError(false);
 
       const snapshot = await getDocs(collection(db, "driverRoutes"));
 
@@ -568,7 +593,14 @@ export default function DriverResultsScreen() {
           : new Map();
 
       const commonFiltered = routesWithProfiles.filter((driver) => {
-        const activeMatches = driver.active !== false;
+        // A trip the driver explicitly cancelled (or hid from their own
+        // list) must never resurface here for a different passenger to book
+        // — see driverViolationCore.ts's isCancelledTripStatus, the one
+        // shared policy every public/search query should use.
+        const activeMatches =
+          driver.active !== false &&
+          !isCancelledTripStatus(driver.status) &&
+          driver.deletedForDriver !== true;
         const categoryMatches = !category || driver.category === category;
 
         const driverGender = getDriverGender(driver);
@@ -631,10 +663,16 @@ export default function DriverResultsScreen() {
       if (isWeekly) {
         const matchesMap: Record<string, WeeklyDayMatch[]> = {};
 
+        // Each selected date is matched INDEPENDENTLY (OR logic) —
+        // matchDriverWeeklyDays already checks every requested date
+        // separately and returns whichever ones this driver actually
+        // covers; a driver is kept as long as it covers AT LEAST ONE, never
+        // required to cover every selected date. See this fix's own bug
+        // report ("Search each selected date independently... OR logic").
         const matchedDrivers = commonFiltered.filter((driver) => {
           const matches = matchDriverWeeklyDays(
             driver,
-            requestedWeeklyDays,
+            sortedRequestedDates,
             { maxTimeDiffMinutes: MAX_TIME_DIFF_MINUTES },
           );
 
@@ -664,6 +702,9 @@ export default function DriverResultsScreen() {
       setDrivers(filtered);
     } catch (error: any) {
       console.log("Load drivers error:", error.message);
+      // A failed query is a real error state, never silently rendered as
+      // "no trips found" — see loadError's own declaration above.
+      setLoadError(true);
       Alert.alert(t("common.error"), t("rides.couldNotLoadDrivers"));
     } finally {
       setLoading(false);
@@ -742,6 +783,19 @@ const handleBookDriver = async (driver: DriverRoute) => {
         pickupLng,
         pickupAddress,
         pickupSource,
+
+        // The driver's own route origin — snapshotted onto the booking (see
+        // ride-payment.tsx) so the driver's incoming-request card can show
+        // an approximate distance to the passenger's pickup point without a
+        // second Firestore read per card. Same toFiniteCoordinate-safe
+        // handling as this screen's own route-matching above (legacy
+        // documents may have these as numeric strings, or missing).
+        ...(toFiniteCoordinate(driver.fromLat) !== null
+          ? { driverFromLat: String(toFiniteCoordinate(driver.fromLat)) }
+          : {}),
+        ...(toFiniteCoordinate(driver.fromLng) !== null
+          ? { driverFromLng: String(toFiniteCoordinate(driver.fromLng)) }
+          : {}),
       },
     } as any);
 
@@ -898,12 +952,330 @@ const confirmWeeklyDayPicker = () => {
 const availableDrivers = drivers.filter((driver: any) => {
   return (
     driver.status !== "booked" &&
+    !isCancelledTripStatus(driver.status) &&
+    driver.deletedForDriver !== true &&
     driver.isBooked !== true &&
     driver.available !== false &&
     !driver.bookingId &&
     !driver.bookedBy
   );
 });
+
+// Regroups the already-computed per-driver matches (weeklyMatches, from
+// matchDriverWeeklyDays — unchanged) BY DATE instead of by driver, so the
+// results screen can show "which trips exist for THIS date" independently
+// per selected date (see this fix's own bug report). See
+// weeklyBookingCore.ts's own header for why this is the shared, unit-tested
+// implementation rather than one written inline here.
+const resultsByDate = isWeekly
+  ? groupMatchesByDate(sortedRequestedDates, availableDrivers, weeklyMatches)
+  : new Map<string, { driver: DriverRoute; match: WeeklyDayMatch }[]>();
+
+  // Renders one driver's result card. `onlyDate`, when provided, scopes the
+  // weekly "Available for" list to that ONE date — used when this card is
+  // rendered inside a per-date results group (see resultsByDate above), so
+  // the same driver appearing under several date headings never repeats
+  // another date's info under the wrong heading. The Book button is
+  // unaffected either way: it always opens the day-picker against the
+  // driver's FULL match set (weeklyMatches[driver.id]) — booking is a
+  // driver-level action, never scoped to a single date.
+  const renderDriverCard = (driver: DriverRoute, onlyDate?: string) => {
+    const totalPrice = Number(driver.price || 0) * seats;
+
+    const driverLanguages = getDriverLanguages(driver);
+    const dateText = getDateText(driver);
+    const daysText = getDaysText(driver);
+    const driverGender = getDriverGender(driver);
+    const rating = getDriverRating(driver);
+    const displayedDriverId = getDisplayedDriverId(driver);
+
+    const weeklyMatchesForCard = onlyDate
+      ? (weeklyMatches[driver.id] || []).filter((match) => match.requested.date === onlyDate)
+      : weeklyMatches[driver.id] || [];
+
+    return (
+      <View key={onlyDate ? `${driver.id}-${onlyDate}` : driver.id} style={styles.card}>
+        <View style={styles.topRow}>
+          <View style={styles.driverInfoRow}>
+            <View style={styles.avatar}>
+              <Ionicons
+                name="person-outline"
+                size={29}
+                color="#F58220"
+              />
+            </View>
+
+            <View style={styles.driverTextBox}>
+              <Text style={styles.driverName}>
+                {getDriverName(driver)}
+              </Text>
+
+              <View style={styles.driverMetaRow}>
+                {driverGender ? (
+                  <>
+                    <Text style={styles.genderText}>
+                      {driverGender === "female" ? "♀" : "♂"}
+                    </Text>
+                    <Text style={styles.dot}>•</Text>
+                  </>
+                ) : null}
+
+                <Ionicons
+                  name="location-outline"
+                  size={15}
+                  color="#7C5F46"
+                />
+
+                <Text style={styles.driverMetaText}>
+                  {driver.from || from} → {driver.to || to}
+                </Text>
+              </View>
+
+              {driver.category === "school" && driver.schoolName ? (
+                <View style={styles.driverMetaRow}>
+                  <Ionicons
+                    name="school-outline"
+                    size={15}
+                    color="#7C5F46"
+                  />
+                  <Text style={styles.driverMetaText}>
+                    {driver.schoolName}
+                  </Text>
+                </View>
+              ) : null}
+
+              {driver.category !== "school" &&
+              driver.destinationDetails ? (
+                <View style={styles.driverMetaRow}>
+                  <Ionicons
+                    name="flag-outline"
+                    size={15}
+                    color="#7C5F46"
+                  />
+                  <Text style={styles.driverMetaText}>
+                    {driver.destinationDetails}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+
+          <View style={styles.ratingBox}>
+            <Ionicons name="star" size={16} color="#B86115" />
+            {rating ? (
+              <>
+                <Text style={styles.ratingText}>
+                  {rating.average.toFixed(1)}
+                </Text>
+                <Text style={styles.reviewCount}>
+                  ({rating.count})
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.reviewCount}>{t("roadsideHelp.newDriverLabel")}</Text>
+            )}
+          </View>
+        </View>
+
+        {isWeekly ? (
+          <View style={styles.weeklyAvailBox}>
+            <Text style={styles.weeklyAvailTitle}>
+              {t("rides.availableFor")}
+            </Text>
+
+            {weeklyMatchesForCard.map((match) => (
+              <View
+                key={match.requested.date}
+                style={styles.weeklyAvailRow}
+              >
+                <Ionicons
+                  name="calendar-outline"
+                  size={15}
+                  color="#F58220"
+                />
+                <Text style={styles.weeklyAvailText}>
+                  {translateStoredDayName(match.driverDay.dayName, t)} ·{" "}
+                  {match.driverDay.date} · {match.driverDay.time} ·{" "}
+                  {match.driverDay.price} ₪
+                </Text>
+              </View>
+            ))}
+
+            <View style={styles.softLine} />
+
+            <Text style={styles.priceText}>
+              {t("rides.totalIfAllDaysBooked", {
+                total: computeWeeklyTotal(
+                  weeklyMatchesForCard.map((match) => ({
+                    price: match.driverDay.price,
+                    seats: match.requested.seats,
+                  })),
+                ),
+              })}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.detailsPanel}>
+            <View style={styles.detailsColumn}>
+              {(dateText || daysText) && (
+                <View style={styles.detailRow}>
+                  <View style={[styles.iconCircle, marginEnd(10, isRTL)]}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={17}
+                      color="#F58220"
+                    />
+                  </View>
+
+                  <View style={styles.detailTextBox}>
+                    {dateText ? (
+                      <Text style={styles.detailMainText}>
+                        {dateText}
+                      </Text>
+                    ) : null}
+
+                    {daysText ? (
+                      <Text style={styles.detailSubText}>
+                        {daysText}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              )}
+
+              <View style={styles.softLine} />
+
+              <View style={styles.detailRow}>
+                <View style={styles.iconCircle}>
+                  <Ionicons
+                    name="time-outline"
+                    size={17}
+                    color="#F58220"
+                  />
+                </View>
+
+                <View style={styles.detailTextBox}>
+                  <Text style={styles.detailMainText}>
+                    {driver.time || "--:--"}
+                  </Text>
+                  <Text style={styles.detailSubText}>
+                    {t("rides.departureTimeLabel")}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.verticalDivider} />
+
+            <View style={styles.detailsColumn}>
+              <View style={styles.detailRow}>
+                <View style={styles.iconCircle}>
+                  <Ionicons
+                    name="people-outline"
+                    size={17}
+                    color="#F58220"
+                  />
+                </View>
+
+                <View style={styles.detailTextBox}>
+                  <Text style={styles.detailMainText}>
+                    {t("booking.seatsCount", { count: driver.seats || 1 })}
+                  </Text>
+                  <Text style={styles.detailSubText}>
+                    {t("rides.seatsAvailableSub")}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.softLine} />
+
+              <View style={styles.detailRow}>
+                <View style={styles.iconCircle}>
+                  <Ionicons
+                    name="bag-outline"
+                    size={17}
+                    color="#F58220"
+                  />
+                </View>
+
+                <View style={styles.detailTextBox}>
+                  <Text style={styles.priceText}>
+                    {totalPrice} ₪
+                  </Text>
+                  <Text style={styles.detailSubText}>{t("rides.priceLabel")}</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        )}
+
+        <View style={styles.badgesRow}>
+          {driverLanguages.map((lang) => (
+            <View key={lang} style={styles.languageBadge}>
+              <Ionicons
+                name="language-outline"
+                size={15}
+                color="#178C7B"
+              />
+              <Text style={styles.languageText}>
+                {LANGUAGES[lang] || lang}
+              </Text>
+            </View>
+          ))}
+
+          {typeof driver.allowsPets === "boolean" && (
+            <View
+              style={[
+                styles.petBadge,
+                driver.allowsPets
+                  ? styles.petAllowedBadge
+                  : styles.petNotAllowedBadge,
+              ]}
+            >
+              <Ionicons
+                name={
+                  driver.allowsPets ? "paw-outline" : "close-outline"
+                }
+                size={15}
+                color={driver.allowsPets ? "#F58220" : "#7C5F46"}
+              />
+
+              <Text
+                style={[
+                  styles.petText,
+                  driver.allowsPets
+                    ? styles.petAllowedText
+                    : styles.petNotAllowedText,
+                ]}
+              >
+                {driver.allowsPets ? t("rides.petsAllowed") : t("rides.noPets")}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.divider} />
+
+        <DriverReviewsSection
+          driverId={displayedDriverId}
+          reviewCountHint={rating?.count ?? null}
+        />
+
+        <Pressable
+          style={[styles.bookButton, bookingBusy && { opacity: 0.6 }]}
+          onPress={() =>
+            isWeekly
+              ? openWeeklyDayPicker(driver)
+              : handleBookDriver(driver)
+          }
+          disabled={bookingBusy}
+        >
+          <Text style={styles.bookButtonText}>{t("rides.bookThisDriver")}</Text>
+        </Pressable>
+      </View>
+    );
+  };
+
   return (
     <DirectionalScreen style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -932,14 +1304,52 @@ const availableDrivers = drivers.filter((driver: any) => {
           <Text style={styles.routeText}>
             📅{" "}
             {t("rides.weeklyPrefix", {
-              days: requestedWeeklyDays
+              days: sortedRequestedDates
                 .map((day) => `${translateStoredDayName(day.dayName, t)} ${day.date}`)
                 .join(", "),
             })}
           </Text>
         ) : null}
 
-        {availableDrivers.length === 0? (
+        {loadError ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="alert-circle-outline" size={42} color="#B91C1C" />
+            <Text style={styles.emptyTitle}>{t("common.error")}</Text>
+            <Text style={styles.emptyText}>{t("rides.couldNotLoadDrivers")}</Text>
+          </View>
+        ) : isWeekly ? (
+          <View style={styles.list}>
+            {/* Grouped BY DATE, never by driver — each selected date gets its
+                own heading and either its matching trips or a clear
+                "no trips for this date" message (see resultsByDate above).
+                A general empty message is shown ABOVE the groups when
+                nothing matched anywhere, but the per-date breakdown below it
+                is never hidden/replaced — see this fix's own bug report. */}
+            {availableDrivers.length === 0 ? (
+              <Text style={styles.weeklyOverallEmptyText}>{t("rides.noDriversFound")}</Text>
+            ) : null}
+
+            {sortedRequestedDates.map((day) => {
+              const dateResults = resultsByDate.get(day.date) || [];
+
+              return (
+                <View key={day.date} style={styles.dateGroup}>
+                  <Text style={styles.dateGroupHeading}>
+                    {translateStoredDayName(day.dayName, t)} {day.date}
+                  </Text>
+
+                  {dateResults.length === 0 ? (
+                    <Text style={styles.dateGroupEmptyText}>
+                      {t("rides.noTripsForThisDate")}
+                    </Text>
+                  ) : (
+                    dateResults.map(({ driver }) => renderDriverCard(driver, day.date))
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        ) : availableDrivers.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="car-outline" size={42} color="#8B7B6B" />
             <Text style={styles.emptyTitle}>{t("rides.noDriversFound")}</Text>
@@ -947,298 +1357,7 @@ const availableDrivers = drivers.filter((driver: any) => {
           </View>
         ) : (
           <View style={styles.list}>
-            {availableDrivers.map((driver) =>  {
-              const totalPrice = Number(driver.price || 0) * seats;
-
-              const driverLanguages = getDriverLanguages(driver);
-              const dateText = getDateText(driver);
-              const daysText = getDaysText(driver);
-              const driverGender = getDriverGender(driver);
-              const rating = getDriverRating(driver);
-              const displayedDriverId = getDisplayedDriverId(driver);
-
-              return (
-                <View key={driver.id} style={styles.card}>
-                  <View style={styles.topRow}>
-                    <View style={styles.driverInfoRow}>
-                      <View style={styles.avatar}>
-                        <Ionicons
-                          name="person-outline"
-                          size={29}
-                          color="#F58220"
-                        />
-                      </View>
-
-                      <View style={styles.driverTextBox}>
-                        <Text style={styles.driverName}>
-                          {getDriverName(driver)}
-                        </Text>
-
-                        <View style={styles.driverMetaRow}>
-                          {driverGender ? (
-                            <>
-                              <Text style={styles.genderText}>
-                                {driverGender === "female" ? "♀" : "♂"}
-                              </Text>
-                              <Text style={styles.dot}>•</Text>
-                            </>
-                          ) : null}
-
-                          <Ionicons
-                            name="location-outline"
-                            size={15}
-                            color="#7C5F46"
-                          />
-
-                          <Text style={styles.driverMetaText}>
-                            {driver.from || from} → {driver.to || to}
-                          </Text>
-                        </View>
-
-                        {driver.category === "school" && driver.schoolName ? (
-                          <View style={styles.driverMetaRow}>
-                            <Ionicons
-                              name="school-outline"
-                              size={15}
-                              color="#7C5F46"
-                            />
-                            <Text style={styles.driverMetaText}>
-                              {driver.schoolName}
-                            </Text>
-                          </View>
-                        ) : null}
-
-                        {driver.category !== "school" &&
-                        driver.destinationDetails ? (
-                          <View style={styles.driverMetaRow}>
-                            <Ionicons
-                              name="flag-outline"
-                              size={15}
-                              color="#7C5F46"
-                            />
-                            <Text style={styles.driverMetaText}>
-                              {driver.destinationDetails}
-                            </Text>
-                          </View>
-                        ) : null}
-                      </View>
-                    </View>
-
-                    <View style={styles.ratingBox}>
-                      <Ionicons name="star" size={16} color="#B86115" />
-                      {rating ? (
-                        <>
-                          <Text style={styles.ratingText}>
-                            {rating.average.toFixed(1)}
-                          </Text>
-                          <Text style={styles.reviewCount}>
-                            ({rating.count})
-                          </Text>
-                        </>
-                      ) : (
-                        <Text style={styles.reviewCount}>{t("roadsideHelp.newDriverLabel")}</Text>
-                      )}
-                    </View>
-                  </View>
-
-                  {isWeekly ? (
-                    <View style={styles.weeklyAvailBox}>
-                      <Text style={styles.weeklyAvailTitle}>
-                        {t("rides.availableFor")}
-                      </Text>
-
-                      {(weeklyMatches[driver.id] || []).map((match) => (
-                        <View
-                          key={match.requested.date}
-                          style={styles.weeklyAvailRow}
-                        >
-                          <Ionicons
-                            name="calendar-outline"
-                            size={15}
-                            color="#F58220"
-                          />
-                          <Text style={styles.weeklyAvailText}>
-                            {translateStoredDayName(match.driverDay.dayName, t)} ·{" "}
-                            {match.driverDay.date} · {match.driverDay.time} ·{" "}
-                            {match.driverDay.price} ₪
-                          </Text>
-                        </View>
-                      ))}
-
-                      <View style={styles.softLine} />
-
-                      <Text style={styles.priceText}>
-                        {t("rides.totalIfAllDaysBooked", {
-                          total: computeWeeklyTotal(
-                            (weeklyMatches[driver.id] || []).map((match) => ({
-                              price: match.driverDay.price,
-                              seats: match.requested.seats,
-                            })),
-                          ),
-                        })}
-                      </Text>
-                    </View>
-                  ) : (
-                    <View style={styles.detailsPanel}>
-                      <View style={styles.detailsColumn}>
-                        {(dateText || daysText) && (
-                          <View style={styles.detailRow}>
-                            <View style={[styles.iconCircle, marginEnd(10, isRTL)]}>
-                              <Ionicons
-                                name="calendar-outline"
-                                size={17}
-                                color="#F58220"
-                              />
-                            </View>
-
-                            <View style={styles.detailTextBox}>
-                              {dateText ? (
-                                <Text style={styles.detailMainText}>
-                                  {dateText}
-                                </Text>
-                              ) : null}
-
-                              {daysText ? (
-                                <Text style={styles.detailSubText}>
-                                  {daysText}
-                                </Text>
-                              ) : null}
-                            </View>
-                          </View>
-                        )}
-
-                        <View style={styles.softLine} />
-
-                        <View style={styles.detailRow}>
-                          <View style={styles.iconCircle}>
-                            <Ionicons
-                              name="time-outline"
-                              size={17}
-                              color="#F58220"
-                            />
-                          </View>
-
-                          <View style={styles.detailTextBox}>
-                            <Text style={styles.detailMainText}>
-                              {driver.time || "--:--"}
-                            </Text>
-                            <Text style={styles.detailSubText}>
-                              {t("rides.departureTimeLabel")}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-
-                      <View style={styles.verticalDivider} />
-
-                      <View style={styles.detailsColumn}>
-                        <View style={styles.detailRow}>
-                          <View style={styles.iconCircle}>
-                            <Ionicons
-                              name="people-outline"
-                              size={17}
-                              color="#F58220"
-                            />
-                          </View>
-
-                          <View style={styles.detailTextBox}>
-                            <Text style={styles.detailMainText}>
-                              {t("booking.seatsCount", { count: driver.seats || 1 })}
-                            </Text>
-                            <Text style={styles.detailSubText}>
-                              {t("rides.seatsAvailableSub")}
-                            </Text>
-                          </View>
-                        </View>
-
-                        <View style={styles.softLine} />
-
-                        <View style={styles.detailRow}>
-                          <View style={styles.iconCircle}>
-                            <Ionicons
-                              name="bag-outline"
-                              size={17}
-                              color="#F58220"
-                            />
-                          </View>
-
-                          <View style={styles.detailTextBox}>
-                            <Text style={styles.priceText}>
-                              {totalPrice} ₪
-                            </Text>
-                            <Text style={styles.detailSubText}>{t("rides.priceLabel")}</Text>
-                          </View>
-                        </View>
-                      </View>
-                    </View>
-                  )}
-
-                  <View style={styles.badgesRow}>
-                    {driverLanguages.map((lang) => (
-                      <View key={lang} style={styles.languageBadge}>
-                        <Ionicons
-                          name="language-outline"
-                          size={15}
-                          color="#178C7B"
-                        />
-                        <Text style={styles.languageText}>
-                          {LANGUAGES[lang] || lang}
-                        </Text>
-                      </View>
-                    ))}
-
-                    {typeof driver.allowsPets === "boolean" && (
-                      <View
-                        style={[
-                          styles.petBadge,
-                          driver.allowsPets
-                            ? styles.petAllowedBadge
-                            : styles.petNotAllowedBadge,
-                        ]}
-                      >
-                        <Ionicons
-                          name={
-                            driver.allowsPets ? "paw-outline" : "close-outline"
-                          }
-                          size={15}
-                          color={driver.allowsPets ? "#F58220" : "#7C5F46"}
-                        />
-
-                        <Text
-                          style={[
-                            styles.petText,
-                            driver.allowsPets
-                              ? styles.petAllowedText
-                              : styles.petNotAllowedText,
-                          ]}
-                        >
-                          {driver.allowsPets ? t("rides.petsAllowed") : t("rides.noPets")}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-
-                  <View style={styles.divider} />
-
-                  <DriverReviewsSection
-                    driverId={displayedDriverId}
-                    reviewCountHint={rating?.count ?? null}
-                  />
-
-                  <Pressable
-                    style={[styles.bookButton, bookingBusy && { opacity: 0.6 }]}
-                    onPress={() =>
-                      isWeekly
-                        ? openWeeklyDayPicker(driver)
-                        : handleBookDriver(driver)
-                    }
-                    disabled={bookingBusy}
-                  >
-                    <Text style={styles.bookButtonText}>{t("rides.bookThisDriver")}</Text>
-                  </Pressable>
-                </View>
-              );
-            })}
+            {availableDrivers.map((driver) => renderDriverCard(driver))}
           </View>
         )}
       </ScrollView>
@@ -1389,6 +1508,31 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: 18,
+  },
+  dateGroup: {
+    marginBottom: 6,
+  },
+  dateGroupHeading: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 10,
+  },
+  dateGroupEmptyText: {
+    color: "#7C5F46",
+    fontSize: 13,
+    backgroundColor: "#FFFDFC",
+    borderWidth: 1,
+    borderColor: "#E7DCD1",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 18,
+  },
+  weeklyOverallEmptyText: {
+    color: "#7C5F46",
+    fontWeight: "700",
+    fontSize: 14,
+    marginBottom: 8,
   },
   card: {
     backgroundColor: "#FFFFFF",

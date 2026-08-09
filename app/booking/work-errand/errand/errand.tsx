@@ -22,6 +22,7 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../../../../firebase";
 import { getCategoryMeta } from "../../bookingsLib";
+import { isCancelledTripStatus } from "../../driverViolationCore";
 import {
   DirectionalRow,
   DirectionalScreen,
@@ -141,12 +142,21 @@ export default function ErrandsScreen() {
 
       const snapshot = await getDocs(collection(db, "errandJobs"));
 
+      // A trip the driver explicitly cancelled (or hid from their own list)
+      // must never resurface in passenger browse results — see
+      // driverViolationCore.ts's isCancelledTripStatus, the one shared
+      // policy every public/search query should use.
+      const openDocs = snapshot.docs.filter((docSnap: QueryDocumentSnapshot) => {
+        const data = docSnap.data();
+        return !isCancelledTripStatus(data.status) && data.deletedForDriver !== true;
+      });
+
       // The owner's rating is their overall driverReviews-backed rating
       // (users/{ownerId}.ratingAverage/ratingCount) — the SAME number shown
       // for School/Personal/Work — never a value cached on the errand
       // listing itself, so it stays correct after every future rating.
       const errandsList: Driver[] = await Promise.all(
-        snapshot.docs.map(async (docSnap: QueryDocumentSnapshot): Promise<Driver> => {
+        openDocs.map(async (docSnap: QueryDocumentSnapshot): Promise<Driver> => {
           const data = docSnap.data();
 
           let ratingAverage = 0;

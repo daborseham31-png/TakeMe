@@ -41,17 +41,28 @@ import {
   NoShowAppealError,
   NoShowAppealReasonCategory,
   submitViolationAppeal,
+  ViolationSource,
 } from "./driverNoShowLib";
 
 type Props = {
   visible: boolean;
   violationId: string;
+  // Defaults to "driverViolations" (the no-show system) when omitted, so
+  // every existing caller keeps working unchanged.
+  violationSource?: ViolationSource;
   tripId: string;
   onClose: () => void;
   onSubmitted: () => void;
 };
 
-export default function ViolationAppealModal({ visible, violationId, tripId, onClose, onSubmitted }: Props) {
+export default function ViolationAppealModal({
+  visible,
+  violationId,
+  violationSource,
+  tripId,
+  onClose,
+  onSubmitted,
+}: Props) {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
 
@@ -150,6 +161,7 @@ export default function ViolationAppealModal({ visible, violationId, tripId, onC
 
       await submitViolationAppeal({
         violationId,
+        violationSource,
         tripId,
         reasonCategory,
         explanation,

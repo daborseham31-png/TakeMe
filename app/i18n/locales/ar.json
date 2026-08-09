@@ -325,6 +325,7 @@
     "weeklyPrefix": "أسبوعي: {{days}}",
     "noDriversFound": "لم يتم العثور على سائقين",
     "noDriversHint": "حاول تغيير موقع الانطلاق، الوجهة، الوقت، الجنس، اللغة، التاريخ، أو عدد المقاعد.",
+    "noTripsForThisDate": "لم يتم العثور على رحلات لهذا التاريخ.",
     "availableFor": "متاح لـ:",
     "totalIfAllDaysBooked": "الإجمالي إذا تم حجز كل الأيام: {{total}} ₪",
     "seatsAvailableSub": "متاح",
@@ -439,6 +440,9 @@
     "violationsTab": "المخالفات",
     "noViolations": "ليس لديك أي مخالفات مسجلة.",
     "driverNoShow": "عدم حضور السائق",
+    "driverCancellation": "ألغيت من قبلك",
+    "statusCancellationActive": "مسجلة",
+    "statusCancellationExcused": "أُعفيت من قبل الإدارة",
     "affectedPassengers": "{{count}} ركاب متأثرين",
     "refundStatus": {
       "not_required": "لا يلزم استرداد",
@@ -1017,6 +1021,9 @@
   "booking": {
     "from": "من",
     "to": "إلى",
+    "passengerAreaLabel": "منطقة الراكب: {{area}}",
+    "pickupLocationNotProvided": "لم يتم تحديد موقع الالتقاط",
+    "approxDistanceFromRoute": "حوالي {{distance}} كم من المسار",
     "enterDepartureCity": "أدخل مدينة الانطلاق",
     "tripDate": "تاريخ الرحلة",
     "tripTime": "وقت الرحلة",

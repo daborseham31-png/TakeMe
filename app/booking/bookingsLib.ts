@@ -41,7 +41,9 @@ import {
 
 import {
   CancellationStandingResult,
+  DRIVER_CANCELLED_TRIP_STATUS,
   evaluateDriverCancellationStanding,
+  isCancelledTripStatus,
   readExistingCancellationViolation,
   writeCancellationViolationIfNew,
 } from "./driverViolationsLib";
@@ -1259,6 +1261,15 @@ export const cancelGeneralBooking = async (
     // written atomically alongside the cancellation below (see
     // driverViolationsLib.ts's own header for why this must never be a
     // separate, skippable step).
+    if (cancelledBy === "driver") {
+      console.log("cancelGeneralBooking: linked booking found (driver cancel)", {
+        bookingId,
+        status: current.status,
+        driverId: current.driverId,
+        activeBookingCount: current.driverId ? 1 : 0,
+      });
+    }
+
     const violationSnap =
       cancelledBy === "driver" && current.driverId
         ? await readExistingCancellationViolation(transaction, current.driverId, "bookings", bookingId)
@@ -1269,6 +1280,11 @@ export const cancelGeneralBooking = async (
     // -----------------------------------------------------------------
     transaction.update(bookingRef, {
       status: "cancelled",
+      // Lets the OTHER side's UI show "Cancelled by driver" specifically,
+      // rather than a generic cancellation — mirrors the same field
+      // cancelSchoolTrip/cancelApplication already write on their own
+      // cascaded booking/application docs.
+      cancelledBy,
       updatedAt: serverTimestamp(),
     });
 
@@ -1308,7 +1324,7 @@ export const cancelGeneralBooking = async (
         // Upcoming/Unbooked Trips — the just-cancelled `bookings` doc above
         // remains the retained history record — instead of reopening it.
         transaction.update(routeRef, {
-          status: "cancelled",
+          status: DRIVER_CANCELLED_TRIP_STATUS,
           isBooked: true,
           available: false,
           deletedForDriver: true,
@@ -1432,7 +1448,7 @@ export type DriverTripItem = {
   acceptedWorkersCount: number | null;
   isFull: boolean;
 
-  status: "ongoing" | "completed";
+  status: "ongoing" | "completed" | "cancelled";
   createdAtSeconds: number;
   searchText: string;
 };
@@ -1492,7 +1508,15 @@ export const normalizeDriverTrip = (
   // "completed" here means the job LISTING was manually marked done — it's
   // a different concept from the job being full (isFull), which only
   // affects whether it still shows up in passenger search results.
-  const status = data.status === "completed" ? "completed" : "ongoing";
+  // "cancelled" covers both the generic "cancelled" value and the driver-
+  // specific DRIVER_CANCELLED_TRIP_STATUS (see isCancelledTripStatus) — a
+  // driver-cancelled listing must never read as "ongoing"/waiting-for-
+  // booking (see tagTrip in bookings.tsx, which reads this exact field).
+  const status = isCancelledTripStatus(data.status)
+    ? "cancelled"
+    : data.status === "completed"
+      ? "completed"
+      : "ongoing";
   const meta = getCategoryMeta(category);
 
   return {

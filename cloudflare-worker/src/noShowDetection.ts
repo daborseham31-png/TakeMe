@@ -185,10 +185,19 @@ export type TripCandidate = {
   time: string;
 };
 
+// "cancelled_by_driver" mirrors DRIVER_CANCELLED_TRIP_STATUS in the mobile
+// app's driverViolationCore.ts (app/booking/driverViolationCore.ts) — the
+// status a manually-cancelled driverRoutes listing (cancelDriverTrip /
+// cancelGeneralBooking's driver branch) is written to, so it is never picked
+// up here as a no-show candidate. Duplicated as a literal rather than
+// imported, matching this Worker's existing convention of re-implementing
+// the mobile app's trip-eligibility logic in its own TS project (see this
+// file's own header) — the two must be kept in sync manually.
 function isStillOpenForNoShow(data: Record<string, unknown>): boolean {
   return (
     data.active !== false &&
     data.status !== "cancelled" &&
+    data.status !== "cancelled_by_driver" &&
     data.status !== "completed" &&
     data.tripStatus !== DRIVER_NO_SHOW_TRIP_STATUS
   );

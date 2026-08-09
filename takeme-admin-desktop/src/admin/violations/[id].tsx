@@ -66,6 +66,11 @@ const normalizeViolation = (id: string, data: Record<string, any>): DriverViolat
 const normalizeAppeal = (id: string, data: Record<string, any>): ViolationAppeal => ({
   id,
   violationId: data.violationId || "",
+  // This screen only ever loads a driverViolations/{id} doc (see the
+  // onSnapshot above) — an appeal reaching here is always about THIS
+  // system, never a driver-cancellation appeal (those are reviewed from
+  // app/admin/drivers/[id].tsx instead, since that path needs driverId).
+  violationSource: (data.violationSource as ViolationAppeal["violationSource"]) || "driverViolations",
   driverId: data.driverId || "",
   tripId: data.tripId || "",
   reasonCategory: data.reasonCategory || "other",

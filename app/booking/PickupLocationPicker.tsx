@@ -59,6 +59,31 @@ export type PickupLocation = {
   source: PickupLocationSource;
 };
 
+// Best-effort reverse-geocoded area/city name for a pickup point — used by
+// Personal Ride (ride-payment.tsx) and Work (apply.tsx) to give the driver/
+// employer a short "Passenger area: …" label distinct from the full
+// address, without exposing anything beyond the ONE point the requester
+// already chose (see this feature's own "never expose live location /
+// private home address automatically" requirement — this only ever
+// resolves the SAME point already selected, never anything else). Reuses
+// the exact same reverse-geocoder this file already calls elsewhere
+// (resolveAddress/handleUseCurrent) — deliberately never blocks/fails the
+// caller: returns "" on any error so a resolution failure never prevents a
+// request from being submitted.
+export const resolvePickupArea = async (
+  latitude: number,
+  longitude: number,
+): Promise<string> => {
+  try {
+    const results = await Location.reverseGeocodeAsync({ latitude, longitude });
+    const place = results[0];
+    if (!place) return "";
+    return place.city || place.subregion || place.district || place.region || "";
+  } catch {
+    return "";
+  }
+};
+
 type Props = {
   visible: boolean;
   onClose: () => void;
