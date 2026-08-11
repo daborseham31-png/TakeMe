@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
@@ -102,6 +102,14 @@ const FILTER_ICONS: Record<FilterKey, keyof typeof Ionicons.glyphMap> = {
 export default function HomeScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
+  // Home never unmounts once visited (expo-router Tabs keep every visited
+  // tab screen mounted in the background) — this is read ONLY by the
+  // "Trips near you" feed subscription below, so those 4 collection-wide
+  // listeners (see homeFeedLib.ts) stop reading Firestore the instant the
+  // passenger switches to another tab, instead of continuing to watch
+  // every driverRoutes/workJobs/errandJobs/schoolTrips write platform-wide
+  // for the rest of the session.
+  const isFocused = useIsFocused();
   const [unreadHelp, setUnreadHelp] = useState(0);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
   const [checkingDriver, setCheckingDriver] = useState(false);
@@ -289,6 +297,17 @@ export default function HomeScreen() {
   // briefly null until the first onAuthStateChanged callback), throwing
   // "Missing or insufficient permissions" for that first connection attempt.
   useEffect(() => {
+    // Paused while another tab is active — see isFocused's own comment
+    // above. Nothing to tear down here in that case: this effect simply
+    // never subscribes, and its own cleanup (below) handles unsubscribing
+    // once isFocused flips back to false.
+    if (!isFocused) return;
+
+    // TEMP DEV-ONLY diagnostic — verifies focus-gating never leaves the
+    // homeFeed listener group running in the background or double-subscribes
+    // on refocus. Safe to delete once confirmed.
+    if (__DEV__) console.log("[Home][feed] effect subscribe (focused)");
+
     let cancelled = false;
     let unsubFeed: (() => void) | null = null;
 
@@ -324,8 +343,9 @@ export default function HomeScreen() {
       cancelled = true;
       unsubFeed?.();
       unsubAuth();
+      if (__DEV__) console.log("[Home][feed] effect unsubscribe (blurred/unmount)");
     };
-  }, []);
+  }, [isFocused]);
 
   // Re-check location every time Home regains focus (app foregrounded,
   // navigated back to this tab) — this is what makes "nearby" update when

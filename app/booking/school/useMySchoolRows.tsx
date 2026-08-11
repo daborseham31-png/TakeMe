@@ -291,6 +291,12 @@ export default function useMySchoolRows({
 
     const unsubs: (() => void)[] = [];
 
+    // TEMP DEV-ONLY diagnostic — verifies Bookings' focus-gating (which
+    // passes uid: null here while the tab is unfocused) never leaves this
+    // group running in the background or double-subscribes on refocus.
+    // Safe to delete once confirmed.
+    if (__DEV__) console.log(`[useMySchoolRows] subscribe (tab=${tab})`, { uid });
+
     if (tab === "passenger") {
       unsubs.push(
         onSnapshot(
@@ -350,7 +356,10 @@ export default function useMySchoolRows({
       setRideRequests([]);
     }
 
-    return () => unsubs.forEach((unsub) => unsub());
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+      if (__DEV__) console.log(`[useMySchoolRows] unsubscribe (tab=${tab})`, { uid });
+    };
   }, [tab, uid]);
 
   // Same one-shot targeted-open behaviour as bookings.tsx's own effect (see
