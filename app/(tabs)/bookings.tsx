@@ -146,7 +146,7 @@ import {
   validateAccountInfo,
   validateDateAndTimeNotPassed,
 } from "../driver/create/driverHelpers";
-import { fetchDriverEligibility } from "../driver/driverEligibility";
+import { fetchDriverEligibility, getDriverEligibilityAlertCopy } from "../driver/driverEligibility";
 import {
   DriverTripCategory,
   RepublishTripPrefill,
@@ -2147,7 +2147,8 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     try {
       const eligibility = await fetchDriverEligibility(user.uid);
       if (!eligibility.eligible) {
-        Alert.alert(t("driver.verificationRequired"), t("driver.mustVerifyLicense"));
+        const copy = getDriverEligibilityAlertCopy(eligibility.status, t);
+        Alert.alert(copy.title, copy.message);
         return;
       }
 

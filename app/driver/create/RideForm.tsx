@@ -33,7 +33,7 @@ import { backIconName } from "../../i18n/rtl";
 import AutocompleteTextField from "../../components/AutocompleteTextField";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import VehicleDetailsSection from "../../components/VehicleDetailsSection";
-import { fetchDriverEligibility } from "../driverEligibility";
+import { fetchDriverEligibility, getDriverEligibilityAlertCopy } from "../driverEligibility";
 import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
 import DateInput, { TimeInput } from "./DateInput";
 import WeeklyDaysCard from "./WeeklyDaysCard";
@@ -178,10 +178,8 @@ export default function RideForm({
     const eligibility = await fetchDriverEligibility(user.uid);
 
     if (!eligibility.eligible) {
-      Alert.alert(
-        t("driver.verificationRequired"),
-        t("driver.mustVerifyLicense"),
-      );
+      const copy = getDriverEligibilityAlertCopy(eligibility.status, t);
+      Alert.alert(copy.title, copy.message);
       return;
     }
 

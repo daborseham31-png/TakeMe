@@ -19,7 +19,7 @@ import { getDriverSuspensionBlockedReason } from "../booking/driverViolationsLib
 import { DirectionalScreen } from "../i18n/DirectionalPrimitives";
 import { useLanguage } from "../i18n/LanguageProvider";
 import { marginStart } from "../i18n/rtl";
-import { fetchDriverEligibility } from "./driverEligibility";
+import { fetchDriverEligibility, getDriverEligibilityAlertCopy } from "./driverEligibility";
 
 type Category = {
   key: string;
@@ -97,6 +97,23 @@ export default function AddDriverRouteScreen() {
     fetchDriverEligibility(user.uid)
       .then(async (result) => {
         if (!result.eligible) {
+          // "pending_admin_approval"/"rejected"/"suspended" mean the driver
+          // ALREADY completed license verification — sending them back to
+          // verify-license would wrongly ask them to re-upload it. Show why
+          // they're blocked and return them to wherever they came from
+          // instead; only the genuine "never verified / expired" statuses
+          // still route to verify-license.
+          if (
+            result.status === "pending_admin_approval" ||
+            result.status === "rejected" ||
+            result.status === "suspended"
+          ) {
+            const copy = getDriverEligibilityAlertCopy(result.status, t);
+            Alert.alert(copy.title, copy.message);
+            router.back();
+            return;
+          }
+
           router.replace("/driver/verify-license" as any);
           return;
         }

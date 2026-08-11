@@ -36,7 +36,6 @@ export const subscribeDrivers = (
 export const getMissingDriverRequirements = (driver: AdminUserRow): string[] => {
   const missing: string[] = [];
 
-  if (!driver.carPlate) missing.push(i18n.t("admin.missingVehiclePlate"));
   if (!driver.licenseExpiryDate) missing.push(i18n.t("admin.missingLicenseExpiry"));
   if (driver.spokenLanguages.length === 0) missing.push(i18n.t("admin.missingSpokenLanguages"));
   if (!driver.phone) missing.push(i18n.t("admin.missingPhoneNumber"));
@@ -79,6 +78,22 @@ const NOTIFICATION_COPY: Record<
   },
 };
 
+// Touches driverVerificationStatus ONLY — never cancellationStanding. These
+// are two deliberately independent axes with two deliberately separate admin
+// actions/buttons:
+//   - driverVerificationStatus  -> Approve / Reject / Suspend / Reactivate
+//                                  (this function)
+//   - cancellationStanding      -> Lift Suspension
+//                                  (liftDriverCancellationSuspension, in
+//                                  app/booking/driverViolationsLib.ts)
+// An earlier version of this function ALSO cleared an active cancellation
+// suspension whenever status was set to "approved", to work around Lift
+// Suspension being blocked before its minimum duration elapsed. That created
+// two different, inconsistent ways to reactivate a cancellation suspension —
+// explicitly not wanted. Lift Suspension is now unconditionally available at
+// any time (see liftDriverCancellationSuspension's own comment), so it is
+// the ONE correct tool for that job; this function no longer needs to (and
+// must not) duplicate it.
 export const setDriverVerification = async (
   driverId: string,
   status: DriverVerificationStatus,

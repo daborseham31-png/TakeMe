@@ -54,6 +54,7 @@ import {
   FirestoreQueryDocument,
   queryFirestoreDocuments,
   queryFirestoreDocumentsByIn,
+  queryFirestoreDocumentsWhereGte,
 } from "./firestoreRest";
 
 const GRACE_PERIOD_MINUTES = 15;
@@ -204,10 +205,36 @@ function isStillOpenForNoShow(data: Record<string, unknown>): boolean {
 }
 
 async function gatherCandidates(env: Env, lookbackYmd: string): Promise<TripCandidate[]> {
-  const [routes, schoolTrips] = await Promise.all([
-    queryFirestoreDocuments(env, "driverRoutes", {}),
-    queryFirestoreDocuments(env, "schoolTrips", {}),
+  // Server-side date-window filter — see this file's "SUBREQUEST-BUDGET FIX"
+  // header comment for the bulk-booking-fetch fix, and this comment for the
+  // sibling fix: this used to call queryFirestoreDocuments(env,
+  // "driverRoutes"/"schoolTrips", {}) with NO filter at all, downloading
+  // BOTH collections' entire history on every 5-minute tick (confirmed via
+  // Firestore Query Insights: ~234 driverRoutes docs + ~157 schoolTrips docs
+  // read per run, 288 runs/day, ≈112k reads/day from these two collections
+  // alone — comfortably enough to trip the Spark plan's 50k reads/day quota
+  // and surface as "Quota exceeded." elsewhere in the app). Restricting to
+  // tripDate/date >= lookbackYmd server-side cuts every run down to just the
+  // 30-day reconcile window instead of the whole collection.
+  //
+  // driverRoutes is queried on BOTH `tripDate` (what every current writer
+  // uses) and the legacy `date` fallback (see routeDate below) — two
+  // bounded, 30-day-window reads, never two full scans — merged and deduped
+  // by document id, so a document that only ever had `date` (see this file's
+  // own "route-lion" regression tests) is still found exactly as before.
+  // schoolTrips has no such legacy field, so it only needs the one query.
+  const [routesByTripDate, routesByLegacyDate, schoolTrips] = await Promise.all([
+    queryFirestoreDocumentsWhereGte(env, "driverRoutes", "tripDate", lookbackYmd),
+    queryFirestoreDocumentsWhereGte(env, "driverRoutes", "date", lookbackYmd),
+    queryFirestoreDocumentsWhereGte(env, "schoolTrips", "date", lookbackYmd),
   ]);
+
+  const routesById = new Map<string, FirestoreQueryDocument>();
+  for (const doc of routesByTripDate) routesById.set(doc.id, doc);
+  for (const doc of routesByLegacyDate) {
+    if (!routesById.has(doc.id)) routesById.set(doc.id, doc);
+  }
+  const routes = Array.from(routesById.values());
 
   const candidates: TripCandidate[] = [];
 
@@ -588,7 +615,7 @@ export async function runNoShowDetection(env: Env, now: Date = new Date()): Prom
   let firestoreSubrequestsUsed = 0;
 
   const candidates = await gatherCandidates(env, lookbackYmd);
-  firestoreSubrequestsUsed += 2; // driverRoutes + schoolTrips.
+  firestoreSubrequestsUsed += 3; // driverRoutes(tripDate) + driverRoutes(date) + schoolTrips.
 
   // Computed once per candidate, reused both to decide which trip ids are
   // actually due for a bulk booking fetch AND inside processCandidate below

@@ -21,7 +21,7 @@ import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
 import KeyboardAvoidingWrapper from "../../components/KeyboardAvoidingWrapper";
 import VehicleDetailsSection from "../../components/VehicleDetailsSection";
-import { fetchDriverEligibility } from "../driverEligibility";
+import { fetchDriverEligibility, getDriverEligibilityAlertCopy } from "../driverEligibility";
 import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
 import { translateCategoryLabel } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
@@ -128,10 +128,8 @@ export default function WorkJobScreen() {
     const eligibility = await fetchDriverEligibility(user.uid);
 
     if (!eligibility.eligible) {
-      Alert.alert(
-        t("driver.verificationRequired"),
-        t("driver.mustVerifyLicense"),
-      );
+      const copy = getDriverEligibilityAlertCopy(eligibility.status, t);
+      Alert.alert(copy.title, copy.message);
       return;
     }
 

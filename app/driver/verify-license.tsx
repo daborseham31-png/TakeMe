@@ -173,14 +173,37 @@ export default function VerifyLicenseScreen() {
       licenseExpiryDate: licenseResult.expiryDate,
       licenseCategories: licenseResult.licenseCategories,
       spokenLanguages,
-      driverVerificationStatus: "ai_verified",
+      // "pending_admin_review" — one of DriverEligibilityStatus's actual
+      // recognized values (see admin/adminTypes.ts's DriverVerificationStatus
+      // union and driver/driverEligibility.ts's evaluateDriverEligibility).
+      // This used to write the made-up literal "ai_verified", which was
+      // never a real status anywhere else in the app: it displayed as a raw,
+      // untranslated "Ai_Verified" badge on the admin driver-details screen,
+      // and — since evaluateDriverEligibility never checked
+      // driverVerificationStatus at all before this fix — silently let the
+      // driver straight into trip creation despite never having been
+      // approved by an admin. OCR/document verification succeeding is NOT
+      // the same as admin approval; this status must stay "pending" until an
+      // admin explicitly approves (see adminDriversLib.ts's
+      // setDriverVerification).
+      driverVerificationStatus: "pending_admin_review",
       updatedAt: serverTimestamp(),
     };
 
     try {
       await setDoc(doc(db, collectionPath, docId), writeData, { merge: true });
 
-      router.replace("/driver/add-route" as any);
+      // Never route straight into trip creation from here — the driver just
+      // finished OCR verification, not admin approval (see the comment on
+      // driverVerificationStatus above). add-route.tsx would immediately
+      // bounce them back out with a "pending approval" alert now that it
+      // correctly checks approval status, so send them back to Home with a
+      // clear explanation instead of that confusing round trip.
+      Alert.alert(
+        t("driver.licenseSubmittedTitle"),
+        t("driver.licenseSubmittedPendingApprovalMessage"),
+      );
+      router.replace("/(tabs)/home" as any);
     } catch (error: any) {
       // Never swallow the original Firebase error — log everything needed
       // to debug a "Missing or insufficient permissions" write: the exact

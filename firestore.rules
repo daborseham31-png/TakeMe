@@ -65,6 +65,23 @@ service cloud.firestore {
           .data.get("cancellationStanding", {}).get("suspensionActive", false) == true;
     }
 
+    // Server-side mirror of app/driver/driverEligibility.ts's
+    // evaluateDriverEligibility "must be exactly approved" gate — OCR/
+    // document verification succeeding only ever sets driverVerificationStatus
+    // to "pending_admin_review" (see verify-license.tsx), never "approved";
+    // only an admin's own explicit action (adminDriversLib.ts's
+    // setDriverVerification) ever writes "approved". Without this check here,
+    // the client-side eligibility gate was only a UI convenience — any
+    // signed-in user with isDriver:true could still call these collections'
+    // create rule directly and publish a trip despite never being approved.
+    // Applied to CREATE only, same scope/reasoning as isDriverSuspended()
+    // above.
+    function isDriverApproved() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid))
+          .data.get("driverVerificationStatus", "") == "approved";
+    }
+
     function unchanged(field) {
       return !(field in request.resource.data) ||
         !(field in resource.data) ||
@@ -261,18 +278,22 @@ service cloud.firestore {
 
     // Become a Driver's license OCR self-submission (app/driver/
     // verify-license.tsx's handleVerify) — the passenger's own client sets
-    // isDriver + a pending "ai_verified" status alongside the OCR'd license
-    // fields and the languages they picked, merged onto their own
-    // users/{uid} doc. This is a NARROW carve-out of the isDriver/
-    // driverVerificationStatus lock above (the isSelf(...) && unchanged(...)
-    // branch), not a replacement for it: the new status can only ever be
-    // "ai_verified" here — never "approved" (that stays admin-only, both via
-    // the isAdmin() branch and the create rule above), never "rejected"/
-    // "suspended", and role/accountStatus/cancellationStanding can never be
-    // touched by this branch since they're simply not in the allowed key
-    // list (hasOnly below). A driver whose license just expired re-verifies
-    // through this exact same write, so the OLD driverVerificationStatus is
-    // deliberately unconstrained — only the NEW value is ever checked.
+    // isDriver + a pending "pending_admin_review" status alongside the OCR'd
+    // license fields and the languages they picked, merged onto their own
+    // users/{uid} doc. OCR/document verification succeeding is NOT admin
+    // approval — see app/driver/driverEligibility.ts's own header — so this
+    // status must always land on "pending_admin_review", never "approved".
+    // This is a NARROW carve-out of the isDriver/driverVerificationStatus
+    // lock above (the isSelf(...) && unchanged(...) branch), not a
+    // replacement for it: the new status can only ever be
+    // "pending_admin_review" here — never "approved" (that stays admin-only,
+    // both via the isAdmin() branch and the create rule above), never
+    // "rejected"/"suspended", and role/accountStatus/cancellationStanding can
+    // never be touched by this branch since they're simply not in the
+    // allowed key list (hasOnly below). A driver whose license just expired
+    // re-verifies through this exact same write, so the OLD
+    // driverVerificationStatus is deliberately unconstrained — only the NEW
+    // value is ever checked.
     function isValidSelfLicenseVerification(userId) {
       let newData = request.resource.data;
       return isSelf(userId) &&
@@ -283,7 +304,7 @@ service cloud.firestore {
         ]) &&
         newData.isDriver == true &&
         newData.licenseIsValid == true &&
-        newData.driverVerificationStatus == "ai_verified" &&
+        newData.driverVerificationStatus == "pending_admin_review" &&
         newData.licenseNumber is string &&
         newData.licenseExpiryDate is string &&
         newData.licenseCategories is list &&
@@ -765,22 +786,24 @@ service cloud.firestore {
     match /driverRoutes/{routeId} {
       allow read: if isSignedIn();
       // A suspended driver may not publish a new ride/weekly trip listing —
-      // see isDriverSuspended() above. update/delete stay exactly as broad
-      // as before (see the comment above on why — cancellation flows
-      // restore seats on routes the calling passenger doesn't own).
-      allow create: if isSignedIn() && !isDriverSuspended();
+      // see isDriverSuspended() above. Nor may a driver who hasn't been
+      // admin-approved yet (pending/rejected/suspended-by-admin) — see
+      // isDriverApproved() above. update/delete stay exactly as broad as
+      // before (see the comment above on why — cancellation flows restore
+      // seats on routes the calling passenger doesn't own).
+      allow create: if isSignedIn() && !isDriverSuspended() && isDriverApproved();
       allow update, delete: if isSignedIn();
     }
 
     match /workJobs/{jobId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && !isDriverSuspended();
+      allow create: if isSignedIn() && !isDriverSuspended() && isDriverApproved();
       allow update, delete: if isSignedIn();
     }
 
     match /errandJobs/{errandId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && !isDriverSuspended();
+      allow create: if isSignedIn() && !isDriverSuspended() && isDriverApproved();
       allow update, delete: if isSignedIn();
     }
 
@@ -931,9 +954,11 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // A suspended driver may not create a new School Trip listing — see
-      // isDriverSuspended() above.
+      // isDriverSuspended() above. Nor may a driver who hasn't been
+      // admin-approved yet — see isDriverApproved() above.
       allow create: if isSignedIn() &&
         !isDriverSuspended() &&
+        isDriverApproved() &&
         request.resource.data.driverId == request.auth.uid &&
         request.resource.data.availableSeats == request.resource.data.totalSeats;
 

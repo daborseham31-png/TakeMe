@@ -146,6 +146,13 @@ function mockFetchImplementation(input: RequestInfo | URL, init?: RequestInit): 
       const { fieldPath } = where.fieldFilter.field;
       const expected = where.fieldFilter.value.stringValue;
       matches = matches.filter((d) => d.fields[fieldPath] === expected);
+    } else if (where?.fieldFilter?.op === "GREATER_THAN_OR_EQUAL") {
+      // Mirrors queryFirestoreDocumentsWhereGte — a real Firestore range
+      // query on a field EXCLUDES any document that doesn't have that field
+      // at all (never coerces "missing" to "less than everything").
+      const { fieldPath } = where.fieldFilter.field;
+      const minValue = where.fieldFilter.value.stringValue;
+      matches = matches.filter((d) => typeof d.fields[fieldPath] === "string" && (d.fields[fieldPath] as string) >= minValue);
     } else if (where?.fieldFilter?.op === "IN") {
       const { fieldPath } = where.fieldFilter.field;
       const values: string[] = where.fieldFilter.value.arrayValue.values.map((v: any) => v.stringValue);
@@ -580,6 +587,76 @@ describe("noShowDetection: pagination", () => {
     expect(summary.bookingDocumentsFetched).toBe(50);
     const violation = store.find((d) => d.collection === "driverViolations" && d.id === "route-many");
     expect(violation?.fields.passengerCount).toBe(50);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Server-side date-window query — the fix for the "Quota exceeded."
+// (resource-exhausted) incident traced via Firestore Query Insights to
+// gatherCandidates reading driverRoutes/schoolTrips with NO filter at all.
+// ---------------------------------------------------------------------------
+
+describe("noShowDetection: server-side date-window query (Quota exceeded fix)", () => {
+  it("a driverRoutes trip dated well outside the 30-day lookback window is never gathered as a candidate", async () => {
+    seed("driverRoutes", "route-ancient", {
+      driverId: "driver-old",
+      tripDate: "2026-01-01", // Far outside the 30-day lookback from NOW (2026-08-03).
+      time: DUE_TIME,
+      from: "A",
+      to: "B",
+      active: true,
+      status: "booked",
+      bookingType: "personal",
+    });
+    seedBooking("bk-ancient", "route-ancient");
+    seedDueDriverRoute("route-recent", "driver-recent");
+    seedBooking("bk-recent", "route-recent");
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW);
+
+    // Only the in-window trip is gathered — the ancient one is excluded by
+    // the server-side tripDate >= lookbackYmd filter, not merely skipped
+    // client-side after being read.
+    expect(summary.candidatesGathered).toBe(1);
+    expect(summary.violationsCreated).toBe(1);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "route-ancient")).toBe(false);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "route-recent")).toBe(true);
+  });
+
+  it("a schoolTrips trip dated well outside the 30-day lookback window is never gathered as a candidate", async () => {
+    seed("schoolTrips", "school-ancient", {
+      driverId: "driver-old",
+      date: "2026-01-01",
+      departureTime: DUE_TIME,
+      fromAddress: "School",
+      toAddress: "Home",
+      active: true,
+      status: "booked",
+    });
+    seedSchoolBooking("sbk-ancient", "school-ancient");
+    seedDueSchoolTrip("school-recent", "driver-recent");
+    seedSchoolBooking("sbk-recent", "school-recent");
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW);
+
+    expect(summary.candidatesGathered).toBe(1);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "school-ancient")).toBe(false);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "school-recent")).toBe(true);
+  });
+
+  it("issues bounded, server-side-filtered queries instead of one unfiltered full-collection scan", async () => {
+    seedDueDriverRoute("route-1", "driver-1");
+    seedBooking("bk-1", "route-1");
+    seedDueSchoolTrip("school-1", "driver-2");
+    seedSchoolBooking("sbk-1", "school-1");
+
+    await runNoShowDetection(TEST_ENV, NOW);
+
+    // Two driverRoutes reads (tripDate window + legacy date-field window)
+    // and one schoolTrips read — never a single unfiltered call reading the
+    // whole collection.
+    expect(runQueryCallsByCollection["driverRoutes"]).toBe(2);
+    expect(runQueryCallsByCollection["schoolTrips"]).toBe(1);
   });
 });
 

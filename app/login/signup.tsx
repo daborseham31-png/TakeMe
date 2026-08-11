@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
+import PasswordRequirementsChecklist from "../components/PasswordRequirementsChecklist";
 import {
   analyzeIdImage,
   analyzeLicenseImage,
@@ -34,6 +35,7 @@ import {
   pickDocumentImage,
   SPOKEN_LANGUAGE_OPTIONS,
 } from "./idVerificationLib";
+import { isPasswordStrong } from "./passwordValidation";
 
 type Gender = "Male" | "Female" | "Other";
 
@@ -62,6 +64,8 @@ export default function SignUpScreen() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [gender, setGender] = useState<Gender | "">("");
 
   // --- Driver: spoken languages -----------------------------------------------
@@ -83,6 +87,11 @@ export default function SignUpScreen() {
   const emailError =
     email.trim().length > 0 && !isValidEmail
       ? t("auth.emailMustBeGmailHotmail")
+      : "";
+
+  const confirmPasswordError =
+    confirmPassword.length > 0 && confirmPassword !== password
+      ? t("auth.passwordsDoNotMatch")
       : "";
 
   const derivedAge =
@@ -182,7 +191,7 @@ export default function SignUpScreen() {
       return;
     }
 
-    if (!email.trim() || !phone.trim() || !password) {
+    if (!email.trim() || !phone.trim() || !password || !confirmPassword) {
       Alert.alert(t("auth.missingDetails"), t("auth.fillAllRequiredFields"));
       return;
     }
@@ -197,8 +206,13 @@ export default function SignUpScreen() {
       return;
     }
 
-    if (password.length < 6) {
-      Alert.alert(t("auth.weakPasswordTitle"), t("auth.passwordMinLength"));
+    if (!isPasswordStrong(password)) {
+      Alert.alert(t("auth.weakPasswordTitle"), t("auth.weakPasswordMessage"));
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      Alert.alert(t("auth.passwordMismatchTitle"), t("auth.passwordsDoNotMatch"));
       return;
     }
 
@@ -456,6 +470,28 @@ export default function SignUpScreen() {
               <Text style={styles.eye}>{showPw ? t("auth.hide") : t("auth.show")}</Text>
             </Pressable>
           </View>
+
+          {password.length > 0 ? (
+            <PasswordRequirementsChecklist password={password} />
+          ) : null}
+
+          <Text style={styles.label}>{t("auth.confirmPassword")}</Text>
+          <View style={styles.passwordRow}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder={t("auth.confirmPasswordPlaceholder")}
+              placeholderTextColor="#8b7b6b"
+              secureTextEntry={!showConfirmPw}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+            />
+            <Pressable onPress={() => setShowConfirmPw(!showConfirmPw)}>
+              <Text style={styles.eye}>{showConfirmPw ? t("auth.hide") : t("auth.show")}</Text>
+            </Pressable>
+          </View>
+          {confirmPasswordError ? (
+            <Text style={styles.fieldError}>{confirmPasswordError}</Text>
+          ) : null}
 
           <Text style={styles.label}>{t("auth.genderLabel")}</Text>
           <View style={styles.optionRow}>

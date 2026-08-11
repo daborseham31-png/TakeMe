@@ -24,7 +24,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
-import { fetchDriverEligibility } from "../driver/driverEligibility";
+import { fetchDriverEligibility, getDriverEligibilityAlertCopy } from "../driver/driverEligibility";
 import {
   DirectionalCard,
   DirectionalRow,
@@ -642,6 +642,20 @@ export default function HomeScreen() {
 
       if (eligibility.eligible) {
         router.push("/driver/add-route" as any);
+        return;
+      }
+
+      // pending_admin_approval/rejected/suspended all mean the driver
+      // already completed license verification — show why they're blocked
+      // and stay on Home, never send them back to re-upload a license they
+      // already submitted.
+      if (
+        eligibility.status === "pending_admin_approval" ||
+        eligibility.status === "rejected" ||
+        eligibility.status === "suspended"
+      ) {
+        const copy = getDriverEligibilityAlertCopy(eligibility.status, t);
+        Alert.alert(copy.title, copy.message);
         return;
       }
 
