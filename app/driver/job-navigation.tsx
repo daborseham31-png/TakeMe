@@ -4,7 +4,6 @@ import { doc, onSnapshot } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Pressable,
   ScrollView,
@@ -12,7 +11,8 @@ import {
   Text,
   View,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import { Alert } from "../AppAlert";
+import MapView, { Marker } from "../../components/PlatformMapView";
 
 import { useTranslation } from "react-i18next";
 

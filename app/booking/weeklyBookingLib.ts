@@ -30,7 +30,7 @@ import {
   runTransaction,
   serverTimestamp,
 } from "firebase/firestore";
-import { Alert } from "react-native";
+import { Alert } from "../AppAlert";
 
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";

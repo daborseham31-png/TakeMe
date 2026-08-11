@@ -34,7 +34,8 @@
 // ---------------------------------------------------------------------------
 
 import * as Clipboard from "expo-clipboard";
-import { Alert, Linking } from "react-native";
+import { Linking } from "react-native";
+import { Alert } from "../AppAlert";
 
 // Plain helper module (not a component) — uses the initialized global
 // i18next instance directly rather than the useTranslation() hook.

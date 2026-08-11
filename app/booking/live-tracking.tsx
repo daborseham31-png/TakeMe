@@ -11,7 +11,7 @@ import {
   Text,
   View,
 } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import MapView, { Marker, Polyline } from "../../components/PlatformMapView";
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";

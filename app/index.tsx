@@ -4,8 +4,8 @@ import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Alert } from "./AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { auth } from "../firebase";
@@ -311,6 +312,15 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 7,
+    // Web-only: this pill and KeyboardSafeScreen's ScrollView below are both
+    // siblings of DirectionalScreen with an equal (default) z-index of 0.
+    // react-native-web paints/hit-tests tied z-index siblings in DOM order,
+    // so the ScrollView — a later sibling that flex-fills the ENTIRE screen
+    // (nothing above it takes flow space) — was intercepting clicks/taps
+    // over this pill's region despite it being position:"absolute". Native
+    // hit-tests this correctly already (RN's native touch dispatch isn't
+    // subject to the same DOM paint-order tie-break), so this is Web-only.
+    ...(Platform.OS === "web" ? { zIndex: 10 } : {}),
   },
   languagePillText: {
     color: "#7C5F46",

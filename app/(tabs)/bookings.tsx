@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import DateTimePicker from "../../components/PlatformDateTimePicker";
 import { router, useLocalSearchParams } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -19,7 +19,6 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Keyboard,
   Linking,
@@ -33,6 +32,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth, db } from "../../firebase";
@@ -5999,7 +5999,7 @@ useEffect(() => {
               // already-happened trip, never just future ones.
               minimumDate={new Date(2000, 0, 1)}
               onChange={(_event: any, selectedDate?: Date) => {
-                if (Platform.OS === "android") {
+                if (Platform.OS === "android" || Platform.OS === "web") {
                   setDateMenuOpen(false);
                 }
 

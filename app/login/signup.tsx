@@ -5,7 +5,6 @@ import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Platform,
   Pressable,
@@ -16,6 +15,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 
 import { useTranslation } from "react-i18next";
 

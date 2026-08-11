@@ -7,12 +7,12 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   ImageBackground,
   Linking,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -21,6 +21,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
@@ -1400,6 +1401,18 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
     shadowRadius: 20,
     elevation: 6,
+    // Web-only: react-native-web's Image/ImageBackground default the
+    // rendered image box to the SOURCE ASSET's raw pixel size (hero-car.png
+    // is 1024x1024) whenever this container has no EXPLICIT width/height
+    // (minHeight alone doesn't count — see
+    // react-native-web/src/exports/Image/index.js's `imageSizeStyle`).
+    // Without this, the image renders unscaled at 1024x1024 anchored
+    // top-left instead of being cover-scaled to fill this card, landing on
+    // the source PNG's blank corner (see the comment above) instead of the
+    // car illustration. Native measures via layout, not asset intrinsic
+    // size, so it has no such bug and stays on minHeight-only exactly as
+    // before.
+    ...(Platform.OS === "web" ? { height: 300, width: "100%" } : {}),
   },
   heroBgImage: {
     borderRadius: 28,

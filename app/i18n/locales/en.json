@@ -1,6 +1,7 @@
 {
   "common": {
     "appName": "TakeMe",
+    "mapPreviewUnavailableWeb": "Map preview isn't available on Web.",
     "loading": "Loading...",
     "save": "Save",
     "saveChanges": "Save Changes",

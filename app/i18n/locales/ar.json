@@ -1,6 +1,7 @@
 {
   "common": {
     "appName": "TakeMe",
+    "mapPreviewUnavailableWeb": "معاينة الخريطة غير متاحة على الويب.",
     "loading": "جارٍ التحميل...",
     "save": "حفظ",
     "saveChanges": "حفظ التغييرات",

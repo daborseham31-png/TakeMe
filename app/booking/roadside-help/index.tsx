@@ -4,14 +4,14 @@ import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
-import MapView, { Marker, Region } from "react-native-maps";
+import { Alert } from "../../AppAlert";
+import MapView, { Marker, Region } from "../../../components/PlatformMapView";
 import { useTranslation } from "react-i18next";
 
 import KeyboardSafeScreen from "../../components/KeyboardSafeScreen";

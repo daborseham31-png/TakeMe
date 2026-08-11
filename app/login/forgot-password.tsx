@@ -3,7 +3,6 @@ import { sendPasswordResetEmail } from "firebase/auth";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { auth, firebaseAuthDomain } from "../../firebase";

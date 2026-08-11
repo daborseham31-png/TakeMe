@@ -1,7 +1,8 @@
 import { router } from "expo-router";
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
-import { Alert, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
+import { Alert } from "../../AppAlert";
 
 import { auth, db } from "../../../firebase";
 // This file is a plain helper module (not a component), so it uses the

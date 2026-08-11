@@ -1,6 +1,7 @@
 {
   "common": {
     "appName": "TakeMe",
+    "mapPreviewUnavailableWeb": "תצוגת מפה אינה זמינה בגרסת האינטרנט.",
     "loading": "טוען...",
     "save": "שמירה",
     "saveChanges": "שמירת השינויים",

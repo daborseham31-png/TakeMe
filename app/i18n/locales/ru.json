@@ -1,6 +1,7 @@
 {
   "common": {
     "appName": "TakeMe",
+    "mapPreviewUnavailableWeb": "Предпросмотр карты недоступен в веб-версии.",
     "loading": "Загрузка...",
     "save": "Сохранить",
     "saveChanges": "Сохранить изменения",
