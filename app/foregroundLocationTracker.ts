@@ -35,7 +35,10 @@ export type ForegroundTrackTarget = {
   [field: string]: string | undefined;
 };
 
-export type StartTrackingResult = { started: boolean; reason?: "foreground_denied" };
+export type StartTrackingResult = {
+  started: boolean;
+  reason?: "foreground_denied";
+};
 
 export function createForegroundLocationTracker(collectionName: string) {
   // In-memory only, on purpose — no persistence/restoration across app
@@ -56,7 +59,9 @@ export function createForegroundLocationTracker(collectionName: string) {
   // the first write — safe to call repeatedly, since re-merging the same
   // driverId/passengerId onto an existing doc is a no-op diff — closes that
   // gap for every caller without changing firestore.rules.
-  const ensureTargetDoc = async (target: ForegroundTrackTarget): Promise<void> => {
+  const ensureTargetDoc = async (
+    target: ForegroundTrackTarget,
+  ): Promise<void> => {
     const { targetId, ...fields } = target;
     await setDoc(doc(db, collectionName, targetId), fields, { merge: true });
   };
@@ -90,7 +95,9 @@ export function createForegroundLocationTracker(collectionName: string) {
     );
   };
 
-  const doStart = async (target: ForegroundTrackTarget): Promise<StartTrackingResult> => {
+  const doStart = async (
+    target: ForegroundTrackTarget,
+  ): Promise<StartTrackingResult> => {
     if (subscription && activeTargetId === target.targetId) {
       // Already tracking exactly this target — nothing to do.
       return { started: true };
@@ -105,7 +112,7 @@ export function createForegroundLocationTracker(collectionName: string) {
     }
     activeTargetId = null;
 
-    const foreground = await Location.requestForegroundPermissionsAsync();
+    const foreground = await Location.requestForegroundPermissionsAsync(); //طلب صلاحية الموقع
     if (foreground.status !== "granted") {
       return { started: false, reason: "foreground_denied" };
     }
@@ -114,6 +121,7 @@ export function createForegroundLocationTracker(collectionName: string) {
       await ensureTargetDoc(target);
       activeTargetId = target.targetId;
       subscription = await Location.watchPositionAsync(
+        //التتبع المستمر
         {
           accuracy: Location.Accuracy.High,
           timeInterval: 4000,
@@ -121,14 +129,20 @@ export function createForegroundLocationTracker(collectionName: string) {
         },
         (location) => {
           writeLocationFix(target, location.coords).catch((error) => {
-            console.log(`foregroundLocationTracker(${collectionName}): could not write location`, error);
+            console.log(
+              `foregroundLocationTracker(${collectionName}): could not write location`,
+              error,
+            );
           });
         },
       );
 
       return { started: true };
     } catch (error) {
-      console.log(`foregroundLocationTracker(${collectionName}): start failed`, error);
+      console.log(
+        `foregroundLocationTracker(${collectionName}): start failed`,
+        error,
+      );
       activeTargetId = null;
       subscription = null;
       return { started: false, reason: "foreground_denied" };
@@ -139,7 +153,9 @@ export function createForegroundLocationTracker(collectionName: string) {
   // re-run twice within milliseconds of each other (e.g. two listeners
   // firing right after the same status change), which would otherwise race
   // two independent watchPositionAsync subscriptions against each other.
-  const start = (target: ForegroundTrackTarget): Promise<StartTrackingResult> => {
+  const start = (
+    target: ForegroundTrackTarget,
+  ): Promise<StartTrackingResult> => {
     if (startPromise) return startPromise;
 
     startPromise = doStart(target).finally(() => {
@@ -162,11 +178,16 @@ export function createForegroundLocationTracker(collectionName: string) {
   // first timeInterval/distanceInterval tick.
   const captureOnce = async (target: ForegroundTrackTarget): Promise<void> => {
     try {
-      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const current = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
       await ensureTargetDoc(target);
       await writeLocationFix(target, current.coords);
     } catch (error) {
-      console.log(`foregroundLocationTracker(${collectionName}): captureOnce failed`, error);
+      console.log(
+        `foregroundLocationTracker(${collectionName}): captureOnce failed`,
+        error,
+      );
     }
   };
 
