@@ -58,7 +58,23 @@ import {
 } from "./firestoreRest";
 
 const GRACE_PERIOD_MINUTES = 15;
-const RECONCILE_LOOKBACK_DAYS = 30;
+// Trailing reconcile window — a pure outage-recovery safety net, not a
+// legitimate trip-lifetime need (trip creation always validates a future
+// date/time — see validateDateAndTimeNotPassed in the Expo app), so it does
+// not need to be as wide as "however long a trip could theoretically stay
+// open." 7 days absorbs a full weekend-plus Worker outage while keeping
+// gatherCandidates' per-run read cost bounded. Reduced from 30 — see the
+// delivery report on Firestore read-quota usage for the read-cost math this
+// is based on.
+const RECONCILE_LOOKBACK_DAYS = 7;
+// Forward bound — a trip can never be past its own 15-minute grace deadline
+// before its own scheduled date has arrived, so anything dated beyond
+// "today (Israel-local) + 1 day" can never be due yet and was previously
+// being read for no reason, forever, no matter how far in the future it was
+// dated. The +1 (rather than exactly "today") is deliberate slack against a
+// day-boundary edge case, not a precision requirement — see israelYmd's own
+// header just below for the specific bug this guards against.
+const RECONCILE_HORIZON_DAYS = 1;
 const DRIVER_NO_SHOW_TRIP_STATUS = "driver_no_show";
 
 // Firestore's own hard cap on the number of disjunction values in a single
@@ -130,6 +146,32 @@ function zonedTimeToUtc(year: number, month: number, day: number, hour: number, 
   // time.
   const offsetMs = shownAsUtcMs - naiveUtcMs;
   return new Date(naiveUtcMs - offsetMs);
+}
+
+// The inverse direction of zonedTimeToUtc above: given an absolute instant,
+// what is "today" as a YYYY-MM-DD string in Israel-local wall-clock terms?
+// Used to bound gatherCandidates' date-range queries (see
+// RECONCILE_LOOKBACK_DAYS/RECONCILE_HORIZON_DAYS above) — computing this via
+// the Workers runtime's own UTC calendar date instead would be a real bug:
+// Israel is UTC+2/+3, so its calendar date flips to "tomorrow" BEFORE UTC's
+// does. Roughly every day between ~21:00-23:59 UTC, a naive
+// `new Date().toISOString().slice(0,10)` would still read "yesterday" while
+// Israel is already on the next calendar day, which would risk wrongly
+// excluding that day's genuinely-due trips from the query's bounds. Shifting
+// the instant by a whole number of days (done by the caller, before this
+// function ever sees it) rather than doing date arithmetic on Y/M/D parts
+// keeps this correct across a DST transition too, for the same reason
+// zonedTimeToUtc's own "double conversion" does: it's always applied to a
+// real absolute instant, never to wall-clock parts.
+export function israelYmd(instant: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: APP_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(instant);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
 export function combineScheduledDateTime(date: string, time: string): Date | null {
@@ -204,7 +246,12 @@ function isStillOpenForNoShow(data: Record<string, unknown>): boolean {
   );
 }
 
-async function gatherCandidates(env: Env, lookbackYmd: string): Promise<TripCandidate[]> {
+async function gatherCandidates(
+  env: Env,
+  lookbackYmd: string,
+  horizonYmd: string,
+  includeLegacyDateQuery: boolean,
+): Promise<{ candidates: TripCandidate[]; subrequestsUsed: number }> {
   // Server-side date-window filter — see this file's "SUBREQUEST-BUDGET FIX"
   // header comment for the bulk-booking-fetch fix, and this comment for the
   // sibling fix: this used to call queryFirestoreDocuments(env,
@@ -214,19 +261,41 @@ async function gatherCandidates(env: Env, lookbackYmd: string): Promise<TripCand
   // read per run, 288 runs/day, ≈112k reads/day from these two collections
   // alone — comfortably enough to trip the Spark plan's 50k reads/day quota
   // and surface as "Quota exceeded." elsewhere in the app). Restricting to
-  // tripDate/date >= lookbackYmd server-side cuts every run down to just the
-  // 30-day reconcile window instead of the whole collection.
+  // tripDate/date in [lookbackYmd, horizonYmd] server-side cuts every run
+  // down to a small, bounded window instead of the whole collection.
   //
-  // driverRoutes is queried on BOTH `tripDate` (what every current writer
-  // uses) and the legacy `date` fallback (see routeDate below) — two
-  // bounded, 30-day-window reads, never two full scans — merged and deduped
-  // by document id, so a document that only ever had `date` (see this file's
-  // own "route-lion" regression tests) is still found exactly as before.
-  // schoolTrips has no such legacy field, so it only needs the one query.
+  // BOTH bounds matter, not just lookbackYmd: the original fix only added a
+  // trailing lower bound, which still let every future-dated trip — no
+  // matter how far out — get fully read on every single tick, forever, since
+  // a trip can never be past its own 15-minute grace deadline before its own
+  // scheduled date arrives. horizonYmd (see RECONCILE_HORIZON_DAYS) closes
+  // that gap. Both filters still target the SAME field per query — never a
+  // composite filter across two DIFFERENT fields — so this still needs no
+  // composite index, exactly as before (see firestoreRest.ts's own header on
+  // queryFirestoreDocumentsWhereGte).
+  //
+  // driverRoutes is queried on `tripDate` (what every current writer uses)
+  // on every run, and on the legacy `date` fallback (see routeDate below)
+  // only once per hour (includeLegacyDateQuery) — confirmed via a repo-wide
+  // search that no current write path (app/driver/create/RideForm.tsx, the
+  // Republish flow in app/(tabs)/bookings.tsx) ever sets a plain `date`
+  // field on driverRoutes any more, so this query exists purely as a safety
+  // net for pre-migration documents and returns ~0 rows in production on
+  // almost every run. Running it hourly instead of every 5 minutes keeps
+  // that safety net (a document that only ever had `date` — see this file's
+  // own "route-lion" regression tests — is still found, merged, and deduped
+  // by document id exactly as before, just once an hour rather than every
+  // tick) while cutting ~92% of its own (already mostly-wasted) query
+  // overhead. schoolTrips has no such legacy field, so it only needs the one
+  // query, every run.
+  const legacyDateQuery = includeLegacyDateQuery
+    ? queryFirestoreDocumentsWhereGte(env, "driverRoutes", "date", lookbackYmd, horizonYmd)
+    : Promise.resolve<FirestoreQueryDocument[]>([]);
+
   const [routesByTripDate, routesByLegacyDate, schoolTrips] = await Promise.all([
-    queryFirestoreDocumentsWhereGte(env, "driverRoutes", "tripDate", lookbackYmd),
-    queryFirestoreDocumentsWhereGte(env, "driverRoutes", "date", lookbackYmd),
-    queryFirestoreDocumentsWhereGte(env, "schoolTrips", "date", lookbackYmd),
+    queryFirestoreDocumentsWhereGte(env, "driverRoutes", "tripDate", lookbackYmd, horizonYmd),
+    legacyDateQuery,
+    queryFirestoreDocumentsWhereGte(env, "schoolTrips", "date", lookbackYmd, horizonYmd),
   ]);
 
   const routesById = new Map<string, FirestoreQueryDocument>();
@@ -254,7 +323,7 @@ async function gatherCandidates(env: Env, lookbackYmd: string): Promise<TripCand
       // that name instead — never the other way around, since it's not what
       // production actually writes.
       const routeDate = data.tripDate || data.date;
-      if (!routeDate || routeDate < lookbackYmd) continue;
+      if (!routeDate || routeDate < lookbackYmd || routeDate > horizonYmd) continue;
       candidates.push({
         tripId: route.id,
         tripCollection: "driverRoutes",
@@ -279,7 +348,7 @@ async function gatherCandidates(env: Env, lookbackYmd: string): Promise<TripCand
     try {
       const data = trip.data as Record<string, any>;
       if (!isStillOpenForNoShow(data)) continue;
-      if (!data.date || data.date < lookbackYmd) continue;
+      if (!data.date || data.date < lookbackYmd || data.date > horizonYmd) continue;
       candidates.push({
         tripId: trip.id,
         tripCollection: "schoolTrips",
@@ -297,7 +366,7 @@ async function gatherCandidates(env: Env, lookbackYmd: string): Promise<TripCand
     }
   }
 
-  return candidates;
+  return { candidates, subrequestsUsed: includeLegacyDateQuery ? 3 : 2 };
 }
 
 // ---------------------------------------------------------------------------
@@ -576,8 +645,9 @@ async function notifyAllAdmins(
 // ---------------------------------------------------------------------------
 
 export type NoShowDetectionSummary = {
-  // Every still-open, within-lookback trip gatherCandidates returned —
-  // includes trips that aren't actually due yet this cycle.
+  // Every still-open, within-window (lookback..horizon) trip
+  // gatherCandidates returned — includes trips that aren't actually due yet
+  // this cycle.
   candidatesGathered: number;
   // How many DISTINCT trip ids were actually sent into the bulk booking
   // fetch (i.e. already past their grace period this run) — the number
@@ -595,10 +665,17 @@ export type NoShowDetectionSummary = {
   ineligibleSkipped: number;
   failures: number;
   // Best-effort count of outbound Firestore REST calls this run made
-  // (gatherCandidates's 2 + bulk-fetch chunks/pages + one commit per
-  // created/duplicate + the admin-notify query/commit). Does not count the
-  // one-time OAuth2 token exchange, which only happens on a cold isolate.
+  // (gatherCandidates's 2 or 3, depending on legacyDateQueryIncluded, + bulk-
+  // fetch chunks/pages + one commit per created/duplicate + the admin-notify
+  // query/commit). Does not count the one-time OAuth2 token exchange, which
+  // only happens on a cold isolate.
   firestoreSubrequestsUsed: number;
+  // Whether this run's tick fell on the once-per-hour slot that also queries
+  // driverRoutes' legacy `date` field (see gatherCandidates' own header) —
+  // surfaced here purely for observability, so the hourly cadence is
+  // directly visible in Worker logs rather than only inferable from
+  // firestoreSubrequestsUsed.
+  legacyDateQueryIncluded: boolean;
   durationMs: number;
 };
 
@@ -609,13 +686,32 @@ export type NoShowDetectionSummary = {
 // signing call in firestoreRest.ts's getAccessToken.
 export async function runNoShowDetection(env: Env, now: Date = new Date()): Promise<NoShowDetectionSummary> {
   const startedAt = Date.now();
-  const lookbackDate = new Date(now.getTime() - RECONCILE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
-  const lookbackYmd = lookbackDate.toISOString().slice(0, 10);
+
+  // Israel-local, not UTC — see israelYmd's own header for why a naive UTC
+  // slice (new Date().toISOString().slice(0,10)) would wrongly exclude
+  // genuinely-due trips for roughly 2-3 hours every day.
+  const lookbackYmd = israelYmd(new Date(now.getTime() - RECONCILE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000));
+  const horizonYmd = israelYmd(new Date(now.getTime() + RECONCILE_HORIZON_DAYS * 24 * 60 * 60 * 1000));
+
+  // The legacy driverRoutes/date fallback query only runs on the first tick
+  // of each hour (see gatherCandidates' own header for why this is safe).
+  // Gated on the real-world UTC clock — minute-of-hour is identical in UTC
+  // and Israel time (both are whole-hour-offset zones), so no Israel-specific
+  // conversion is needed for this particular check, unlike the calendar-date
+  // bounds above. `< 5` (not `=== 0`) tolerates the cron firing a little
+  // late under load while still running exactly once per hour, since ticks
+  // land on a five-minute grid (:00, :05, :10, ...).
+  const includeLegacyDateQuery = now.getUTCMinutes() < 5;
 
   let firestoreSubrequestsUsed = 0;
 
-  const candidates = await gatherCandidates(env, lookbackYmd);
-  firestoreSubrequestsUsed += 3; // driverRoutes(tripDate) + driverRoutes(date) + schoolTrips.
+  const { candidates, subrequestsUsed: gatherSubrequestsUsed } = await gatherCandidates(
+    env,
+    lookbackYmd,
+    horizonYmd,
+    includeLegacyDateQuery,
+  );
+  firestoreSubrequestsUsed += gatherSubrequestsUsed;
 
   // Computed once per candidate, reused both to decide which trip ids are
   // actually due for a bulk booking fetch AND inside processCandidate below
@@ -698,6 +794,7 @@ export async function runNoShowDetection(env: Env, now: Date = new Date()): Prom
     ineligibleSkipped,
     failures,
     firestoreSubrequestsUsed,
+    legacyDateQueryIncluded: includeLegacyDateQuery,
     durationMs: Date.now() - startedAt,
   };
 }

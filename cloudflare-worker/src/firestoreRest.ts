@@ -305,25 +305,30 @@ export async function queryFirestoreDocuments(
 }
 
 // ---------------------------------------------------------------------------
-// Single-field "greater than or equal" range query — added for
-// noShowDetection.ts's gatherCandidates (see that file's header on the
-// "Quota exceeded." incident this fixes): lets a caller restrict a read to
-// e.g. "tripDate >= 30 days ago" server-side instead of downloading an
-// entire collection and discarding old documents in JS.
+// Single-field range query — added for noShowDetection.ts's gatherCandidates
+// (see that file's header on the "Quota exceeded." incident this fixes):
+// lets a caller restrict a read to e.g. "tripDate >= 7 days ago" server-side
+// instead of downloading an entire collection and discarding old documents
+// in JS. `maxValue` is an OPTIONAL second bound (e.g. "tripDate <= tomorrow")
+// added so a caller can also exclude future documents that could never be
+// due yet — see noShowDetection.ts's RECONCILE_HORIZON_DAYS for why an
+// unbounded-forward query was itself a real cost driver, not just the
+// trailing lookback.
 //
-// Deliberately ONE filter, on ONE field, with no other `where` clause
-// combined into the same query — Firestore requires a composite index for
-// any query that combines an equality/other filter with a range filter on a
-// DIFFERENT field, but a query with a SINGLE range filter (whose field also
-// appears as the first/only `orderBy`, as required) is served entirely by
-// Firestore's automatic single-field index. No index to provision, no
+// Both bounds always target the SAME field passed as `fieldPath` — never a
+// second, different field — so this still needs no composite index: Firestore
+// requires a composite index for a query that combines a filter on one field
+// with a range filter on a DIFFERENT field, but any combination of filters on
+// a SINGLE field (whose field also appears as the first/only `orderBy`, as
+// required) is served entirely by Firestore's automatic single-field index,
+// exactly as when only `minValue` was supported. No index to provision, no
 // deploy required for this function to work.
 //
 // No pagination: matches queryFirestoreDocuments' own existing precedent
 // (also a single, unpaginated runQuery call) — Firestore's REST `runQuery`
 // returns every matching document in one response when no `limit` is set,
 // which is exactly what the current (pre-fix) full-collection call already
-// relies on successfully today. A 30-day-window read is always a subset of
+// relies on successfully today. A bounded-window read is always a subset of
 // what that same call already handles in one response, so no new pagination
 // need is introduced here.
 // ---------------------------------------------------------------------------
@@ -333,19 +338,41 @@ export async function queryFirestoreDocumentsWhereGte(
   collection: string,
   fieldPath: string,
   minValue: string,
+  maxValue?: string,
 ): Promise<FirestoreQueryDocument[]> {
   const accessToken = await getAccessToken(env);
   const url = `${FIRESTORE_BASE}/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents:runQuery`;
 
+  const minFilter = {
+    fieldFilter: {
+      field: { fieldPath },
+      op: "GREATER_THAN_OR_EQUAL",
+      value: { stringValue: minValue },
+    },
+  };
+
+  const where =
+    maxValue === undefined
+      ? minFilter
+      : {
+          compositeFilter: {
+            op: "AND",
+            filters: [
+              minFilter,
+              {
+                fieldFilter: {
+                  field: { fieldPath },
+                  op: "LESS_THAN_OR_EQUAL",
+                  value: { stringValue: maxValue },
+                },
+              },
+            ],
+          },
+        };
+
   const structuredQuery = {
     from: [{ collectionId: collection }],
-    where: {
-      fieldFilter: {
-        field: { fieldPath },
-        op: "GREATER_THAN_OR_EQUAL",
-        value: { stringValue: minValue },
-      },
-    },
+    where,
     orderBy: [{ field: { fieldPath }, direction: "ASCENDING" }],
   };
 

@@ -1,68 +1,65 @@
 // ---------------------------------------------------------------------------
-// Route-based / detour-aware ride matching — FULLY LOCAL, FREE geometric
-// approximation. No network calls, no API key, no paid routing service, no
-// Google Cloud billing of any kind. Every function here is pure and
-// synchronous — safe to call directly from a render-time useMemo.
+// مطابقة الرحلات القائمة على المسار وتأخذ الانحراف بعين الاعتبار — تقريب
+// هندسي محلي بالكامل ومجاني. لا اتصال بالشبكة، لا مفتاح API، لا خدمة توجيه
+// مدفوعة، ولا أي فوترة من Google Cloud من أي نوع. كل دالة هنا نقية (pure)
+// ومتزامنة (synchronous) — آمنة للاستدعاء مباشرة من useMemo وقت العرض.
 //
-// Terms (see the feature's own spec): A = driver origin, C = driver
-// destination, B = passenger pickup, D = passenger destination. The
-// driver's own "route" is approximated as the STRAIGHT LINE segment A->C
-// (no real road geometry is available without a paid routing API) — B is
-// matched by projecting it onto that segment (Haversine distance + 2D
-// geometric projection), and the detour is approximated as
-// distance(A,B)+distance(B,C)-distance(A,C) (or the A->B->D->C variant when
-// D is known and different from C).
+// المصطلحات (انظر مواصفات الميزة نفسها): A = نقطة انطلاق السائق، C = وجهة
+// السائق، B = نقطة استلام الراكب، D = وجهة الراكب. "مسار" السائق نفسه يُقرَّب
+// كخط مستقيم من A إلى C (لا تتوفر هندسة طريق حقيقية بدون واجهة برمجية
+// مدفوعة للتوجيه) — يتم مطابقة B عبر إسقاطها على هذا الخط (مسافة Haversine +
+// إسقاط هندسي ثنائي الأبعاد)، ويُقرَّب الانحراف كـ
+// distance(A,B)+distance(B,C)-distance(A,C) (أو صيغة A->B->D->C عندما تكون D
+// معروفة ومختلفة عن C).
 //
-// app/booking/homeFeedLib.ts is the only caller that wires this into the
-// actual Home feed, and never the other way around (this file does not
-// import homeFeedLib.ts, to avoid a circular import — see its own
-// DriverRouteInput type below, a minimal shape homeFeedLib.ts maps its
-// FeedItem into).
+// app/booking/homeFeedLib.ts هو المستدعي الوحيد الذي يربط هذا الملف بواجهة
+// الصفحة الرئيسية الفعلية، وليس العكس أبدًا (هذا الملف لا يستورد
+// homeFeedLib.ts، تفاديًا لاستيراد دائري — انظر نوع DriverRouteInput الخاص
+// به أدناه، وهو شكل مبسّط تحوّل إليه homeFeedLib.ts بيانات FeedItem الخاصة
+// بها).
 // ---------------------------------------------------------------------------
 
 export type LatLng = { latitude: number; longitude: number };
 
 // ---------------------------------------------------------------------------
-// Configuration — every threshold this feature uses lives here, and only
-// here. Never hardcode a competing copy of any of these in a component.
+// الإعدادات — كل قيمة حدّية تستخدمها هذه الميزة موجودة هنا، وهنا فقط. لا
+// تكتب أبدًا نسخة منافسة مكررة من أي منها بأي مكوّن آخر.
 // ---------------------------------------------------------------------------
 
-// How far (perpendicular distance, in km) a pickup or destination may be
-// from the straight A->C corridor and still count as "on the way".
+// إلى أي مدى (المسافة العمودية، بالكيلومترات) يمكن أن تكون نقطة الاستلام أو
+// الوجهة بعيدة عن ممر الخط المستقيم A->C وتظل تُحتسب بأنها "على الطريق".
 export const MAX_ROUTE_CORRIDOR_DISTANCE_KM = 5;
 
-// Absolute cap on the approximate detour (extra km beyond the A->C
-// distance) a trip may take on to pick up/drop off the passenger.
+// الحد الأقصى المطلق للانحراف التقريبي (كيلومترات إضافية بعد مسافة A->C)
+// الذي يمكن أن تتحمّله الرحلة لاستلام/إنزال الراكب.
 export const MAX_APPROXIMATE_DETOUR_KM = 8;
 
-// Relative cap — the approximate detour, as a fraction of the driver's own
-// A->C distance. Guards short trips where even a small absolute detour is a
-// large percentage of the ride (e.g. a 2km base ride with a 6km detour).
+// حد نسبي — الانحراف التقريبي، كنسبة من مسافة A->C الخاصة بالسائق نفسه.
+// يحمي الرحلات القصيرة حيث حتى انحراف مطلق صغير يمثّل نسبة كبيرة من الرحلة
+// (مثلاً رحلة أساسية 2 كم مع انحراف 6 كم).
 export const MAX_APPROXIMATE_DETOUR_RATIO = 0.25;
 
-// How far B's normalized progress along A->C may fall outside the [0, 1]
-// range (as a fraction of the segment's own length) and still be treated as
-// "approximately between A and C" — absorbs GPS noise and slightly
-// off-corridor pickups right near the start/end, never enough to accept a
-// genuinely reversed/backward pickup.
+// إلى أي مدى يمكن أن يقع تقدّم B الموحّد على طول A->C خارج النطاق [0, 1]
+// (كنسبة من طول القطعة نفسها) ويظل يُعتبر "بين A وC تقريبًا" — يمتص ضجيج
+// GPS واستلامًا خارج الممر قليلاً بالقرب من البداية/النهاية، لكن ليس أبدًا
+// بما يكفي لقبول استلام معكوس/للخلف بشكل حقيقي.
 export const ROUTE_PROGRESS_TOLERANCE = 0.05;
 
-// "Is D effectively the same place as C" — expressed in km since this file
-// otherwise works in km throughout.
+// "هل D هي نفس مكان C فعليًا" — معبّر عنها بالكيلومترات لأن هذا الملف يعمل
+// بالكيلومترات في كل مكان.
 export const SAME_LOCATION_KM = 0.15;
 
-// Below this A->C length, the base route is treated as a single point (a
-// driver whose origin and destination are ~the same place) rather than a
-// direction — see projectOntoCorridor below.
-const MIN_CORRIDOR_LENGTH_KM = 0.01; // 10 meters
+// تحت هذا الطول لمسار A->C، يُعامل المسار الأساسي كنقطة واحدة (سائق تكون
+// نقطة انطلاقه ووجهته في نفس المكان تقريبًا) بدلاً من اعتباره اتجاهًا —
+// انظر projectOntoCorridor أدناه.
+const MIN_CORRIDOR_LENGTH_KM = 0.01; // 10 أمتار
 
 // ---------------------------------------------------------------------------
-// Result type (adapted to this project's existing null-over-undefined,
-// explicit-reason convention — see homeFeedLib.ts's own FeedItem). No
-// duration field anywhere in this file: without a real road-routing service,
-// a time estimate would just be fabricated, so only approximate DISTANCE
-// (clearly a straight-line approximation, never presented as a real ETA) is
-// ever produced.
+// نوع النتيجة (مُكيَّف مع اصطلاح المشروع الحالي وهو null بدلاً من undefined،
+// مع سبب صريح — انظر نوع FeedItem الخاص بـ homeFeedLib.ts نفسه). لا يوجد
+// حقل مدة (duration) في هذا الملف على الإطلاق: بدون خدمة توجيه طرق حقيقية،
+// فإن تقدير الوقت سيكون "ملفّقًا" فقط، لذا يُنتَج فقط المسافة التقريبية
+// (وهي بوضوح تقريب خط مستقيم، لا تُعرَض أبدًا كوقت وصول متوقع حقيقي).
 // ---------------------------------------------------------------------------
 
 export type RouteMatchReason =
@@ -80,20 +77,20 @@ export type RouteMatchResult = {
   eligible: boolean;
   pickupDistanceFromRouteKm: number | null;
   destinationDistanceFromRouteKm: number | null;
-  // Straight-line approximation of the extra distance the driver would
-  // travel to serve this passenger — see calculateApproximateDetourKm below.
-  // Never a real road-network detour; always clamped to >= 0.
+  // تقريب خط مستقيم للمسافة الإضافية التي سيقطعها السائق لخدمة هذا الراكب —
+  // انظر calculateApproximateDetourKm أدناه. ليس أبدًا انحرافًا حقيقيًا
+  // لشبكة الطرق؛ يُثبَّت دائمًا عند قيمة >= 0.
   approximateDetourKm: number | null;
   detourRatio: number | null;
   reason: RouteMatchReason;
 };
 
-// The minimal, framework-agnostic shape this module needs from a driver's
-// trip — homeFeedLib.ts maps its own FeedItem into this. Both origin and
-// destination are null for a listing that predates coordinate-saving (or
-// whose coordinates failed to resolve) — the caller (homeFeedLib.ts) falls
-// back to the existing plain origin-distance behavior instead of ever
-// constructing one of these with missing coordinates.
+// الشكل الأدنى، المستقل عن أي إطار عمل، الذي تحتاجه هذه الوحدة من رحلة
+// السائق — homeFeedLib.ts تحوّل FeedItem الخاصة بها إلى هذا الشكل. كل من
+// origin وdestination يكونان null لقائمة تسبق حفظ الإحداثيات (أو التي فشل
+// حل إحداثياتها) — المستدعي (homeFeedLib.ts) يعود عندها إلى سلوك مسافة
+// المنشأ البسيط الموجود مسبقًا، ولا يُنشئ أبدًا واحدًا من هذه بإحداثيات
+// ناقصة.
 export type DriverRouteInput = {
   tripId: string;
   origin: LatLng | null;
@@ -102,24 +99,25 @@ export type DriverRouteInput = {
 
 export type PassengerRouteQuery = {
   pickup: LatLng;
-  // Optional — see this file's header. Omitted today by Home's nearby feed
-  // (D is treated as C); a future explicit search flow can pass a real D.
+  // اختياري — انظر ترويسة هذا الملف. مُهمَل حاليًا من قِبل خلاصة "القريب
+  // مني" في الصفحة الرئيسية (تُعامَل D على أنها نفس C)؛ يمكن لتدفق بحث
+  // صريح مستقبلي أن يمرّر D حقيقية.
   destination?: LatLng | null;
 };
 
 // ---------------------------------------------------------------------------
-// Geometry — Haversine distance + local-plane projection. No decoded
-// polyline, no third-party geometry package: the "route" this file works
-// with is always just the two-point A->C segment, so plain vector math is
-// simpler and more transparent than pulling in a line-geometry library for
-// a single segment.
+// الهندسة — مسافة Haversine + إسقاط على مستوى محلي. لا خط متعرّج (polyline)
+// مُفكَّك، لا حزمة هندسة خارجية: "المسار" الذي يعمل عليه هذا الملف هو دائمًا
+// قطعة النقطتين A->C فقط، لذا فإن حساب المتجهات البسيط أبسط وأكثر شفافية من
+// استيراد مكتبة هندسة خطوط لأجل قطعة واحدة.
 // ---------------------------------------------------------------------------
 
-// Straight-line (haversine, great-circle) distance in km — the ONE place
-// every point-to-point distance in this file goes through. Deliberately NOT
-// imported from homeFeedLib.ts's own calculateDistanceKm (identical
-// formula) — that would make this file depend on homeFeedLib.ts, which
-// depends on THIS file, a circular import.
+// مسافة الخط المستقيم (Haversine، الدائرة العظمى) بالكيلومترات — المكان
+// الوحيد الذي تمرّ منه كل مسافة بين نقطتين في هذا الملف. لم تُستورد عمدًا من
+// calculateDistanceKm الخاصة بـ homeFeedLib.ts (نفس المعادلة تمامًا) — لأن
+// ذلك سيجعل هذا الملف يعتمد على homeFeedLib.ts، التي تعتمد بدورها على هذا
+// الملف، فيحدث استيراد دائري.
+// الغرض: حساب المسافة الحقيقية بالكيلومترات بين نقطتين إحداثيات (خط عرض/طول).
 function haversineKm(a: LatLng, b: LatLng): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
   const earthRadiusKm = 6371;
@@ -133,12 +131,14 @@ function haversineKm(a: LatLng, b: LatLng): number {
   return 2 * earthRadiusKm * Math.asin(Math.sqrt(Math.min(1, h)));
 }
 
+// الغرض: التحقق هل نقطتان تُعتبران نفس المكان تقريبًا (المسافة بينهما ضمن SAME_LOCATION_KM).
 export const isEffectivelySameLocation = (a: LatLng, b: LatLng): boolean =>
   haversineKm(a, b) <= SAME_LOCATION_KM;
 
-// Guards every coordinate this module touches — catches both "missing"
-// (null/undefined) and "invalid" (NaN, out-of-range) values in one check, so
-// callers never need two separate guards.
+// يحرس كل إحداثية تلمسها هذه الوحدة — يلتقط "المفقود" (null/undefined)
+// و"غير الصالح" (NaN، خارج النطاق) في فحص واحد، لذا لا يحتاج المستدعون أبدًا
+// لفحصين منفصلين.
+// الغرض: التحقق من صحة نقطة إحداثيات — موجودة، والأرقام منطقية وضمن النطاق المسموح.
 export function isValidLatLng(point: LatLng | null | undefined): point is LatLng {
   if (!point) return false;
   const { latitude, longitude } = point;
@@ -152,12 +152,12 @@ export function isValidLatLng(point: LatLng | null | undefined): point is LatLng
   );
 }
 
-// Coordinates read from Firestore should always be numbers, but some
-// documents (or route params, which arrive as strings via
-// useLocalSearchParams) may carry a numeric string instead — this is the
-// ONE place that safely coerces either shape into a real number, or null
-// for anything else (missing, empty string, non-numeric text). Never
-// throws.
+// الإحداثيات المقروءة من Firestore يجب أن تكون دائمًا أرقامًا، لكن بعض
+// المستندات (أو باراميترات المسار، التي تصل كسلسلة نصية عبر
+// useLocalSearchParams) قد تحمل سلسلة نصية رقمية بدلاً من ذلك — هذا هو
+// المكان الوحيد الذي يحوّل بأمان أيًا من الشكلين إلى رقم حقيقي، أو null لأي
+// شيء آخر (مفقود، سلسلة فارغة، نص غير رقمي). لا يرمي استثناءً أبدًا.
+// الغرض: تحويل أي قيمة (رقم أو نص) إلى رقم إحداثية صالح، أو null إن تعذّر ذلك.
 export function toFiniteCoordinate(value: unknown): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
@@ -171,11 +171,11 @@ export function toFiniteCoordinate(value: unknown): number | null {
   return null;
 }
 
-// Small equirectangular local-plane approximation, centered on `origin` —
-// accurate enough for the short (regional, well under a few hundred km)
-// distances this app deals with; see this file's own header / the final
-// report's "accuracy limitations" note for why this is a deliberate
-// trade-off rather than an oversight.
+// تقريب مستوٍ مسطّح صغير (equirectangular)، مُركَّز على origin — دقيق بما
+// يكفي للمسافات القصيرة (الإقليمية، أقل بكثير من بضع مئات الكيلومترات) التي
+// يتعامل معها هذا التطبيق؛ انظر ترويسة هذا الملف / ملاحظة "قيود الدقة" في
+// التقرير النهائي لمعرفة لماذا هذه مفاضلة مقصودة وليست إغفالًا.
+// الغرض: تحويل نقطة إحداثيات إلى إحداثيات مستوٍ مسطّح محلي (x, y) بالكيلومترات حول نقطة الأصل.
 const toLocalPlaneKm = (origin: LatLng, point: LatLng): { x: number; y: number } => {
   const latRad = (origin.latitude * Math.PI) / 180;
   const kmPerDegLat = 110.574;
@@ -187,19 +187,20 @@ const toLocalPlaneKm = (origin: LatLng, point: LatLng): { x: number; y: number }
 };
 
 export type CorridorProjection = {
-  // Perpendicular distance from `target` to the nearest point on the A->C
-  // segment (clamped to the segment itself, not the infinite line).
+  // المسافة العمودية من target إلى أقرب نقطة على قطعة A->C (مُثبَّتة عند
+  // حدود القطعة نفسها، وليس الخط اللانهائي).
   distanceFromCorridorKm: number;
-  // `target`'s normalized progress along A->C: 0 = at A, 1 = at C,
-  // UNCLAMPED (so a value like -0.2 or 1.3 is how "significantly behind A" /
-  // "well past C" is detected by the direction checks below).
+  // تقدّم target الموحّد على طول A->C: 0 = عند A، 1 = عند C، غير مُثبَّت
+  // (UNCLAMPED) (لذا فإن قيمة مثل -0.2 أو 1.3 هي كيفية اكتشاف فحوصات
+  // الاتجاه أدناه لـ "متأخر عن A بشكل كبير" / "متجاوز C بكثير").
   progress: number;
 };
 
-// Projects `target` onto the straight A->C segment. Never throws; a
-// degenerate (near-zero-length) A->C segment — a driver whose origin and
-// destination are ~the same place — falls back to plain point distance from
-// A, with progress 0 (no meaningful direction to be "ahead" or "behind" on).
+// يُسقط target على قطعة A->C المستقيمة. لا يرمي استثناءً أبدًا؛ قطعة A->C
+// شبه معدومة الطول (سائق تكون نقطة انطلاقه ووجهته في نفس المكان تقريبًا)
+// تعود إلى مسافة نقطة بسيطة من A، مع تقدّم 0 (لا يوجد اتجاه ذو معنى لتكون
+// "متقدمًا" أو "متأخرًا" عليه).
+// الغرض: إسقاط نقطة (target) على خط مسار السائق المستقيم A->C، وحساب بُعدها العمودي عنه ومدى تقدّمها على طوله.
 export function projectOntoCorridor(
   origin: LatLng,
   destination: LatLng,
@@ -227,21 +228,23 @@ export function projectOntoCorridor(
 }
 
 // ---------------------------------------------------------------------------
-// Prefilter — corridor distance (Phase 3 equivalent) + direction validation
-// (Phase 4 equivalent). Cheap, local, synchronous — the only kind of check
-// this module ever does, now that there is no separate network-based Phase
-// 5; the approximate detour check right below is just as local.
+// الفلترة المسبقة (Prefilter) — مسافة الممر (تعادل المرحلة 3) + التحقق من
+// الاتجاه (تعادل المرحلة 4). فحوصات رخيصة، محلية، متزامنة — النوع الوحيد من
+// الفحص الذي تقوم به هذه الوحدة، الآن بعد أن لم تعد هناك مرحلة 5 منفصلة
+// قائمة على الشبكة؛ فحص الانحراف التقريبي أدناه مباشرة محلي بنفس القدر.
 // ---------------------------------------------------------------------------
 
 export type PrefilterResult = {
   passed: boolean;
   pickupDistanceFromRouteKm: number | null;
   destinationDistanceFromRouteKm: number | null;
-  // "MATCH" here only means "prefilter passed" — final eligibility still
-  // depends on the approximate detour check below.
+  // "MATCH" هنا تعني فقط "اجتازت الفلترة المسبقة" — الأهلية النهائية لا
+  // تزال تعتمد على فحص الانحراف التقريبي أدناه.
   reason: RouteMatchReason;
 };
 
+// الغرض: فلترة أولية سريعة لمرشّح سائق — التحقق هل نقطة استلام الراكب (ووجهته إن وُجدت)
+// قريبتان بما يكفي من مسار السائق وبنفس اتجاهه، قبل الانتقال لحساب الانحراف الأدق.
 export function prefilterCandidate(
   driverRoute: DriverRouteInput,
   query: PassengerRouteQuery,
@@ -274,8 +277,8 @@ export function prefilterCandidate(
     };
   }
 
-  // B must lie approximately between A and C — reject if it's significantly
-  // behind A (negative progress) or well past C (progress > 1), each beyond
+  // يجب أن تقع B تقريبًا بين A وC — تُرفض إذا كانت خلف A بشكل كبير (تقدّم
+  // سالب) أو بعد C بكثير (تقدّم > 1)، كل ذلك بما يتجاوز
   // ROUTE_PROGRESS_TOLERANCE.
   if (
     pickupProjection.progress < -ROUTE_PROGRESS_TOLERANCE ||
@@ -289,9 +292,8 @@ export function prefilterCandidate(
     };
   }
 
-  // D effectively equals C (explicit destination omitted, or genuinely the
-  // same place) — validate against the driver's own destination C itself
-  // rather than adding a redundant, always-passing check.
+  // D تساوي C فعليًا (وجهة صريحة محذوفة، أو نفس المكان فعلاً) — يتم التحقق
+  // مقابل وجهة السائق C نفسها بدلاً من إضافة فحص زائد يمر دائمًا.
   const destinationTarget =
     query.destination && !isEffectivelySameLocation(query.destination, driverRoute.destination)
       ? query.destination
@@ -321,9 +323,8 @@ export function prefilterCandidate(
     };
   }
 
-  // Pickup must come before the destination along the corridor — never
-  // require the driver to travel backwards to reach B after already having
-  // passed D's position.
+  // يجب أن تأتي نقطة الاستلام قبل الوجهة على طول الممر — لا تتطلب أبدًا من
+  // السائق السفر للخلف للوصول إلى B بعد أن يكون قد تجاوز موقع D بالفعل.
   if (pickupProjection.progress > destinationProjection.progress + ROUTE_PROGRESS_TOLERANCE) {
     return {
       passed: false,
@@ -342,15 +343,16 @@ export function prefilterCandidate(
 }
 
 // ---------------------------------------------------------------------------
-// Approximate detour — pure straight-line math, no network call. Handles
-// zero/missing/invalid/NaN/negative values safely, never throws, never lets
-// a bad number silently pass as eligible.
+// الانحراف التقريبي — حساب خط مستقيم صافٍ، بدون أي اتصال شبكة. يتعامل بأمان
+// مع القيم صفر/المفقودة/غير الصالحة/NaN/السالبة، لا يرمي استثناءً أبدًا، ولا
+// يسمح أبدًا لرقم سيئ بالمرور بصمت كـ "مؤهّل".
 // ---------------------------------------------------------------------------
 
-// distance(A,B) + distance(B,C) - distance(A,C), or the A->B->D->C variant
-// when `passengerDestination` (D) is given and differs from C. Clamped to
-// >= 0 — floating-point round-off could otherwise produce a tiny negative
-// value for a pickup that is essentially exactly on the A->C line.
+// distance(A,B) + distance(B,C) - distance(A,C)، أو صيغة A->B->D->C عندما
+// تُعطى passengerDestination (D) وتختلف عن C. مُثبَّتة عند >= 0 — قد ينتج عن
+// أخطاء تقريب الفاصلة العائمة قيمة سالبة صغيرة جدًا لنقطة استلام تقع فعليًا
+// بالضبط على خط A->C.
+// الغرض: حساب المسافة الإضافية التقريبية (بالكيلومترات) التي سيقطعها السائق بسبب استلام/إنزال الراكب.
 export function calculateApproximateDetourKm(
   origin: LatLng,
   pickup: LatLng,
@@ -378,6 +380,7 @@ export type ApproximateDetourEvaluation = {
   detourRatio: number | null;
 };
 
+// الغرض: التحقق هل الانحراف المحسوب ضمن الحدود المسموحة (المطلقة بالكيلومترات، والنسبية من مسافة الرحلة).
 export function evaluateApproximateDetour(
   input: ApproximateDetourInput,
 ): ApproximateDetourEvaluation {
@@ -400,10 +403,10 @@ export function evaluateApproximateDetour(
 }
 
 // ---------------------------------------------------------------------------
-// Sorting — lowest approximate detour, then lowest pickup-from-corridor
-// distance, then nearest departure, then existing rating, then a fully
-// deterministic id tie-break. A missing/null value is always sorted last
-// within its own criterion (never treated as "0 = best").
+// الترتيب — أقل انحراف تقريبي، ثم أقل مسافة استلام عن الممر، ثم أقرب موعد
+// انطلاق، ثم التقييم الحالي، ثم فاصل حتمي كامل بواسطة المعرّف. القيمة
+// المفقودة/الفارغة تُرتَّب دائمًا في النهاية ضمن معيارها الخاص (لا تُعامَل
+// أبدًا كـ "0 = الأفضل").
 // ---------------------------------------------------------------------------
 
 export type SortableRouteMatch = {
@@ -415,6 +418,7 @@ export type SortableRouteMatch = {
   id: string;
 };
 
+// الغرض: ترتيب قائمة نتائج المطابقة من الأفضل للأسوأ (أقل انحراف، ثم أقل بُعد استلام، ثم أقرب موعد، ثم أعلى تقييم).
 export function sortRouteMatches<T extends SortableRouteMatch>(items: T[]): T[] {
   return [...items].sort((a, b) => {
     const aDetour = a.approximateDetourKm ?? Number.POSITIVE_INFINITY;
@@ -430,7 +434,7 @@ export function sortRouteMatches<T extends SortableRouteMatch>(items: T[]): T[] 
     }
 
     if (a.ratingAverage !== b.ratingAverage) {
-      return b.ratingAverage - a.ratingAverage; // higher rating first
+      return b.ratingAverage - a.ratingAverage; // الأعلى تقييمًا أولاً
     }
 
     return a.id.localeCompare(b.id);
@@ -438,13 +442,14 @@ export function sortRouteMatches<T extends SortableRouteMatch>(items: T[]): T[] 
 }
 
 // ---------------------------------------------------------------------------
-// Orchestration — prefilter, then (only for candidates that pass) the
-// approximate detour check. Fully synchronous: no network, no cache, no
-// concurrency limiter, no AbortController — there is nothing asynchronous
-// left to cache, limit, or cancel. This is the one function homeFeedLib.ts
-// calls; it never touches Firestore or React state itself.
+// التنسيق — الفلترة المسبقة، ثم (فقط للمرشّحين الذين اجتازوها) فحص الانحراف
+// التقريبي. متزامن بالكامل: لا شبكة، لا تخزين مؤقت، لا محدّد تزامن، لا
+// AbortController — لا يوجد شيء غير متزامن متبقٍ ليُخزَّن مؤقتًا أو يُحدَّد
+// أو يُلغى. هذه هي الدالة الوحيدة التي تستدعيها homeFeedLib.ts؛ لا تلمس
+// أبدًا Firestore أو حالة React بنفسها.
 // ---------------------------------------------------------------------------
 
+// الغرض: الدالة الرئيسية للملف — تفلتر وتقيّم كل السائقين المرشّحين مقابل طلب الراكب، وترجع نتيجة مطابقة (مؤهّل أم لا، مع السبب) لكل واحد منهم.
 export function getRouteMatchesForCandidates(
   candidates: DriverRouteInput[],
   query: PassengerRouteQuery,
@@ -464,9 +469,9 @@ export function getRouteMatchesForCandidates(
       };
     }
 
-    // prefilterCandidate only returns passed: true when origin/destination/
-    // pickup (and, if present, destinationTarget) are all valid LatLng
-    // values — safe to assert non-null here.
+    // prefilterCandidate تُرجع passed: true فقط عندما تكون origin/
+    // destination/pickup (وإن وُجدت destinationTarget) كلها قيم LatLng
+    // صالحة — من الآمن التأكيد على أنها غير null هنا.
     const origin = driverRoute.origin!;
     const destination = driverRoute.destination!;
 
