@@ -105,6 +105,8 @@
     "sendResetLinkButton": "שלח קישור איפוס",
     "backToLoginButton": "חזרה להתחברות",
     "emailMustBeGmailHotmail": "האימייל חייב להיות כתובת Gmail או Hotmail.",
+    "invalidPhoneTitle": "מספר טלפון לא תקין",
+    "phoneMustBe10DigitsStart05": "מספר הטלפון חייב להיות בדיוק 10 ספרות ולהתחיל ב-05.",
     "vehicleNumberDigitsError": "מספר הרכב חייב להכיל בין 7 ל-9 ספרות.",
     "couldNotReadIdClear": "לא הצלחנו לקרוא את תעודת הזהות שלך בבירור. יש להעלות תמונה ברורה יותר.",
     "couldNotReadIdTryAgain": "לא ניתן היה לקרוא את תעודת הזהות שלך. יש לנסות שוב.",

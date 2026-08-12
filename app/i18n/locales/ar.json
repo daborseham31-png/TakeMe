@@ -105,6 +105,8 @@
     "sendResetLinkButton": "إرسال رابط إعادة التعيين",
     "backToLoginButton": "العودة لتسجيل الدخول",
     "emailMustBeGmailHotmail": "يجب أن يكون البريد الإلكتروني من Gmail أو Hotmail.",
+    "invalidPhoneTitle": "رقم هاتف غير صالح",
+    "phoneMustBe10DigitsStart05": "يجب أن يتكون رقم الهاتف من 10 أرقام بالضبط ويبدأ ب 05.",
     "vehicleNumberDigitsError": "يجب أن يحتوي رقم المركبة على 7 إلى 9 أرقام.",
     "couldNotReadIdClear": "لم نتمكن من قراءة هويتك بوضوح. يرجى رفع صورة أوضح.",
     "couldNotReadIdTryAgain": "تعذر قراءة هويتك. يرجى المحاولة مرة أخرى.",

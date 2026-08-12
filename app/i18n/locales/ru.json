@@ -105,6 +105,8 @@
     "sendResetLinkButton": "Отправить ссылку",
     "backToLoginButton": "Назад ко входу",
     "emailMustBeGmailHotmail": "Эл. почта должна быть на Gmail или Hotmail.",
+    "invalidPhoneTitle": "Неверный номер телефона",
+    "phoneMustBe10DigitsStart05": "Номер телефона должен состоять ровно из 10 цифр и начинаться с 05.",
     "vehicleNumberDigitsError": "Номер автомобиля должен содержать от 7 до 9 цифр.",
     "couldNotReadIdClear": "Не удалось чётко распознать документ. Загрузите более чёткое фото.",
     "couldNotReadIdTryAgain": "Не удалось распознать документ. Попробуйте снова.",

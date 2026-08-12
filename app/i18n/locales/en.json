@@ -105,6 +105,8 @@
     "sendResetLinkButton": "Send Reset Link",
     "backToLoginButton": "Back to Login",
     "emailMustBeGmailHotmail": "Email must be a Gmail or Hotmail address.",
+    "invalidPhoneTitle": "Invalid phone number",
+    "phoneMustBe10DigitsStart05": "Phone number must be exactly 10 digits and start with 05.",
     "vehicleNumberDigitsError": "Vehicle number must contain between 7 and 9 digits.",
     "couldNotReadIdClear": "We couldn't read your ID clearly. Please upload a clearer photo.",
     "couldNotReadIdTryAgain": "Could not read your ID. Please try again.",

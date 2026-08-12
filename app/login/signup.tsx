@@ -89,6 +89,10 @@ export default function SignUpScreen() {
       ? t("auth.emailMustBeGmailHotmail")
       : "";
 
+  const isValidPhone = /^05\d{8}$/.test(phone);
+  const phoneError =
+    phone.length > 0 && !isValidPhone ? t("auth.phoneMustBe10DigitsStart05") : "";
+
   const confirmPasswordError =
     confirmPassword.length > 0 && confirmPassword !== password
       ? t("auth.passwordsDoNotMatch")
@@ -198,6 +202,11 @@ export default function SignUpScreen() {
 
     if (!isValidEmail) {
       Alert.alert(t("auth.invalidEmailTitle"), t("auth.emailMustBeGmailHotmail"));
+      return;
+    }
+
+    if (!isValidPhone) {
+      Alert.alert(t("auth.invalidPhoneTitle"), t("auth.phoneMustBe10DigitsStart05"));
       return;
     }
 
@@ -452,9 +461,11 @@ export default function SignUpScreen() {
             placeholder={t("auth.phoneNumberPlaceholder")}
             placeholderTextColor="#8b7b6b"
             keyboardType="phone-pad"
+            maxLength={10}
             value={phone}
-            onChangeText={(text) => setPhone(getDigitsOnly(text))}
+            onChangeText={(text) => setPhone(getDigitsOnly(text).slice(0, 10))}
           />
+          {phoneError ? <Text style={styles.fieldError}>{phoneError}</Text> : null}
 
           <Text style={styles.label}>{t("auth.password")}</Text>
           <View style={styles.passwordRow}>
