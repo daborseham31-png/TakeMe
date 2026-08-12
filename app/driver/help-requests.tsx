@@ -26,7 +26,6 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -34,6 +33,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 
 import { useTranslation } from "react-i18next";
 

@@ -10,7 +10,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert } from "../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { isSafeHttpsKioskUrl, isSchoolKioskBackendConfigured } from "../booking/school/schoolKioskLinks";

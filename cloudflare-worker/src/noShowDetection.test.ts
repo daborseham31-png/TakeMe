@@ -24,6 +24,7 @@ import {
   decideInitialRefundStatus,
   evaluateSchedule,
   graceDeadline,
+  israelYmd,
   normalizeBookingRecord,
   runNoShowDetection,
 } from "./noShowDetection";
@@ -146,6 +147,13 @@ function mockFetchImplementation(input: RequestInfo | URL, init?: RequestInit): 
       const { fieldPath } = where.fieldFilter.field;
       const expected = where.fieldFilter.value.stringValue;
       matches = matches.filter((d) => d.fields[fieldPath] === expected);
+    } else if (where?.fieldFilter?.op === "GREATER_THAN_OR_EQUAL") {
+      // Mirrors queryFirestoreDocumentsWhereGte — a real Firestore range
+      // query on a field EXCLUDES any document that doesn't have that field
+      // at all (never coerces "missing" to "less than everything").
+      const { fieldPath } = where.fieldFilter.field;
+      const minValue = where.fieldFilter.value.stringValue;
+      matches = matches.filter((d) => typeof d.fields[fieldPath] === "string" && (d.fields[fieldPath] as string) >= minValue);
     } else if (where?.fieldFilter?.op === "IN") {
       const { fieldPath } = where.fieldFilter.field;
       const values: string[] = where.fieldFilter.value.arrayValue.values.map((v: any) => v.stringValue);
@@ -156,10 +164,24 @@ function mockFetchImplementation(input: RequestInfo | URL, init?: RequestInit): 
 
       matches = matches.filter((d) => values.includes(d.fields[fieldPath] as string));
     } else if (where?.compositeFilter) {
+      // Handles both shapes real callers send through a compositeFilter:
+      // multiple EQUAL filters (queryFirestoreDocuments with >1 filter), and
+      // — added for the bounded-window fix — a GTE+LTE pair on the SAME
+      // field (queryFirestoreDocumentsWhereGte's optional maxValue). Mirrors
+      // the real Firestore range-filter semantics used above: missing the
+      // field entirely excludes the document, never coerced to "in range."
       for (const filter of where.compositeFilter.filters) {
         const { fieldPath } = filter.fieldFilter.field;
-        const expected = filter.fieldFilter.value.stringValue;
-        matches = matches.filter((d) => d.fields[fieldPath] === expected);
+        const op = filter.fieldFilter.op;
+        const value = filter.fieldFilter.value.stringValue;
+
+        if (op === "GREATER_THAN_OR_EQUAL") {
+          matches = matches.filter((d) => typeof d.fields[fieldPath] === "string" && (d.fields[fieldPath] as string) >= value);
+        } else if (op === "LESS_THAN_OR_EQUAL") {
+          matches = matches.filter((d) => typeof d.fields[fieldPath] === "string" && (d.fields[fieldPath] as string) <= value);
+        } else {
+          matches = matches.filter((d) => d.fields[fieldPath] === value);
+        }
       }
     }
 
@@ -254,6 +276,16 @@ afterEach(() => {
 const NOW = new Date(Date.UTC(2026, 7, 3, 20, 40, 0, 0)); // Well past any 23:00 scheduled time + 15-min grace, Israel time.
 const DUE_DATE = "2026-08-03";
 const DUE_TIME = "23:00"; // 23:00 + 15 min grace = 23:15 Israel time, well before NOW (23:40 Israel).
+
+// A second pinned instant landing on the once-per-hour slot that also runs
+// the legacy driverRoutes/date query (see runNoShowDetection's
+// includeLegacyDateQuery, gated on now.getUTCMinutes() < 5) — NOW itself
+// (minute 40) deliberately does NOT land on that slot, so tests that need
+// the legacy query to actually run use this instant instead. Still well
+// past DUE_TIME's 23:15 Israel grace deadline: 21:02 UTC = 00:02 Israel
+// (IDT, Aug 4) — the trip's calendar date has rolled over relative to NOW's,
+// but its scheduled instant is unaffected, so it's still "well overdue."
+const NOW_HOURLY_TICK = new Date(Date.UTC(2026, 7, 3, 21, 2, 0, 0));
 
 function seedDueDriverRoute(tripId: string, driverId: string, opts: { bookingType?: string } = {}) {
   seed("driverRoutes", tripId, {
@@ -584,6 +616,213 @@ describe("noShowDetection: pagination", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Server-side date-window query — the fix for the "Quota exceeded."
+// (resource-exhausted) incident traced via Firestore Query Insights to
+// gatherCandidates reading driverRoutes/schoolTrips with NO filter at all.
+// ---------------------------------------------------------------------------
+
+describe("noShowDetection: server-side date-window query (Quota exceeded fix)", () => {
+  it("a driverRoutes trip dated well outside the 7-day lookback window is never gathered as a candidate", async () => {
+    seed("driverRoutes", "route-ancient", {
+      driverId: "driver-old",
+      tripDate: "2026-01-01", // Far outside the 7-day lookback from NOW (2026-08-03).
+      time: DUE_TIME,
+      from: "A",
+      to: "B",
+      active: true,
+      status: "booked",
+      bookingType: "personal",
+    });
+    seedBooking("bk-ancient", "route-ancient");
+    seedDueDriverRoute("route-recent", "driver-recent");
+    seedBooking("bk-recent", "route-recent");
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW);
+
+    // Only the in-window trip is gathered — the ancient one is excluded by
+    // the server-side tripDate >= lookbackYmd filter, not merely skipped
+    // client-side after being read.
+    expect(summary.candidatesGathered).toBe(1);
+    expect(summary.violationsCreated).toBe(1);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "route-ancient")).toBe(false);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "route-recent")).toBe(true);
+  });
+
+  it("a schoolTrips trip dated well outside the 7-day lookback window is never gathered as a candidate", async () => {
+    seed("schoolTrips", "school-ancient", {
+      driverId: "driver-old",
+      date: "2026-01-01",
+      departureTime: DUE_TIME,
+      fromAddress: "School",
+      toAddress: "Home",
+      active: true,
+      status: "booked",
+    });
+    seedSchoolBooking("sbk-ancient", "school-ancient");
+    seedDueSchoolTrip("school-recent", "driver-recent");
+    seedSchoolBooking("sbk-recent", "school-recent");
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW);
+
+    expect(summary.candidatesGathered).toBe(1);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "school-ancient")).toBe(false);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "school-recent")).toBe(true);
+  });
+
+  it("on a non-hourly tick, only the tripDate query runs against driverRoutes (the legacy date fallback is skipped)", async () => {
+    seedDueDriverRoute("route-1", "driver-1");
+    seedBooking("bk-1", "route-1");
+    seedDueSchoolTrip("school-1", "driver-2");
+    seedSchoolBooking("sbk-1", "school-1");
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW); // NOW: minute 40, not an hourly tick.
+
+    expect(summary.legacyDateQueryIncluded).toBe(false);
+    expect(runQueryCallsByCollection["driverRoutes"]).toBe(1);
+    expect(runQueryCallsByCollection["schoolTrips"]).toBe(1);
+    // Both due trips (driverRoutes + schoolTrips) are still found and
+    // flagged via the tripDate/date queries alone — the skipped legacy
+    // driverRoutes/date query was never needed for either of them.
+    expect(summary.violationsCreated).toBe(2);
+  });
+
+  it("on the once-per-hour tick, both the tripDate and legacy date queries run against driverRoutes", async () => {
+    seedDueDriverRoute("route-1", "driver-1");
+    seedBooking("bk-1", "route-1");
+    seedDueSchoolTrip("school-1", "driver-2");
+    seedSchoolBooking("sbk-1", "school-1");
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW_HOURLY_TICK); // minute 2 — the hourly slot.
+
+    expect(summary.legacyDateQueryIncluded).toBe(true);
+    expect(runQueryCallsByCollection["driverRoutes"]).toBe(2);
+    expect(runQueryCallsByCollection["schoolTrips"]).toBe(1);
+  });
+
+  it("a driverRoutes trip dated 6 days before NOW's Israel-local date is still within the 7-day lookback", async () => {
+    seed("driverRoutes", "route-within-7day", {
+      driverId: "driver-within",
+      tripDate: "2026-07-28", // 6 days before NOW's Israel-local date (2026-08-03).
+      time: DUE_TIME,
+      from: "A",
+      to: "B",
+      active: true,
+      status: "booked",
+      bookingType: "personal",
+    });
+    seed("driverRoutes", "route-outside-7day", {
+      driverId: "driver-outside",
+      // 10 days before — outside the new 7-day lookback, even though it
+      // would still have been inside the old 30-day one.
+      tripDate: "2026-07-24",
+      time: DUE_TIME,
+      from: "A",
+      to: "B",
+      active: true,
+      status: "booked",
+      bookingType: "personal",
+    });
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW);
+
+    expect(summary.candidatesGathered).toBe(1);
+    expect(store.some((d) => d.collection === "driverRoutes" && d.id === "route-within-7day")).toBe(true);
+  });
+
+  it("a driverRoutes trip dated more than 1 day past NOW's Israel-local date is excluded by the new horizon bound", async () => {
+    seed("driverRoutes", "route-too-far-future", {
+      driverId: "driver-future",
+      tripDate: "2026-08-05", // 2 days after NOW's Israel-local date — beyond the +1 day horizon.
+      time: DUE_TIME,
+      from: "A",
+      to: "B",
+      active: true,
+      status: "booked",
+      bookingType: "personal",
+    });
+    seed("driverRoutes", "route-tomorrow-within-horizon", {
+      driverId: "driver-tomorrow",
+      tripDate: "2026-08-04", // 1 day after — inside the horizon buffer, even though not due yet.
+      time: DUE_TIME,
+      from: "A",
+      to: "B",
+      active: true,
+      status: "booked",
+      bookingType: "personal",
+    });
+    seedDueDriverRoute("route-actually-due", "driver-due");
+    seedBooking("bk-due", "route-actually-due");
+
+    const summary = await runNoShowDetection(TEST_ENV, NOW);
+
+    // route-too-far-future is excluded server-side, never even read;
+    // route-tomorrow-within-horizon IS read (it's inside the buffer) but
+    // correctly recognized as not due yet — grace-period gating, not the
+    // date window, is what actually decides eligibility.
+    expect(summary.candidatesGathered).toBe(2);
+    expect(summary.violationsCreated).toBe(1);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "route-too-far-future")).toBe(false);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "route-tomorrow-within-horizon")).toBe(false);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "route-actually-due")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// israelYmd — the Israel-local calendar-date helper the bounded window is
+// built on. Tested directly (not just through runNoShowDetection) because
+// the bug it guards against is specifically about calendar-date computation,
+// not eligibility logic — see the function's own header in noShowDetection.ts.
+// ---------------------------------------------------------------------------
+
+describe("noShowDetection: israelYmd (Israel-local date boundary correctness)", () => {
+  it("returns Israel's calendar date, not UTC's, during the daily UTC/Israel day-boundary mismatch window", () => {
+    // 2026-08-03 22:30 UTC = 2026-08-04 01:30 Asia/Jerusalem (IDT, UTC+3).
+    // A naive `toISOString().slice(0,10)` on this instant would return
+    // "2026-08-03" — one full calendar day behind the real Israel-local date.
+    const instant = new Date(Date.UTC(2026, 7, 3, 22, 30, 0, 0));
+    expect(israelYmd(instant)).toBe("2026-08-04");
+  });
+
+  it("agrees with a naive UTC slice outside the mismatch window", () => {
+    // Midday UTC has no zone-boundary ambiguity — both calculations land on
+    // the same calendar date, which is what makes ~21:00-23:59 UTC the only
+    // dangerous window, not an all-day risk.
+    const instant = new Date(Date.UTC(2026, 7, 3, 12, 0, 0, 0));
+    expect(israelYmd(instant)).toBe("2026-08-03");
+    expect(instant.toISOString().slice(0, 10)).toBe("2026-08-03");
+  });
+
+  it("end-to-end: a trip dated on Israel's already-rolled-over calendar day is still correctly gathered and flagged as due, at an instant where UTC's date has not yet rolled over", async () => {
+    // 2026-08-03 22:00 UTC = 2026-08-04 01:00 Asia/Jerusalem — Israel is
+    // already on Aug 4 while UTC still reads Aug 3. A trip scheduled for
+    // 2026-08-04 00:15 Israel time has a grace deadline of 00:30 Israel
+    // (2026-08-03 21:30 UTC), which has already passed relative to `now`.
+    // If the window bounds were ever computed from the runtime's own UTC
+    // date instead of israelYmd, this is the exact class of trip a
+    // regression would risk silently excluding.
+    const now = new Date(Date.UTC(2026, 7, 3, 22, 0, 0, 0));
+
+    seed("driverRoutes", "route-day-boundary", {
+      driverId: "driver-boundary",
+      tripDate: "2026-08-04",
+      time: "00:15",
+      from: "Home",
+      to: "Work",
+      active: true,
+      status: "booked",
+      bookingType: "personal",
+    });
+    seedBooking("bk-boundary", "route-day-boundary", { passengerId: "passenger-boundary" });
+
+    const summary = await runNoShowDetection(TEST_ENV, now);
+
+    expect(summary.candidatesGathered).toBe(1);
+    expect(summary.violationsCreated).toBe(1);
+    expect(store.some((d) => d.collection === "driverViolations" && d.id === "route-day-boundary")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Resilience — one malformed/failed candidate must not block the rest
 // ---------------------------------------------------------------------------
 
@@ -626,7 +865,8 @@ describe("noShowDetection: one malformed or failed candidate does not stop the r
     // yields every other valid candidate. Deliberately uses the legacy
     // `date` field (not `tripDate`) here too, so this also doubles as
     // coverage for the tripDate-missing fallback alongside the malformed-
-    // bookingType case.
+    // bookingType case. Uses NOW_HOURLY_TICK, not NOW, since the legacy
+    // `date` query this doc depends on only runs once per hour.
     seed("driverRoutes", "route-odd", {
       driverId: "driver-1",
       date: DUE_DATE,
@@ -639,7 +879,7 @@ describe("noShowDetection: one malformed or failed candidate does not stop the r
     seedBooking("bk-1", "route-normal");
     seedBooking("bk-odd", "route-odd");
 
-    const summary = await runNoShowDetection(TEST_ENV, NOW);
+    const summary = await runNoShowDetection(TEST_ENV, NOW_HOURLY_TICK);
 
     expect(summary.candidatesGathered).toBe(2);
     expect(summary.violationsCreated).toBe(2);
@@ -681,7 +921,7 @@ describe("noShowDetection: production regression — route-lion (2026-08-04 00:1
     expect(summary.violationsCreated).toBe(1);
   });
 
-  it("legacy fallback: a driverRoutes doc with ONLY `date` (no tripDate) is still supported", async () => {
+  it("legacy fallback: a driverRoutes doc with ONLY `date` (no tripDate) is still supported, on the hourly tick that queries it", async () => {
     seed("driverRoutes", "route-legacy-date-field", {
       driverId: "driver-1",
       date: DUE_DATE, // no `tripDate` at all — must still be picked up.
@@ -694,8 +934,12 @@ describe("noShowDetection: production regression — route-lion (2026-08-04 00:1
     });
     seedBooking("bk-1", "route-legacy-date-field");
 
-    const summary = await runNoShowDetection(TEST_ENV, NOW);
+    // NOW_HOURLY_TICK, not NOW — the legacy `date` query now only runs once
+    // per hour (see gatherCandidates' own header), so this fixture must land
+    // on that slot to actually exercise the fallback path.
+    const summary = await runNoShowDetection(TEST_ENV, NOW_HOURLY_TICK);
 
+    expect(summary.legacyDateQueryIncluded).toBe(true);
     expect(summary.candidatesGathered).toBe(1);
     expect(summary.violationsCreated).toBe(1);
   });

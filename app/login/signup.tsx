@@ -5,7 +5,6 @@ import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Platform,
   Pressable,
@@ -16,11 +15,13 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
 import KeyboardAvoidingWrapper from "../components/KeyboardAvoidingWrapper";
+import PasswordRequirementsChecklist from "../components/PasswordRequirementsChecklist";
 import {
   analyzeIdImage,
   analyzeLicenseImage,
@@ -34,6 +35,7 @@ import {
   pickDocumentImage,
   SPOKEN_LANGUAGE_OPTIONS,
 } from "./idVerificationLib";
+import { isPasswordStrong } from "./passwordValidation";
 
 type Gender = "Male" | "Female" | "Other";
 
@@ -62,6 +64,8 @@ export default function SignUpScreen() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [gender, setGender] = useState<Gender | "">("");
 
   // --- Driver: spoken languages -----------------------------------------------
@@ -83,6 +87,15 @@ export default function SignUpScreen() {
   const emailError =
     email.trim().length > 0 && !isValidEmail
       ? t("auth.emailMustBeGmailHotmail")
+      : "";
+
+  const isValidPhone = /^05\d{8}$/.test(phone);
+  const phoneError =
+    phone.length > 0 && !isValidPhone ? t("auth.phoneMustBe10DigitsStart05") : "";
+
+  const confirmPasswordError =
+    confirmPassword.length > 0 && confirmPassword !== password
+      ? t("auth.passwordsDoNotMatch")
       : "";
 
   const derivedAge =
@@ -182,7 +195,7 @@ export default function SignUpScreen() {
       return;
     }
 
-    if (!email.trim() || !phone.trim() || !password) {
+    if (!email.trim() || !phone.trim() || !password || !confirmPassword) {
       Alert.alert(t("auth.missingDetails"), t("auth.fillAllRequiredFields"));
       return;
     }
@@ -192,13 +205,23 @@ export default function SignUpScreen() {
       return;
     }
 
+    if (!isValidPhone) {
+      Alert.alert(t("auth.invalidPhoneTitle"), t("auth.phoneMustBe10DigitsStart05"));
+      return;
+    }
+
     if (!gender) {
       Alert.alert(t("auth.missingGenderTitle"), t("auth.selectYourGender"));
       return;
     }
 
-    if (password.length < 6) {
-      Alert.alert(t("auth.weakPasswordTitle"), t("auth.passwordMinLength"));
+    if (!isPasswordStrong(password)) {
+      Alert.alert(t("auth.weakPasswordTitle"), t("auth.weakPasswordMessage"));
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      Alert.alert(t("auth.passwordMismatchTitle"), t("auth.passwordsDoNotMatch"));
       return;
     }
 
@@ -438,9 +461,11 @@ export default function SignUpScreen() {
             placeholder={t("auth.phoneNumberPlaceholder")}
             placeholderTextColor="#8b7b6b"
             keyboardType="phone-pad"
+            maxLength={10}
             value={phone}
-            onChangeText={(text) => setPhone(getDigitsOnly(text))}
+            onChangeText={(text) => setPhone(getDigitsOnly(text).slice(0, 10))}
           />
+          {phoneError ? <Text style={styles.fieldError}>{phoneError}</Text> : null}
 
           <Text style={styles.label}>{t("auth.password")}</Text>
           <View style={styles.passwordRow}>
@@ -456,6 +481,28 @@ export default function SignUpScreen() {
               <Text style={styles.eye}>{showPw ? t("auth.hide") : t("auth.show")}</Text>
             </Pressable>
           </View>
+
+          {password.length > 0 ? (
+            <PasswordRequirementsChecklist password={password} />
+          ) : null}
+
+          <Text style={styles.label}>{t("auth.confirmPassword")}</Text>
+          <View style={styles.passwordRow}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder={t("auth.confirmPasswordPlaceholder")}
+              placeholderTextColor="#8b7b6b"
+              secureTextEntry={!showConfirmPw}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+            />
+            <Pressable onPress={() => setShowConfirmPw(!showConfirmPw)}>
+              <Text style={styles.eye}>{showConfirmPw ? t("auth.hide") : t("auth.show")}</Text>
+            </Pressable>
+          </View>
+          {confirmPasswordError ? (
+            <Text style={styles.fieldError}>{confirmPasswordError}</Text>
+          ) : null}
 
           <Text style={styles.label}>{t("auth.genderLabel")}</Text>
           <View style={styles.optionRow}>

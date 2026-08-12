@@ -737,6 +737,45 @@ export const rejectRequest = async (
     }
   }
 
+  // Work only — a rejected request never took a seat (only acceptWorkRequest
+  // decrements remainingSeats), so the job is already visible on Home the
+  // whole time this request was pending. This re-affirms that explicitly: if
+  // the job still has open seats, force it back to available/not-full so it's
+  // guaranteed to keep showing on Home no matter what state it drifted into.
+  if (kind === "work" && data.sourceId) {
+    try {
+      const jobRef = doc(db, "workJobs", data.sourceId);
+      const jobSnap = await getDoc(jobRef);
+
+      if (jobSnap.exists()) {
+        const jobData: any = jobSnap.data();
+        const totalSeats = Number(
+          jobData.totalSeats ?? jobData.seats ?? jobData.workersNeeded ?? 1,
+        );
+        const remaining =
+          typeof jobData.remainingSeats === "number"
+            ? jobData.remainingSeats
+            : totalSeats;
+
+        if (
+          remaining > 0 &&
+          (jobData.available === false ||
+            jobData.status === "full" ||
+            jobData.isFull === true)
+        ) {
+          await updateDoc(jobRef, {
+            available: true,
+            status: "available",
+            isFull: false,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+    } catch (error) {
+      console.log("rejectRequest: could not verify work job availability", error);
+    }
+  }
+
   await notify({
     receiverId: data.customerId,
     type: "request_rejected",

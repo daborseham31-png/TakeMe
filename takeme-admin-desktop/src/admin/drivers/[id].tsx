@@ -195,9 +195,11 @@ export default function AdminDriverDetailScreen() {
     }
   };
 
-  const canLiftSuspension =
-    !!standing?.suspensionActive &&
-    (!standing.suspensionMinEndAt || standing.suspensionMinEndAt.toMillis() <= Date.now());
+  // An admin may lift a cancellation suspension at ANY time — including
+  // before suspensionMinEndAt/"Earliest Lift Date" — see
+  // liftDriverCancellationSuspension's own comment (driverViolationsLib.ts)
+  // for why that date is informational only, never a block on this button.
+  const canLiftSuspension = !!standing?.suspensionActive;
 
   const runLiftSuspension = async (reason: string) => {
     if (liftingSuspension) return;
@@ -306,7 +308,6 @@ export default function AdminDriverDetailScreen() {
           <View style={styles.section}>
             <Row icon="call-outline" label={t("admin.phoneLabel")} value={driver.phone || "—"} />
             <Row icon="mail-outline" label={t("admin.emailLabel")} value={driver.email || "—"} />
-            <Row icon="barcode-outline" label={t("admin.plateLabel")} value={driver.carPlate || "—"} />
             <Row
               icon="document-text-outline"
               label={t("admin.licenseExpiryLabel")}
@@ -409,10 +410,10 @@ export default function AdminDriverDetailScreen() {
                   value={standing.suspensionReason || "—"}
                 />
 
-                {!canLiftSuspension ? (
-                  <Text style={styles.missingText}>{t("admin.liftSuspensionTooEarlyMessage")}</Text>
-                ) : null}
-
+                {/* Admin may lift this suspension at any time — the
+                    Earliest Lift Date above is informational only (what the
+                    automatic system would otherwise wait for), never a
+                    restriction on this button. */}
                 <ActionButton
                   icon="play-circle-outline"
                   label={t("admin.liftSuspensionButton")}

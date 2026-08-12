@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
@@ -7,12 +7,12 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   ImageBackground,
   Linking,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -21,10 +21,11 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
-import { fetchDriverEligibility } from "../driver/driverEligibility";
+import { fetchDriverEligibility, getDriverEligibilityAlertCopy } from "../driver/driverEligibility";
 import {
   DirectionalCard,
   DirectionalRow,
@@ -101,6 +102,14 @@ const FILTER_ICONS: Record<FilterKey, keyof typeof Ionicons.glyphMap> = {
 export default function HomeScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
+  // Home never unmounts once visited (expo-router Tabs keep every visited
+  // tab screen mounted in the background) — this is read ONLY by the
+  // "Trips near you" feed subscription below, so those 4 collection-wide
+  // listeners (see homeFeedLib.ts) stop reading Firestore the instant the
+  // passenger switches to another tab, instead of continuing to watch
+  // every driverRoutes/workJobs/errandJobs/schoolTrips write platform-wide
+  // for the rest of the session.
+  const isFocused = useIsFocused();
   const [unreadHelp, setUnreadHelp] = useState(0);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
   const [checkingDriver, setCheckingDriver] = useState(false);
@@ -288,6 +297,17 @@ export default function HomeScreen() {
   // briefly null until the first onAuthStateChanged callback), throwing
   // "Missing or insufficient permissions" for that first connection attempt.
   useEffect(() => {
+    // Paused while another tab is active — see isFocused's own comment
+    // above. Nothing to tear down here in that case: this effect simply
+    // never subscribes, and its own cleanup (below) handles unsubscribing
+    // once isFocused flips back to false.
+    if (!isFocused) return;
+
+    // TEMP DEV-ONLY diagnostic — verifies focus-gating never leaves the
+    // homeFeed listener group running in the background or double-subscribes
+    // on refocus. Safe to delete once confirmed.
+    if (__DEV__) console.log("[Home][feed] effect subscribe (focused)");
+
     let cancelled = false;
     let unsubFeed: (() => void) | null = null;
 
@@ -323,8 +343,9 @@ export default function HomeScreen() {
       cancelled = true;
       unsubFeed?.();
       unsubAuth();
+      if (__DEV__) console.log("[Home][feed] effect unsubscribe (blurred/unmount)");
     };
-  }, []);
+  }, [isFocused]);
 
   // Re-check location every time Home regains focus (app foregrounded,
   // navigated back to this tab) — this is what makes "nearby" update when
@@ -642,6 +663,20 @@ export default function HomeScreen() {
 
       if (eligibility.eligible) {
         router.push("/driver/add-route" as any);
+        return;
+      }
+
+      // pending_admin_approval/rejected/suspended all mean the driver
+      // already completed license verification — show why they're blocked
+      // and stay on Home, never send them back to re-upload a license they
+      // already submitted.
+      if (
+        eligibility.status === "pending_admin_approval" ||
+        eligibility.status === "rejected" ||
+        eligibility.status === "suspended"
+      ) {
+        const copy = getDriverEligibilityAlertCopy(eligibility.status, t);
+        Alert.alert(copy.title, copy.message);
         return;
       }
 
@@ -1386,6 +1421,18 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
     shadowRadius: 20,
     elevation: 6,
+    // Web-only: react-native-web's Image/ImageBackground default the
+    // rendered image box to the SOURCE ASSET's raw pixel size (hero-car.png
+    // is 1024x1024) whenever this container has no EXPLICIT width/height
+    // (minHeight alone doesn't count — see
+    // react-native-web/src/exports/Image/index.js's `imageSizeStyle`).
+    // Without this, the image renders unscaled at 1024x1024 anchored
+    // top-left instead of being cover-scaled to fill this card, landing on
+    // the source PNG's blank corner (see the comment above) instead of the
+    // car illustration. Native measures via layout, not asset intrinsic
+    // size, so it has no such bug and stays on minHeight-only exactly as
+    // before.
+    ...(Platform.OS === "web" ? { height: 300, width: "100%" } : {}),
   },
   heroBgImage: {
     borderRadius: 28,

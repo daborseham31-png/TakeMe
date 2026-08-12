@@ -1,7 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { doc, onSnapshot } from "firebase/firestore";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Pressable,
@@ -11,8 +18,7 @@ import {
   Text,
   View,
 } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
-import { useTranslation } from "react-i18next";
+import MapView, { Marker, Polyline } from "../../components/PlatformMapView";
 
 import { db } from "../../firebase";
 import { TRIP_LOCATIONS_COLLECTION } from "../booking/schoolTripsLib";
@@ -47,7 +53,8 @@ const getStatusKey = (booking: any) => {
     if (status === "driver_on_way") return "roadsideHelp.helperOnTheWay";
     if (status === "arrived_pickup") return "roadsideHelp.helperArrivedHint";
     if (status === "in_progress") return "roadsideHelp.helpInProgressHint";
-    if (status === "completion_pending") return "roadsideHelp.waitingForPassengerConfirmation";
+    if (status === "completion_pending")
+      return "roadsideHelp.waitingForPassengerConfirmation";
     if (status === "completed") return "roadsideHelp.badgeCompleted";
 
     return "roadsideHelp.waitingForHelperToStartDriving";
@@ -79,7 +86,7 @@ export default function LiveTrackingScreen() {
   const isSchoolTripsSource = String(params.source || "") === "schoolTrips";
   const bookingCollection = isSchoolTripsSource ? "schoolTrips" : "bookings";
 
-  const mapRef = useRef<MapView | null>(null);
+  const mapRef = useRef<MapView | null>(null); //هذا reference للخريطة نفسها.
   const hasCenteredOnceRef = useRef(false);
   const userHasPannedRef = useRef(false);
 
@@ -116,7 +123,11 @@ export default function LiveTrackingScreen() {
             // departureTime — every other read below, shared with Personal
             // Ride, expects from/to/time).
             ...(isSchoolTripsSource
-              ? { from: data.fromAddress, to: data.toAddress, time: data.departureTime }
+              ? {
+                  from: data.fromAddress,
+                  to: data.toAddress,
+                  time: data.departureTime,
+                }
               : {}),
           });
         } else {
@@ -168,7 +179,8 @@ export default function LiveTrackingScreen() {
       // Roadside Help's own location shape (see roadsideLib.ts's
       // acceptOffer) — the help location itself, not a pickup point.
       toLatLng(booking?.location) ||
-      (typeof booking?.latitude === "number" && typeof booking?.longitude === "number"
+      (typeof booking?.latitude === "number" &&
+      typeof booking?.longitude === "number"
         ? { latitude: booking.latitude, longitude: booking.longitude }
         : null)
     );
@@ -189,13 +201,23 @@ export default function LiveTrackingScreen() {
   // so manual pan/zoom is never fought (see recenter() for the explicit,
   // on-demand alternative).
   useEffect(() => {
-    if (!driverLocation || !mapRef.current || hasCenteredOnceRef.current || userHasPannedRef.current) {
+    if (
+      !driverLocation ||
+      !mapRef.current ||
+      hasCenteredOnceRef.current ||
+      userHasPannedRef.current
+    ) {
       return;
     }
 
     hasCenteredOnceRef.current = true;
     mapRef.current.animateToRegion(
-      { latitude: driverLocation.latitude, longitude: driverLocation.longitude, latitudeDelta: 0.015, longitudeDelta: 0.015 },
+      {
+        latitude: driverLocation.latitude,
+        longitude: driverLocation.longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      },
       700,
     );
   }, [driverLocation]);
@@ -205,7 +227,12 @@ export default function LiveTrackingScreen() {
 
     userHasPannedRef.current = false;
     mapRef.current.animateToRegion(
-      { latitude: driverLocation.latitude, longitude: driverLocation.longitude, latitudeDelta: 0.015, longitudeDelta: 0.015 },
+      {
+        latitude: driverLocation.latitude,
+        longitude: driverLocation.longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      },
       500,
     );
   }, [driverLocation]);
@@ -218,7 +245,8 @@ export default function LiveTrackingScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  const isStale = !!driverUpdatedAtMs && nowMs - driverUpdatedAtMs > STALE_AFTER_MS;
+  const isStale =
+    !!driverUpdatedAtMs && nowMs - driverUpdatedAtMs > STALE_AFTER_MS;
 
   if (loading) {
     return (
@@ -236,7 +264,10 @@ export default function LiveTrackingScreen() {
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={44} color="#8B7B6B" />
           <Text style={styles.emptyTitle}>{t("rides.bookingNotFound")}</Text>
-          <Pressable style={styles.backButtonSmall} onPress={() => router.back()}>
+          <Pressable
+            style={styles.backButtonSmall}
+            onPress={() => router.back()}
+          >
             <Text style={styles.backButtonText}>{t("common.goBack")}</Text>
           </Pressable>
         </View>
@@ -244,7 +275,8 @@ export default function LiveTrackingScreen() {
     );
   }
 
-  const trackingActive = (booking.tripStatus || booking.status) === "in_progress";
+  const trackingActive =
+    (booking.tripStatus || booking.status) === "in_progress";
   const isRoadside = booking.category === "roadside";
 
   return (
@@ -283,7 +315,9 @@ export default function LiveTrackingScreen() {
         {locationError ? (
           <View style={styles.warningBox}>
             <Ionicons name="cloud-offline-outline" size={16} color="#B91C1C" />
-            <Text style={styles.warningText}>{t("rides.locationTemporarilyUnavailable")}</Text>
+            <Text style={styles.warningText}>
+              {t("rides.locationTemporarilyUnavailable")}
+            </Text>
           </View>
         ) : null}
 
@@ -314,11 +348,19 @@ export default function LiveTrackingScreen() {
               {pickupLocation ? (
                 <Marker
                   coordinate={pickupLocation}
-                  title={isRoadside ? t("roadsideHelp.helpLocationMarkerTitle") : t("rides.pickupMarkerTitle")}
+                  title={
+                    isRoadside
+                      ? t("roadsideHelp.helpLocationMarkerTitle")
+                      : t("rides.pickupMarkerTitle")
+                  }
                   description={isRoadside ? "" : t("rides.pickupMarkerDesc")}
                 >
                   <View style={styles.pickupMarker}>
-                    <Ionicons name={isRoadside ? "construct" : "home"} size={17} color="#FFFFFF" />
+                    <Ionicons
+                      name={isRoadside ? "construct" : "home"}
+                      size={17}
+                      color="#FFFFFF"
+                    />
                   </View>
                 </Marker>
               ) : null}
@@ -341,7 +383,11 @@ export default function LiveTrackingScreen() {
                     latitude: driverLocation.latitude,
                     longitude: driverLocation.longitude,
                   }}
-                  title={isRoadside ? t("roadsideHelp.helperMapLabel") : t("rides.driverMarkerTitle")}
+                  title={
+                    isRoadside
+                      ? t("roadsideHelp.helperMapLabel")
+                      : t("rides.driverMarkerTitle")
+                  }
                   description={isRoadside ? "" : t("rides.driverMarkerDesc")}
                   anchor={{ x: 0.5, y: 0.5 }}
                 >
@@ -353,7 +399,11 @@ export default function LiveTrackingScreen() {
             </MapView>
 
             {driverLocation ? (
-              <Pressable style={[styles.recenterButton, positionEnd(14, isRTL)]} onPress={recenter} hitSlop={8}>
+              <Pressable
+                style={[styles.recenterButton, positionEnd(14, isRTL)]}
+                onPress={recenter}
+                hitSlop={8}
+              >
                 <Ionicons name="locate" size={20} color="#F58220" />
               </Pressable>
             ) : null}
@@ -370,7 +420,9 @@ export default function LiveTrackingScreen() {
         {isStale ? (
           <View style={styles.warningBox}>
             <Ionicons name="warning-outline" size={16} color="#B91C1C" />
-            <Text style={styles.warningText}>{t("rides.driverLocationStale")}</Text>
+            <Text style={styles.warningText}>
+              {t("rides.driverLocationStale")}
+            </Text>
           </View>
         ) : null}
 
@@ -379,12 +431,19 @@ export default function LiveTrackingScreen() {
             <Ionicons name="person-outline" size={16} color="#7C5F46" />
             <Text style={styles.infoText}>
               {isRoadside
-                ? t("roadsideHelp.helperLabel", { name: booking.driverName || t("roadsideHelp.yourHelperFallback") })
-                : t("rides.driverLabel", { name: booking.driverName || t("rides.driverFallback") })}
+                ? t("roadsideHelp.helperLabel", {
+                    name:
+                      booking.driverName ||
+                      t("roadsideHelp.yourHelperFallback"),
+                  })
+                : t("rides.driverLabel", {
+                    name: booking.driverName || t("rides.driverFallback"),
+                  })}
             </Text>
           </View>
 
-          {!isRoadside && (booking.car || booking.carColor || booking.carPlate) ? (
+          {!isRoadside &&
+          (booking.car || booking.carColor || booking.carPlate) ? (
             <View style={styles.infoRow}>
               <Ionicons name="car-outline" size={16} color="#7C5F46" />
               <Text style={styles.infoText}>
@@ -398,7 +457,8 @@ export default function LiveTrackingScreen() {
 
           {isRoadside ? (
             <>
-              {Array.isArray(booking.problemTypes) && booking.problemTypes.length > 0 ? (
+              {Array.isArray(booking.problemTypes) &&
+              booking.problemTypes.length > 0 ? (
                 <View style={styles.infoRow}>
                   <Ionicons name="build-outline" size={16} color="#7C5F46" />
                   <Text style={styles.infoText}>
@@ -410,7 +470,9 @@ export default function LiveTrackingScreen() {
               {booking.address || booking.location?.address ? (
                 <View style={styles.infoRow}>
                   <Ionicons name="location-outline" size={16} color="#7C5F46" />
-                  <Text style={styles.infoText}>{booking.address || booking.location?.address}</Text>
+                  <Text style={styles.infoText}>
+                    {booking.address || booking.location?.address}
+                  </Text>
                 </View>
               ) : null}
             </>
@@ -433,14 +495,20 @@ export default function LiveTrackingScreen() {
           {booking.time ? (
             <View style={styles.infoRow}>
               <Ionicons name="time-outline" size={16} color="#7C5F46" />
-              <Text style={[styles.infoText, styles.ltrText]}>{booking.time}</Text>
+              <Text style={[styles.infoText, styles.ltrText]}>
+                {booking.time}
+              </Text>
             </View>
           ) : null}
 
           {driverUpdatedAtMs ? (
-            <Text style={[styles.updatedText, isStale && styles.updatedTextStale]}>
+            <Text
+              style={[styles.updatedText, isStale && styles.updatedTextStale]}
+            >
               {t("rides.lastUpdate", {
-                time: new Date(driverUpdatedAtMs).toLocaleTimeString("en-US", { hour12: false }),
+                time: new Date(driverUpdatedAtMs).toLocaleTimeString("en-US", {
+                  hour12: false,
+                }),
               })}
             </Text>
           ) : (

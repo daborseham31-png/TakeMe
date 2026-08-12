@@ -3,7 +3,6 @@ import { router, useLocalSearchParams } from "expo-router";
 import { doc, onSnapshot } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
-  Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -15,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Alert } from "../../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";

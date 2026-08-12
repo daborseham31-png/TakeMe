@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import DateTimePicker from "../../../components/PlatformDateTimePicker";
 import React, { useEffect, useState } from "react";
 import {
   Modal,

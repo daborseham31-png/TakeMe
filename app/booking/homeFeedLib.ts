@@ -23,7 +23,9 @@ import {
   collection,
   doc,
   getDoc,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   where,
 } from "firebase/firestore";
@@ -603,8 +605,32 @@ const normalizeSchoolTripItem = (id: string, data: any): FeedItem | null => {
 
 // Attaches the SAME users/{providerId}.ratingAverage/ratingCount every other
 // screen reads — never a value cached on the listing itself.
+//
+// Cached (module-level, shared across every subscribeHomeFeed call/screen
+// mount) for PROVIDER_RATING_CACHE_TTL_MS — without this, every single
+// snapshot re-delivery from the 4 collection listeners below (including one
+// caused by a completely unrelated field changing on a completely
+// unrelated document) re-ran a getDoc for EVERY listing's provider, every
+// time. A rating changing mid-session by a few tenths is never visible
+// instantly this way, but it was never guaranteed to be instant before
+// either (ratingAverage/ratingCount are themselves updated via a separate,
+// unrelated review-submission write) — this only bounds how often the SAME
+// provider is re-read while their listings keep re-emitting.
+const PROVIDER_RATING_CACHE_TTL_MS = 5 * 60 * 1000;
+const providerRatingCache = new Map<
+  string,
+  { ratingAverage: number; ratingCount: number; fetchedAt: number }
+>();
+
 const withProviderRating = async (item: FeedItem): Promise<FeedItem> => {
   if (!item.providerId) return item;
+
+  const cached = providerRatingCache.get(item.providerId);
+  if (cached && Date.now() - cached.fetchedAt < PROVIDER_RATING_CACHE_TTL_MS) {
+    item.ratingAverage = cached.ratingAverage;
+    item.ratingCount = cached.ratingCount;
+    return item;
+  }
 
   try {
     const snap = await getDoc(doc(db, "users", item.providerId));
@@ -612,9 +638,19 @@ const withProviderRating = async (item: FeedItem): Promise<FeedItem> => {
       const profile = snap.data();
       item.ratingAverage = Number(profile.ratingAverage) || 0;
       item.ratingCount = Number(profile.ratingCount) || 0;
+    } else {
+      item.ratingAverage = 0;
+      item.ratingCount = 0;
     }
+
+    providerRatingCache.set(item.providerId, {
+      ratingAverage: item.ratingAverage,
+      ratingCount: item.ratingCount,
+      fetchedAt: Date.now(),
+    });
   } catch {
-    // Keep 0/0 — renders as "New" on the card.
+    // Keep 0/0 — renders as "New" on the card. Not cached, so a transient
+    // failure gets retried on the next snapshot rather than sticking.
   }
 
   return item;
@@ -820,16 +856,36 @@ export function sortFeedItems<T extends FeedItemWithDistance>(items: T[]): T[] {
 
 export const FEED_PAGE_SIZE = 20;
 
+// Upper bound on how many docs each of the 4 listeners below ever watches at
+// once — well above FEED_PAGE_SIZE (only the nearest/soonest 20 are ever
+// actually shown, see Home's visibleFeedItems) to comfortably allow for
+// client-side filtering (expiry, seats, booked/cancelled status), but no
+// longer literally "the entire collection". Without this, workJobs/
+// errandJobs in particular (no `where` at all) re-read and re-watch every
+// job/errand ever created, platform-wide, for as long as Home stays
+// mounted — see this file's own module comment.
+const FEED_SOURCE_LIMIT = 200;
+
 // ---------------------------------------------------------------------------
 // Live combined subscription — one onSnapshot per source collection, merged
 // and re-emitted on every change so a trip that becomes full/completed/
 // deleted disappears from the feed immediately (spec #8).
 // ---------------------------------------------------------------------------
 
+// TEMP DEV-ONLY diagnostic counter — every subscribeHomeFeed() call gets its
+// own instance number so the console logs below can be used to confirm a
+// previous instance's 4 listeners always fully unsubscribe BEFORE the next
+// instance's 4 listeners subscribe (never overlapping). Safe to delete once
+// confirmed — has no effect outside __DEV__.
+let __devHomeFeedInstanceCounter = 0;
+
 export const subscribeHomeFeed = (
   onUpdate: (items: FeedItem[]) => void,
   onError?: (error: any) => void,
 ): (() => void) => {
+  const __devInstanceId = __DEV__ ? ++__devHomeFeedInstanceCounter : 0;
+  if (__DEV__) console.log(`[HomeFeed #${__devInstanceId}] subscribe (4 listeners: driverRoutes, workJobs, errandJobs, schoolTrips)`);
+
   let routesItems: FeedItem[] = [];
   let workItems: FeedItem[] = [];
   let errandItems: FeedItem[] = [];
@@ -847,7 +903,7 @@ export const subscribeHomeFeed = (
   };
 
   const unsubRoutes = onSnapshot(
-    query(collection(db, "driverRoutes"), where("active", "==", true)),
+    query(collection(db, "driverRoutes"), where("active", "==", true), limit(FEED_SOURCE_LIMIT)),
     async (snap) => {
       const items = snap.docs
         .map((d) => normalizeDriverRouteItem(d.id, d.data()))
@@ -860,7 +916,7 @@ export const subscribeHomeFeed = (
   );
 
   const unsubWork = onSnapshot(
-    collection(db, "workJobs"),
+    query(collection(db, "workJobs"), orderBy("createdAt", "desc"), limit(FEED_SOURCE_LIMIT)),
     async (snap) => {
       const items = snap.docs
         .map((d) => normalizeWorkJobItem(d.id, d.data()))
@@ -873,7 +929,7 @@ export const subscribeHomeFeed = (
   );
 
   const unsubErrands = onSnapshot(
-    collection(db, "errandJobs"),
+    query(collection(db, "errandJobs"), orderBy("createdAt", "desc"), limit(FEED_SOURCE_LIMIT)),
     async (snap) => {
       const items = snap.docs
         .map((d) => {
@@ -889,7 +945,7 @@ export const subscribeHomeFeed = (
   );
 
   const unsubSchoolTrips = onSnapshot(
-    query(collection(db, "schoolTrips"), where("status", "==", "active")),
+    query(collection(db, "schoolTrips"), where("status", "==", "active"), limit(FEED_SOURCE_LIMIT)),
     async (snap) => {
       const items = snap.docs
         .map((d) => normalizeSchoolTripItem(d.id, d.data()))
@@ -907,6 +963,7 @@ export const subscribeHomeFeed = (
     unsubWork();
     unsubErrands();
     unsubSchoolTrips();
+    if (__DEV__) console.log(`[HomeFeed #${__devInstanceId}] unsubscribe (4 listeners stopped)`);
   };
 };
 

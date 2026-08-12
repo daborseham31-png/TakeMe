@@ -2,14 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert,
   Linking,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import MapView, { Marker, Polyline, Region } from "react-native-maps";
+import { Alert } from "../../AppAlert";
+import MapView, { Marker, Polyline, Region } from "../../../components/PlatformMapView";
 import { useTranslation } from "react-i18next";
 
 import { DirectionalScreen } from "../../i18n/DirectionalPrimitives";

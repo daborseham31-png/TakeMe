@@ -1,8 +1,9 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
-import { ActivityIndicator, I18nManager, StyleSheet, View } from "react-native";
+import { ActivityIndicator, I18nManager, Platform, StyleSheet, View } from "react-native";
 
+import { AppAlertHost } from "./AppAlert";
 import { LanguageProvider, useLanguage } from "./i18n/LanguageProvider";
 import { useGlobalNotificationRouting } from "./useGlobalNotificationRouting";
 
@@ -49,6 +50,24 @@ function LanguageGate({ children }: { children: React.ReactNode }) {
   // flexDirection — never assume this root wrapper alone is "one more
   // mirroring layer" to stack an explicit reverse on top of; see those
   // components' own comments for why that double-applies and cancels out.
+  //
+  // Web-only: on a desktop/tablet-width browser this app has no native
+  // notion of "screen width" to bound it, so every screen would otherwise
+  // stretch full-bleed across the whole window. Centering everything in a
+  // phone-proportioned column (with a neutral letterbox on either side)
+  // applies once, here, instead of touching every individual screen. Native
+  // renders none of this — it always gets the plain flex:1 root exactly as
+  // before.
+  if (Platform.OS === "web") {
+    return (
+      <View style={styles.webOuter}>
+        <View style={[styles.webInner, { direction: isRTL ? "rtl" : "ltr" }]}>
+          {children}
+        </View>
+      </View>
+    );
+  }
+
   return <View style={[styles.root, { direction: isRTL ? "rtl" : "ltr" }]}>{children}</View>;
 }
 
@@ -66,6 +85,7 @@ export default function RootLayout() {
     <LanguageProvider>
       <LanguageGate>
         <GlobalNotificationRouting />
+        <AppAlertHost />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="login" />
@@ -89,5 +109,17 @@ const styles = StyleSheet.create({
   },
   root: {
     flex: 1,
+  },
+  webOuter: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    backgroundColor: "#E7E1D8",
+  },
+  webInner: {
+    flex: 1,
+    width: "100%",
+    maxWidth: 480,
   },
 });

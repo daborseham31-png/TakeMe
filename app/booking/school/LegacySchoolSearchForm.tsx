@@ -22,13 +22,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { Alert } from "../../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { PhysicalDirectionalBlockText } from "../../i18n/DirectionalPrimitives";

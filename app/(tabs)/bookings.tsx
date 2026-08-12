@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import DateTimePicker from "../../components/PlatformDateTimePicker";
 import { router, useLocalSearchParams } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   addDoc,
@@ -19,7 +20,6 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Keyboard,
   Linking,
@@ -33,6 +33,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth, db } from "../../firebase";
@@ -146,7 +147,7 @@ import {
   validateAccountInfo,
   validateDateAndTimeNotPassed,
 } from "../driver/create/driverHelpers";
-import { fetchDriverEligibility } from "../driver/driverEligibility";
+import { fetchDriverEligibility, getDriverEligibilityAlertCopy } from "../driver/driverEligibility";
 import {
   DriverTripCategory,
   RepublishTripPrefill,
@@ -511,6 +512,18 @@ export default function BookingsScreen() {
   }>();
 
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
+  // My Bookings never unmounts once visited (expo-router Tabs keep every
+  // visited tab screen mounted in the background) — used below to pause
+  // this screen's own ~12 onSnapshot listeners (bookings x2, roadsideRequests,
+  // driverRoutes, workJobs, errandJobs, workApplications x2, errandApplications
+  // x2, plus driver violations and useMySchoolRows' own listeners) the
+  // instant the passenger switches to another tab, instead of leaving all
+  // of them reading Firestore in the background for the rest of the
+  // session. Deliberately NOT applied to app/(tabs)/_layout.tsx's own
+  // bookings/conversations listeners — those are intentionally
+  // session-wide (see that file's own comments on tab-badge/live-location
+  // behavior), not screen-local like these.
+  const isFocused = useIsFocused();
   const [tab, setTab] = useState<Tab>("passenger");
   // Shared by both Passenger and Driver — one Upcoming/In Progress/Completed
   // tab row above the single merged list (see getBookingBucket). "violations"
@@ -697,7 +710,10 @@ export default function BookingsScreen() {
 
   const school = useMySchoolRows({
     tab,
-    uid,
+    // Paused while this tab isn't focused (see isFocused's own comment
+    // above) — useMySchoolRows already tears down/clears its own listeners
+    // whenever uid is null, so passing null here reuses that exact path.
+    uid: isFocused ? uid : null,
     pendingRatingBookingId,
     onConsumePendingRating: () => setPendingRatingBookingId(null),
   });
@@ -717,7 +733,7 @@ export default function BookingsScreen() {
   // driverNoShowLib.ts's header) — this screen only ever subscribes/reads,
   // it never attempts to write one.
   useEffect(() => {
-    if (!uid) {
+    if (!uid || !isFocused) {
       setDriverViolations([]);
       setActiveViolationCount(0);
       setDriverCancellationViolations([]);
@@ -743,12 +759,18 @@ export default function BookingsScreen() {
       (error) => console.warn("subscribeDriverCancellationViolations failed", error),
     );
 
+    // TEMP DEV-ONLY diagnostic — verifies focus-gating never leaves a stale
+    // violations listener group running or double-subscribes on refocus.
+    // Safe to delete once confirmed.
+    if (__DEV__) console.log("[Bookings][violations] subscribe (3 listeners)", { uid });
+
     return () => {
       unsubscribeList();
       unsubscribeCount();
       unsubscribeCancellationViolations();
+      if (__DEV__) console.log("[Bookings][violations] unsubscribe (3 listeners)", { uid });
     };
-  }, [uid]);
+  }, [uid, isFocused]);
 
   useEffect(() => {
     const requestedTab = getParamString(params.tab);
@@ -803,9 +825,14 @@ export default function BookingsScreen() {
   }, [params.tab, params.bookingId, params.applicationId, params.requestId, params.type]);
 
   useEffect(() => {
-    if (!uid) return;
+    if (!uid || !isFocused) return;
 
     setLoading(true);
+
+    // TEMP DEV-ONLY diagnostic — verifies focus-gating never leaves this
+    // ~10-listener group running in the background or double-subscribes on
+    // refocus. Safe to delete once confirmed.
+    if (__DEV__) console.log("[Bookings][main] subscribe (10 listeners)", { uid });
 
 const subscribe = (
   collectionName: "driverRoutes" | "workJobs" | "errandJobs",
@@ -1025,8 +1052,9 @@ const subscribe = (
       unsubMyErrand();
       unsubProvWork();
       unsubProvErrand();
+      if (__DEV__) console.log("[Bookings][main] unsubscribe (10 listeners)", { uid });
     };
-  }, [uid]);
+  }, [uid, isFocused]);
 
   // Passenger's own live location sharing is now started/stopped from
   // app/(tabs)/_layout.tsx, NOT here — this screen unmounts on every tab
@@ -2147,7 +2175,8 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
     try {
       const eligibility = await fetchDriverEligibility(user.uid);
       if (!eligibility.eligible) {
-        Alert.alert(t("driver.verificationRequired"), t("driver.mustVerifyLicense"));
+        const copy = getDriverEligibilityAlertCopy(eligibility.status, t);
+        Alert.alert(copy.title, copy.message);
         return;
       }
 
@@ -5998,7 +6027,7 @@ useEffect(() => {
               // already-happened trip, never just future ones.
               minimumDate={new Date(2000, 0, 1)}
               onChange={(_event: any, selectedDate?: Date) => {
-                if (Platform.OS === "android") {
+                if (Platform.OS === "android" || Platform.OS === "web") {
                   setDateMenuOpen(false);
                 }
 

@@ -57,7 +57,6 @@ import {
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   StyleSheet,
@@ -65,6 +64,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Alert } from "../../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../../firebase";
@@ -291,6 +291,12 @@ export default function useMySchoolRows({
 
     const unsubs: (() => void)[] = [];
 
+    // TEMP DEV-ONLY diagnostic — verifies Bookings' focus-gating (which
+    // passes uid: null here while the tab is unfocused) never leaves this
+    // group running in the background or double-subscribes on refocus.
+    // Safe to delete once confirmed.
+    if (__DEV__) console.log(`[useMySchoolRows] subscribe (tab=${tab})`, { uid });
+
     if (tab === "passenger") {
       unsubs.push(
         onSnapshot(
@@ -350,7 +356,10 @@ export default function useMySchoolRows({
       setRideRequests([]);
     }
 
-    return () => unsubs.forEach((unsub) => unsub());
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+      if (__DEV__) console.log(`[useMySchoolRows] unsubscribe (tab=${tab})`, { uid });
+    };
   }, [tab, uid]);
 
   // Same one-shot targeted-open behaviour as bookings.tsx's own effect (see

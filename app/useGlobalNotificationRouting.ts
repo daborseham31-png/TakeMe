@@ -21,6 +21,7 @@
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
+import { Platform } from "react-native";
 
 import { normalizeRoutableNotification, resolveNotificationRoute } from "./notificationRoutingCore";
 
@@ -35,6 +36,13 @@ export const useGlobalNotificationRouting = (): void => {
   const handledIdentifiers = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    // expo-notifications has no web support (Expo's own docs list
+    // Android/iOS only) — none of the calls below are safe to make on Web,
+    // so this hook is a deliberate no-op there rather than risking a throw
+    // from root-level setup (see app/_layout.tsx, where this is mounted
+    // unconditionally on every platform).
+    if (Platform.OS === "web") return;
+
     const handleResponse = (
       response: Notifications.NotificationResponse | null | undefined,
     ) => {

@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -10,7 +11,6 @@ import {
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,6 +18,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 
 import { useTranslation } from "react-i18next";
 
@@ -67,6 +68,14 @@ const formatTime = (seconds: number) => {
 export default function MessagesScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
+  // Messages never unmounts once visited (expo-router Tabs keep every
+  // visited tab screen mounted in the background) — used below to pause
+  // the conversations listener the instant the user switches to another
+  // tab, instead of leaving it reading Firestore in the background for the
+  // rest of the session. The Messages TAB ICON's own unread-count listener
+  // (app/(tabs)/_layout.tsx) is intentionally separate and stays live
+  // regardless of which tab is active, since that's what drives the badge.
+  const isFocused = useIsFocused();
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,8 +94,13 @@ export default function MessagesScreen() {
 
   // Conversations for me. array-contains is a single filter → no index needed.
   useEffect(() => {
-    if (!uid) return;
+    if (!uid || !isFocused) return;
     setLoading(true);
+
+    // TEMP DEV-ONLY diagnostic — verifies focus-gating never leaves this
+    // listener running in the background or double-subscribes on refocus.
+    // Safe to delete once confirmed.
+    if (__DEV__) console.log("[Messages] subscribe", { uid });
 
     const unsub = onSnapshot(
       query(
@@ -122,9 +136,12 @@ export default function MessagesScreen() {
       () => setLoading(false),
     );
 
-    return unsub;
+    return () => {
+      unsub();
+      if (__DEV__) console.log("[Messages] unsubscribe", { uid });
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid]);
+  }, [uid, isFocused]);
 
   // Debounced-ish user search on every change.
   useEffect(() => {

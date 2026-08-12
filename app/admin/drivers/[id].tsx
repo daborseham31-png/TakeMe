@@ -3,7 +3,6 @@ import { useLocalSearchParams } from "expo-router";
 import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -15,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Alert } from "../../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../../firebase";
@@ -167,9 +167,11 @@ export default function AdminDriverDetailScreen() {
     }
   };
 
-  const canLiftSuspension =
-    !!standing?.suspensionActive &&
-    (!standing.suspensionMinEndAt || standing.suspensionMinEndAt.toMillis() <= Date.now());
+  // An admin may lift a cancellation suspension at ANY time — including
+  // before suspensionMinEndAt/"Earliest Lift Date" — see
+  // liftDriverCancellationSuspension's own comment (driverViolationsLib.ts)
+  // for why that date is informational only, never a block on this button.
+  const canLiftSuspension = !!standing?.suspensionActive;
 
   // Derived live from the same onSnapshot-subscribed violations list (never
   // a second, separate Firestore fetch) — this is what makes excusing a
@@ -344,7 +346,6 @@ export default function AdminDriverDetailScreen() {
           <View style={styles.section}>
             <Row icon="call-outline" label={t("admin.phoneLabel")} value={driver.phone || "—"} />
             <Row icon="mail-outline" label={t("admin.emailLabel")} value={driver.email || "—"} />
-            <Row icon="barcode-outline" label={t("admin.plateLabel")} value={driver.carPlate || "—"} />
             <Row
               icon="document-text-outline"
               label={t("admin.licenseExpiryLabel")}
@@ -451,16 +452,11 @@ export default function AdminDriverDetailScreen() {
                   label={t("admin.suspensionIndefiniteLabel")}
                   value={standing.indefinite ? t("common.yes") : t("common.no")}
                 />
-                <Row
-                  icon="eye-outline"
-                  label={t("admin.manualReviewAvailableLabel")}
-                  value={canLiftSuspension ? t("common.yes") : t("common.no")}
-                />
 
-                {!canLiftSuspension ? (
-                  <Text style={styles.missingText}>{t("admin.liftSuspensionTooEarlyMessage")}</Text>
-                ) : null}
-
+                {/* Admin may lift this suspension at any time — the
+                    Earliest Lift Date above is informational only (what the
+                    automatic system would otherwise wait for), never a
+                    restriction on this button. */}
                 <ActionButton
                   icon="play-circle-outline"
                   label={t("admin.liftSuspensionButton")}

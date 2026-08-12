@@ -19,7 +19,7 @@
 
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
-import { Alert } from "react-native";
+import { Alert } from "../AppAlert";
 
 import i18n from "../i18n";
 

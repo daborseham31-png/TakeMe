@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,6 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Alert } from "../../../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { DirectionalScreen } from "../../../i18n/DirectionalPrimitives";

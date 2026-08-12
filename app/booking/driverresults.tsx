@@ -4,7 +4,6 @@ import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -12,6 +11,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { db } from "../../firebase";

@@ -66,6 +66,7 @@ import {
 
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";
+import { computeClearedCancellationSuspension } from "../driver/driverEligibilityCore";
 import { DRIVER_CANCEL_LOCK_HOURS } from "./cancellationEligibility";
 import {
   cancellationViolationId,
@@ -160,7 +161,11 @@ export type CancellationStanding = {
   updatedAt: unknown;
 };
 
-const EMPTY_STANDING: CancellationStanding = {
+// Exported so adminDriversLib.ts's setDriverVerification can build the same
+// safe-defaults-merged CancellationStanding shape when it needs to clear an
+// active cancellation suspension as part of admin driver reactivation (see
+// that function's own comment) — never redefined a second time there.
+export const EMPTY_STANDING: CancellationStanding = {
   suspensionActive: false,
   suspensionTier: 0,
   suspensionMinDurationDays: null,
@@ -552,6 +557,18 @@ export const rejectCancellationViolationAppeal = async (
   });
 };
 
+// The ONE way a cancellation suspension (cancellationStanding.suspensionActive)
+// is ever cleared — see setDriverVerification's own comment (adminDriversLib.ts)
+// for why that function deliberately does NOT also do this. An admin may
+// lift a suspension at ANY time, including before suspensionMinEndAt/
+// "Earliest Lift Date" — this is an explicit product decision: the automatic
+// 7/30/indefinite-day duration (see computeNextSuspensionTier/
+// evaluateDriverCancellationStanding above) still governs how long a
+// suspension lasts if the admin does nothing, but pressing this button IS
+// the admin's manual override of that timer, always available, never
+// gated behind it. suspensionMinEndAt itself is never modified — it stays
+// on the (now-inactive) standing as a historical record of what the
+// automatic system originally decided.
 export const liftDriverCancellationSuspension = async (
   driverId: string,
   reason: string,
@@ -565,15 +582,11 @@ export const liftDriverCancellationSuspension = async (
     throw new Error(i18n.t("admin.driverNotCurrentlySuspended"));
   }
 
-  if (standing.suspensionMinEndAt && standing.suspensionMinEndAt.toMillis() > Date.now()) {
-    throw new Error(i18n.t("admin.liftSuspensionTooEarlyMessage"));
-  }
+  const cleared = computeClearedCancellationSuspension(standing);
 
   await updateDoc(doc(db, "users", driverId), {
     cancellationStanding: {
-      ...standing,
-      suspensionActive: false,
-      manualReviewRequired: false,
+      ...cleared,
       lastSuspensionLiftedAt: serverTimestamp(),
       // The start of a fresh "clean" window for item 6's 60-day repeat-
       // offense rule — a new 5-violation run within 60 days of THIS date

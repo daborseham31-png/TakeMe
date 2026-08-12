@@ -12,11 +12,11 @@ import { reloadAppAsync } from "expo";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   StyleSheet,
 } from "react-native";
+import { Alert } from "../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import {

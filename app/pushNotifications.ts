@@ -24,14 +24,19 @@ import { Platform } from "react-native";
 import { db } from "../firebase";
 import { SupportedLanguage } from "./i18n/languages";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
-});
+// expo-notifications has no web support (Expo's own docs list Android/iOS
+// only) — setNotificationHandler must not run on Web, since this file's
+// module scope executes unconditionally on import.
+if (Platform.OS !== "web") {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 const getProjectId = (): string | null => {
   return (
@@ -50,6 +55,8 @@ export const registerForPushNotificationsAsync = async (
   uid: string,
   language: SupportedLanguage,
 ): Promise<void> => {
+  if (Platform.OS === "web") return;
+
   try {
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync("default", {

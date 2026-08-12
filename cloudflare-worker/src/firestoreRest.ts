@@ -305,6 +305,105 @@ export async function queryFirestoreDocuments(
 }
 
 // ---------------------------------------------------------------------------
+// Single-field range query — added for noShowDetection.ts's gatherCandidates
+// (see that file's header on the "Quota exceeded." incident this fixes):
+// lets a caller restrict a read to e.g. "tripDate >= 7 days ago" server-side
+// instead of downloading an entire collection and discarding old documents
+// in JS. `maxValue` is an OPTIONAL second bound (e.g. "tripDate <= tomorrow")
+// added so a caller can also exclude future documents that could never be
+// due yet — see noShowDetection.ts's RECONCILE_HORIZON_DAYS for why an
+// unbounded-forward query was itself a real cost driver, not just the
+// trailing lookback.
+//
+// Both bounds always target the SAME field passed as `fieldPath` — never a
+// second, different field — so this still needs no composite index: Firestore
+// requires a composite index for a query that combines a filter on one field
+// with a range filter on a DIFFERENT field, but any combination of filters on
+// a SINGLE field (whose field also appears as the first/only `orderBy`, as
+// required) is served entirely by Firestore's automatic single-field index,
+// exactly as when only `minValue` was supported. No index to provision, no
+// deploy required for this function to work.
+//
+// No pagination: matches queryFirestoreDocuments' own existing precedent
+// (also a single, unpaginated runQuery call) — Firestore's REST `runQuery`
+// returns every matching document in one response when no `limit` is set,
+// which is exactly what the current (pre-fix) full-collection call already
+// relies on successfully today. A bounded-window read is always a subset of
+// what that same call already handles in one response, so no new pagination
+// need is introduced here.
+// ---------------------------------------------------------------------------
+
+export async function queryFirestoreDocumentsWhereGte(
+  env: Env,
+  collection: string,
+  fieldPath: string,
+  minValue: string,
+  maxValue?: string,
+): Promise<FirestoreQueryDocument[]> {
+  const accessToken = await getAccessToken(env);
+  const url = `${FIRESTORE_BASE}/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents:runQuery`;
+
+  const minFilter = {
+    fieldFilter: {
+      field: { fieldPath },
+      op: "GREATER_THAN_OR_EQUAL",
+      value: { stringValue: minValue },
+    },
+  };
+
+  const where =
+    maxValue === undefined
+      ? minFilter
+      : {
+          compositeFilter: {
+            op: "AND",
+            filters: [
+              minFilter,
+              {
+                fieldFilter: {
+                  field: { fieldPath },
+                  op: "LESS_THAN_OR_EQUAL",
+                  value: { stringValue: maxValue },
+                },
+              },
+            ],
+          },
+        };
+
+  const structuredQuery = {
+    from: [{ collectionId: collection }],
+    where,
+    orderBy: [{ field: { fieldPath }, direction: "ASCENDING" }],
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ structuredQuery }),
+  });
+
+  if (!response.ok) {
+    console.error("firestoreRest: runQuery (GTE) failed", { collection, status: response.status });
+    throw new Error("Could not read from Firestore.");
+  }
+
+  const results = (await response.json()) as Array<{
+    document?: { name: string; fields?: Record<string, any> };
+  }>;
+
+  return results
+    .filter((entry): entry is { document: { name: string; fields?: Record<string, any> } } => !!entry.document)
+    .map((entry) => {
+      const { name } = entry.document;
+      const id = name.slice(name.lastIndexOf("/") + 1);
+      return { id, data: fromFirestoreFields(entry.document.fields || {}) };
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Bulk "field IN [...]" query, WITH pagination — added for
 // noShowDetection.ts's bulk booking fetch (see that file's header): instead
 // of one queryFirestoreDocuments call per candidate trip (which blew past

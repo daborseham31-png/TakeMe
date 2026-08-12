@@ -14,7 +14,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Alert } from "../../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { auth } from "../../../firebase";
@@ -34,7 +35,7 @@ import {
 } from "../../booking/schoolTripsLib";
 import VehicleDetailsSection from "../../components/VehicleDetailsSection";
 import { useLanguage } from "../../i18n/LanguageProvider";
-import { fetchDriverEligibility } from "../driverEligibility";
+import { fetchDriverEligibility, getDriverEligibilityAlertCopy } from "../driverEligibility";
 import { getDriverSuspensionBlockedReason } from "../../booking/driverViolationsLib";
 import DateInput, { TimeInput } from "./DateInput";
 import {
@@ -233,7 +234,8 @@ export default function SchoolTripForm({ headerTitle, headerSubtitle }: Props) {
     const eligibility = await fetchDriverEligibility(user.uid);
 
     if (!eligibility.eligible) {
-      Alert.alert(t("driver.verificationRequired"), t("driver.mustVerifyLicense"));
+      const copy = getDriverEligibilityAlertCopy(eligibility.status, t);
+      Alert.alert(copy.title, copy.message);
       return;
     }
 

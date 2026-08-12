@@ -11,7 +11,6 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Modal,
   Pressable,
@@ -20,6 +19,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { Alert } from "../../AppAlert";
 
 import { useTranslation } from "react-i18next";
 

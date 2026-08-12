@@ -12,7 +12,8 @@ import * as ImagePicker from "expo-image-picker";
 import Constants from "expo-constants";
 import { doc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert } from "../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";

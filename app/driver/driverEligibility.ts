@@ -8,57 +8,44 @@
 //   - app/driver/create/*.tsx    (re-checked again right before saving a
 //                                 trip/job, in case the license expired or
 //                                 was revoked between screens)
+//   - app/(tabs)/bookings.tsx    (Republish Trip's own pre-submit re-check)
 //
 // A user stays a passenger regardless of this check — this only gates the
 // driver-only screens/actions.
+//
+// The actual decision logic lives in driverEligibilityCore.ts (dependency-
+// free, unit-tested — see tests/driverEligibilityCore.test.ts) and is
+// re-exported here unchanged so no existing import path changes. This file
+// only adds the one genuinely Firestore-dependent piece: fetching the
+// driver's current doc fresh before evaluating it.
 // ---------------------------------------------------------------------------
 
 import { doc, getDoc } from "firebase/firestore";
 
 import { db } from "../../firebase";
-import { getLicenseValidity } from "../login/idVerificationLib";
+import {
+  DriverEligibilityResult,
+  evaluateDriverEligibility,
+} from "./driverEligibilityCore";
 
-export type DriverEligibilityStatus =
-  | "eligible"
-  | "not_registered"
-  | "license_missing"
-  | "license_expired"
-  | "languages_missing";
-
-export type DriverEligibilityResult = {
-  eligible: boolean;
-  status: DriverEligibilityStatus;
-};
-
-// Pure — operates on an already-fetched users/{uid} doc body.
-export const evaluateDriverEligibility = (
-  data: Record<string, any> | null | undefined,
-): DriverEligibilityResult => {
-  if (!data || data.isDriver !== true) {
-    return { eligible: false, status: "not_registered" };
-  }
-
-  if (!data.licenseExpiryDate) {
-    return { eligible: false, status: "license_missing" };
-  }
-
-  const validity = getLicenseValidity(data.licenseExpiryDate);
-
-  if (validity !== "valid" || data.licenseIsValid !== true) {
-    return { eligible: false, status: "license_expired" };
-  }
-
-  if (!Array.isArray(data.spokenLanguages) || data.spokenLanguages.length === 0) {
-    return { eligible: false, status: "languages_missing" };
-  }
-
-  return { eligible: true, status: "eligible" };
-};
+export type {
+  ActiveSuspensionFields,
+  DriverEligibilityResult,
+  DriverEligibilityStatus,
+} from "./driverEligibilityCore";
+export {
+  computeClearedCancellationSuspension,
+  evaluateDriverEligibility,
+  getDriverEligibilityAlertCopy,
+} from "./driverEligibilityCore";
 
 // Fetches users/{uid} fresh from Firestore and evaluates it — use this at
 // decision points (button press, screen mount, right before a Firestore
 // write) rather than trusting cached/local state, since the license can
-// expire or be edited between screens.
+// expire or be edited between screens. Always a live read (never a cached
+// snapshot/local auth-state value), so an admin's reactivation is picked up
+// the very next time the driver hits any of this check's call sites — no
+// stale client state to worry about.
 export const fetchDriverEligibility = async (
   uid: string,
 ): Promise<DriverEligibilityResult> => {

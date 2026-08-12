@@ -14,7 +14,6 @@ import {
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Modal,
   Pressable,
@@ -23,7 +22,8 @@ import {
   Text,
   View,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import { Alert } from "../AppAlert";
+import MapView, { Marker } from "../../components/PlatformMapView";
 
 import { useTranslation } from "react-i18next";
 

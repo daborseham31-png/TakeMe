@@ -19,7 +19,6 @@ import * as ImagePicker from "expo-image-picker";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Modal,
   Pressable,
@@ -29,6 +28,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Alert } from "../AppAlert";
 import { useTranslation } from "react-i18next";
 
 import { compressImageToBase64 } from "../login/idVerificationLib";
