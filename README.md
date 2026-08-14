@@ -19,7 +19,7 @@ The project is built with **Expo / React Native**, **TypeScript**, **Firebase**,
 ## Project Links
 
 * **School Dashboard:** [School Dashboard](https://takeme-id-reader.yvcstudent4.workers.dev/school-kiosk/?schoolId=278010)
-* **User Guide:** [TakeMe User Guide](docs/TakeMe_User_Guide.pdf)
+* **User Guide:** [TakeMe User Guide](docs/מדריך משתמש .pdf)
 
 > The GitHub repository is private. Access can be granted to the project supervisor and examiner through GitHub Collaborators.
 
