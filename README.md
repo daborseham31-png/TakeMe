@@ -1,50 +1,118 @@
-# Welcome to your Expo app 👋
+# TakeMe
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+TakeMe is a cross-platform ride, school-transport, work/errand, and roadside-help marketplace app — passengers and drivers connect directly, with an admin dashboard for moderation and support. Built with Expo (iOS, Android, and Web) and Firebase.
 
-## Get started
+## Features
 
-1. Install dependencies
+**For passengers**
+- Book personal rides, one-off or weekly school rides, and browse work/errand listings
+- Pick a pickup location on a map (current location, saved places, or a dropped pin)
+- Request roadside help with live tracking of the assigned helper
+- Manage bookings — cancel, rebook, rate a driver
+- Save frequently used locations
+- Live in-app notifications
 
-   ```bash
-   npm install
-   ```
+**For drivers**
+- Apply to become a driver with ID/license verification (automated document scanning)
+- Publish personal, school, work, or errand trips, including recurring weekly schedules
+- Manage incoming booking requests and trip stages (start driving → arrived → in progress → finished)
+- Offer and complete roadside-help jobs
+- Ratings, cancellation/no-show violation tracking, and an appeal flow
 
-2. Start the app
+**For admins**
+- Dashboard with platform statistics
+- User and driver management (approve, block, suspend)
+- Review reports, roadside requests, and driver violation appeals
+- Broadcast notifications
 
-   ```bash
-   npx expo start
-   ```
+**Platform**
+- iOS, Android, and Web (installable as a PWA) from a single codebase
+- Full Arabic / Hebrew / English / Russian localization, including RTL layout
+- Firebase Authentication and Firestore for data, Cloudflare Workers for backend jobs that don't fit a client-only app (document scanning, scheduled no-show detection, notifications)
 
-In the output, you'll find options to open the app in a
+## Tech stack
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- [Expo](https://expo.dev) (SDK 54) / React Native / React
+- [Expo Router](https://docs.expo.dev/router/introduction/) for file-based navigation
+- TypeScript
+- Firebase (Auth, Firestore)
+- Cloudflare Workers for serverless backend jobs (see `cloudflare-worker/`)
+- [react-i18next](https://react.i18next.com/) for localization
+- [Vitest](https://vitest.dev/) for unit tests
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Getting started
 
-## Get a fresh project
+### Prerequisites
 
-When you're ready, run:
+- Node.js and npm
+- The [Expo Go](https://expo.dev/go) app (for quickest testing on a physical device) or an iOS/Android simulator
+
+### Setup
 
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Copy the example environment file and fill in any values you need (see the comments inside for what each one is used for):
 
-## Learn more
+```bash
+cp .env.example .env
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+### Run
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+npx expo start
+```
 
-## Join the community
+From the output you can open the app in a development build, an iOS simulator, an Android emulator, Expo Go, or a browser.
 
-Join our community of developers creating universal apps.
+Platform-specific shortcuts:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+npm run ios       # iOS simulator
+npm run android   # Android emulator
+npm run web       # Web (browser)
+```
+
+### Tests
+
+```bash
+npm test
+```
+
+### Type checking
+
+```bash
+npx tsc --noEmit
+```
+
+## Project structure
+
+```
+app/                 Screens and routes (Expo Router file-based routing)
+  (tabs)/             Bottom-tab screens (Home, My Bookings, Messages, Profile)
+  admin/               Admin dashboard screens
+  booking/             Booking flows (rides, school, work & errand, roadside help)
+  driver/              Driver-facing screens
+  login/               Auth screens
+  i18n/                Localization setup and translation files
+components/           Cross-platform components (e.g. native/web map variants)
+cloudflare-worker/    Serverless backend (document scanning, scheduled jobs, notifications)
+takeme-admin-desktop/ Standalone desktop build of the admin dashboard
+tests/                Vitest unit tests
+```
+
+## Web & PWA
+
+The web build is deployed via [EAS Hosting](https://docs.expo.dev/eas/hosting/introduction/) and is installable as a Progressive Web App on both iOS Safari and Android Chrome (Add to Home Screen), with its own manifest and icons (see `app/+html.tsx` and `public/`).
+
+To produce a production web build locally:
+
+```bash
+npx expo export --platform web
+```
+
+## Localization
+
+All user-facing strings live in `app/i18n/locales/` (`en`, `ar`, `he`, `ru`). Arabic and Hebrew are fully right-to-left; see `app/i18n/` for the RTL layout primitives used throughout the app.
