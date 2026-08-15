@@ -34,7 +34,7 @@
 // ---------------------------------------------------------------------------
 
 import * as Clipboard from "expo-clipboard";
-import { Linking } from "react-native";
+import { Linking, Platform } from "react-native";
 import { Alert } from "../AppAlert";
 
 // Plain helper module (not a component) — uses the initialized global
@@ -59,6 +59,22 @@ export const cleanPhoneNumber = (value: string): string => {
 };
 
 const tryOpenBit = async (): Promise<boolean> => {
+  // Web-only: react-native-web's Linking.canOpenURL() always resolves true
+  // (it doesn't actually check anything — see
+  // node_modules/react-native-web/src/exports/Linking/index.js), and its
+  // openURL() just calls window.open(), which does not throw for a custom
+  // scheme like "bit://" a normal browser tab has no handler for — it just
+  // silently does nothing. Left unguarded, this function always reported
+  // "opened successfully" on Web, which suppressed showBitNotInstalled()'s
+  // fallback below and left the passenger stuck with nothing visible after
+  // tapping OK. There's no reliable way to detect real success on Web, so —
+  // matching this module's own stated goal ("say so plainly instead of
+  // failing silently") — treat Web as never able to confirm the BIT app
+  // opened, and go straight to the fallback every time.
+  if (Platform.OS === "web") {
+    return false;
+  }
+
   try {
     const canOpen = await Linking.canOpenURL(BIT_SCHEME);
     if (canOpen) {

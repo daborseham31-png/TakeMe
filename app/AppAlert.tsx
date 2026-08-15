@@ -111,6 +111,15 @@ export function AppAlertHost() {
     button.onPress?.();
   };
 
+  // Matches native Alert.alert's own layout switch: 1-2 buttons sit
+  // side-by-side (same convention this app's other confirm modals already
+  // use — see admin/components/ConfirmModal.tsx), but native iOS stacks 3+
+  // buttons into a full-width vertical list instead of squeezing them into
+  // one row (e.g. profile.tsx's driver-gender picker: 3 options + Cancel).
+  // Web must switch the same way or a many-option alert renders as an
+  // illegibly squeezed row instead of matching the native list.
+  const stacked = state.buttons.length > 2;
+
   return (
     <Modal visible transparent animationType="fade" onRequestClose={handleBackdropPress}>
       <View style={styles.backdrop}>
@@ -120,22 +129,27 @@ export function AppAlertHost() {
           <Text style={styles.title}>{state.title}</Text>
           {state.message ? <Text style={styles.message}>{state.message}</Text> : null}
 
-          <View style={styles.buttonsRow}>
+          <View style={[styles.buttonsRow, stacked && styles.buttonsRowStacked]}>
             {state.buttons.map((button, index) => (
               <Pressable
                 key={index}
                 style={[
                   styles.button,
-                  button.style === "cancel" && styles.cancelButton,
-                  button.style === "destructive" && styles.destructiveButton,
+                  stacked && styles.buttonStacked,
+                  stacked && index > 0 && styles.buttonStackedDivider,
+                  !stacked && button.style === "cancel" && styles.cancelButton,
+                  !stacked && button.style === "destructive" && styles.destructiveButton,
                 ]}
                 onPress={() => handleButtonPress(button)}
               >
                 <Text
                   style={[
                     styles.buttonText,
-                    button.style === "cancel" && styles.cancelButtonText,
-                    button.style === "destructive" && styles.destructiveButtonText,
+                    stacked && styles.buttonTextStacked,
+                    stacked && button.style === "cancel" && styles.cancelTextStacked,
+                    stacked && button.style === "destructive" && styles.destructiveTextStacked,
+                    !stacked && button.style === "cancel" && styles.cancelButtonText,
+                    !stacked && button.style === "destructive" && styles.destructiveButtonText,
                   ]}
                 >
                   {button.text || t("common.ok")}
@@ -207,5 +221,37 @@ const styles = StyleSheet.create({
   },
   destructiveButtonText: {
     color: "#FFFFFF",
+  },
+  // 3+ buttons (e.g. a gender/option picker): full-width vertical list with
+  // thin dividers, matching native iOS Alert.alert's own layout switch —
+  // see the `stacked` comment above.
+  buttonsRowStacked: {
+    flexDirection: "column",
+    gap: 0,
+    marginHorizontal: -20,
+  },
+  buttonStacked: {
+    flex: 0,
+    backgroundColor: "transparent",
+    borderRadius: 0,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+  },
+  buttonStackedDivider: {
+    borderTopWidth: 1,
+    borderTopColor: "#F0E5DC",
+  },
+  buttonTextStacked: {
+    color: "#F58220",
+    fontWeight: "700",
+  },
+  // Native iOS bolds the Cancel action to set it apart from the regular
+  // options in a stacked alert — matched here rather than treating it the
+  // same weight as everything else.
+  cancelTextStacked: {
+    fontWeight: "900",
+  },
+  destructiveTextStacked: {
+    color: "#EF4444",
   },
 });

@@ -52,6 +52,7 @@ import {
   readExistingCancellationViolation,
   writeCancellationViolationIfNew,
 } from "../driverViolationCore";
+import { reverseGeocode } from "../reverseGeocode";
 
 const NOTIFICATION_WORKER_URL =
   "https://takeme-notifications.yvcstudent4.workers.dev";
@@ -210,7 +211,7 @@ export const detectCurrentLocation = async (): Promise<GeoPoint> => {
 
   let address = "";
   try {
-    const results = await Location.reverseGeocodeAsync({ latitude, longitude });
+    const results = await reverseGeocode(latitude, longitude);
     const first = results[0];
     if (first) {
       address = [first.street, first.city || first.region, first.country]

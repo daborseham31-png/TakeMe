@@ -43,6 +43,7 @@ import {
   normalizeLocationText,
   resolveLocationCoordinates,
 } from "./locationSearch";
+import { reverseGeocode } from "./reverseGeocode";
 import {
   createSavedLocation,
   SavedLocation,
@@ -75,7 +76,7 @@ export const resolvePickupArea = async (
   longitude: number,
 ): Promise<string> => {
   try {
-    const results = await Location.reverseGeocodeAsync({ latitude, longitude });
+    const results = await reverseGeocode(latitude, longitude);
     const place = results[0];
     if (!place) return "";
     return place.city || place.subregion || place.district || place.region || "";
@@ -311,6 +312,11 @@ export function LocationMapModal({
     longitude: DEFAULT_REGION.longitude,
   });
   const [address, setAddress] = useState("");
+  const [resolvingAddress, setResolvingAddress] = useState(false);
+  // Bumped on every resolveAddress call so a slow, stale response (e.g. a
+  // quick second tap before the first tap's lookup finishes) can never
+  // overwrite a newer selection's address.
+  const addressRequestRef = useRef(0);
   const [locating, setLocating] = useState(true);
   const [searchText, setSearchText] = useState("");
   // The selected city (from the curated israelLocations.ts dataset) — kept
@@ -377,16 +383,25 @@ export function LocationMapModal({
     });
   };
 
-  const resolveAddress = async (latitude: number, longitude: number) => {
-    try {
-      const results = await Location.reverseGeocodeAsync({ latitude, longitude });
-      const place = results[0];
+  const resolveAddress = async (latitude: number, longitude: number, existingToken?: number) => {
+    // A caller that already bumped the token itself (movePinTo, so the
+    // marker-set and the token bump happen in the same synchronous tick)
+    // passes it through instead of bumping again.
+    const myToken = existingToken ?? ++addressRequestRef.current;
+    setResolvingAddress(true);
 
+    try {
+      const results = await reverseGeocode(latitude, longitude);
+      if (addressRequestRef.current !== myToken) return;
+
+      const place = results[0];
       if (place) {
         setAddress(formatPlaceLabel(place));
       }
     } catch {
       // Fall back to raw coordinates (see addressLabel below).
+    } finally {
+      if (addressRequestRef.current === myToken) setResolvingAddress(false);
     }
   };
 
@@ -394,13 +409,19 @@ export function LocationMapModal({
   // address — the one place both a street-suggestion tap and (elsewhere) a
   // city pick land on, so they always behave identically.
   const movePinTo = (point: { latitude: number; longitude: number }, addressLabelText?: string) => {
+    // Bumped here (not just inside resolveAddress) so an explicit label —
+    // a street suggestion pick — also invalidates any earlier lookup still
+    // in flight; otherwise a slow, stale resolveAddress could land after
+    // and overwrite the label the user just picked.
+    const myToken = ++addressRequestRef.current;
     setMarker(point);
     mapRef.current?.animateToRegion({ ...point, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 500);
 
     if (addressLabelText) {
+      setResolvingAddress(false);
       setAddress(addressLabelText);
     } else {
-      resolveAddress(point.latitude, point.longitude);
+      resolveAddress(point.latitude, point.longitude, myToken);
     }
   };
 
@@ -434,6 +455,8 @@ export function LocationMapModal({
     setCityCoords(null);
     setLabel("");
     setAddress("");
+    setResolvingAddress(false);
+    addressRequestRef.current += 1;
     setStreetQuery("");
     setStreetSuggestions([]);
     setStreetNotFound(false);
@@ -724,6 +747,7 @@ export function LocationMapModal({
             <Text style={mapStyles.addressText} numberOfLines={2}>
               {locating ? t("pickupLocation.detectingLocation") : addressLabel}
             </Text>
+            {!locating && resolvingAddress ? <ActivityIndicator size="small" color="#F58220" /> : null}
           </View>
 
           <Pressable style={mapStyles.confirmButton} onPress={handleConfirm}>

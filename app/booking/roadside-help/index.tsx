@@ -25,6 +25,7 @@ import {
 import { translateCategoryLabel, translateProblemType } from "../../i18n/formatters";
 import { useLanguage } from "../../i18n/LanguageProvider";
 import { positionEnd } from "../../i18n/rtl";
+import { reverseGeocode } from "../reverseGeocode";
 import { createRoadsideRequest } from "./roadsideLib";
 
 // Default map region (Nazareth area) used until the user moves the pin.
@@ -82,7 +83,13 @@ export default function RoadsideHelpScreen() {
   const [descriptionError, setDescriptionError] = useState("");
   const [locating, setLocating] = useState(true);
   const [address, setAddress] = useState("");
+  const [resolvingAddress, setResolvingAddress] = useState(false);
   const [sending, setSending] = useState(false);
+
+  // Bumped on every resolveAddress call so a slow, stale response (e.g. the
+  // GPS fix's own lookup finishing after the user has already tapped a
+  // different point) can never overwrite a newer selection's address.
+  const addressRequestRef = useRef(0);
 
   // "Other" is the one problem type that requires a description — every
   // other type keeps it optional.
@@ -108,18 +115,26 @@ export default function RoadsideHelpScreen() {
   )}`;
   const addressLabel = address || coordsLabel;
 
-  // Turn coordinates into a readable place name (best effort).
+  // Turn coordinates into a readable place name (best effort, works on both
+  // native and Web — see reverseGeocode.ts). A stale response for a point
+  // the user has since moved away from is dropped rather than applied.
   const resolveAddress = async (latitude: number, longitude: number) => {
-    try {
-      const results = await Location.reverseGeocodeAsync({ latitude, longitude });
-      const place = results[0];
+    const myToken = ++addressRequestRef.current;
+    setResolvingAddress(true);
 
+    try {
+      const results = await reverseGeocode(latitude, longitude);
+      if (addressRequestRef.current !== myToken) return;
+
+      const place = results[0];
       if (place) {
         const parts = [place.name, place.city, place.region].filter(Boolean);
         setAddress(parts.join(", "));
       }
     } catch {
-      // Fall back to raw coordinates.
+      // Fall back to raw coordinates (see addressLabel above).
+    } finally {
+      if (addressRequestRef.current === myToken) setResolvingAddress(false);
     }
   };
 
@@ -262,6 +277,7 @@ export default function RoadsideHelpScreen() {
           <View style={styles.addressRow}>
             <Ionicons name="location" size={16} color="#EF4444" />
             <Text style={styles.addressText}>{addressLabel}</Text>
+            {resolvingAddress ? <ActivityIndicator size="small" color="#EF4444" /> : null}
           </View>
 
           <PhysicalDirectionalBlockText style={styles.hintText}>
@@ -275,12 +291,20 @@ export default function RoadsideHelpScreen() {
               ref={mapRef}
               style={styles.map}
               initialRegion={DEFAULT_REGION}
-              onPress={(event) => setMarker(event.nativeEvent.coordinate)}
+              onPress={(event) => {
+                const point = event.nativeEvent.coordinate;
+                setMarker(point);
+                resolveAddress(point.latitude, point.longitude);
+              }}
             >
               <Marker
                 draggable
                 coordinate={marker}
-                onDragEnd={(event) => setMarker(event.nativeEvent.coordinate)}
+                onDragEnd={(event) => {
+                  const point = event.nativeEvent.coordinate;
+                  setMarker(point);
+                  resolveAddress(point.latitude, point.longitude);
+                }}
               />
             </MapView>
 
