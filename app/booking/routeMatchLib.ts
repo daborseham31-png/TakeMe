@@ -139,7 +139,9 @@ export const isEffectivelySameLocation = (a: LatLng, b: LatLng): boolean =>
 // و"غير الصالح" (NaN، خارج النطاق) في فحص واحد، لذا لا يحتاج المستدعون أبدًا
 // لفحصين منفصلين.
 // الغرض: التحقق من صحة نقطة إحداثيات — موجودة، والأرقام منطقية وضمن النطاق المسموح.
-export function isValidLatLng(point: LatLng | null | undefined): point is LatLng {
+export function isValidLatLng(
+  point: LatLng | null | undefined,
+): point is LatLng {
   if (!point) return false;
   const { latitude, longitude } = point;
   return (
@@ -176,7 +178,10 @@ export function toFiniteCoordinate(value: unknown): number | null {
 // يتعامل معها هذا التطبيق؛ انظر ترويسة هذا الملف / ملاحظة "قيود الدقة" في
 // التقرير النهائي لمعرفة لماذا هذه مفاضلة مقصودة وليست إغفالًا.
 // الغرض: تحويل نقطة إحداثيات إلى إحداثيات مستوٍ مسطّح محلي (x, y) بالكيلومترات حول نقطة الأصل.
-const toLocalPlaneKm = (origin: LatLng, point: LatLng): { x: number; y: number } => {
+const toLocalPlaneKm = (
+  origin: LatLng,
+  point: LatLng,
+): { x: number; y: number } => {
   const latRad = (origin.latitude * Math.PI) / 180;
   const kmPerDegLat = 110.574;
   const kmPerDegLng = 111.32 * Math.cos(latRad);
@@ -268,7 +273,9 @@ export function prefilterCandidate(
     query.pickup,
   );
 
-  if (pickupProjection.distanceFromCorridorKm > MAX_ROUTE_CORRIDOR_DISTANCE_KM) {
+  if (
+    pickupProjection.distanceFromCorridorKm > MAX_ROUTE_CORRIDOR_DISTANCE_KM
+  ) {
     return {
       passed: false,
       pickupDistanceFromRouteKm: pickupProjection.distanceFromCorridorKm,
@@ -295,7 +302,8 @@ export function prefilterCandidate(
   // D تساوي C فعليًا (وجهة صريحة محذوفة، أو نفس المكان فعلاً) — يتم التحقق
   // مقابل وجهة السائق C نفسها بدلاً من إضافة فحص زائد يمر دائمًا.
   const destinationTarget =
-    query.destination && !isEffectivelySameLocation(query.destination, driverRoute.destination)
+    query.destination &&
+    !isEffectivelySameLocation(query.destination, driverRoute.destination)
       ? query.destination
       : driverRoute.destination;
 
@@ -314,22 +322,30 @@ export function prefilterCandidate(
     destinationTarget,
   );
 
-  if (destinationProjection.distanceFromCorridorKm > MAX_ROUTE_CORRIDOR_DISTANCE_KM) {
+  if (
+    destinationProjection.distanceFromCorridorKm >
+    MAX_ROUTE_CORRIDOR_DISTANCE_KM
+  ) {
     return {
       passed: false,
       pickupDistanceFromRouteKm: pickupProjection.distanceFromCorridorKm,
-      destinationDistanceFromRouteKm: destinationProjection.distanceFromCorridorKm,
+      destinationDistanceFromRouteKm:
+        destinationProjection.distanceFromCorridorKm,
       reason: "DESTINATION_MISMATCH",
     };
   }
 
   // يجب أن تأتي نقطة الاستلام قبل الوجهة على طول الممر — لا تتطلب أبدًا من
   // السائق السفر للخلف للوصول إلى B بعد أن يكون قد تجاوز موقع D بالفعل.
-  if (pickupProjection.progress > destinationProjection.progress + ROUTE_PROGRESS_TOLERANCE) {
+  if (
+    pickupProjection.progress >
+    destinationProjection.progress + ROUTE_PROGRESS_TOLERANCE
+  ) {
     return {
       passed: false,
       pickupDistanceFromRouteKm: pickupProjection.distanceFromCorridorKm,
-      destinationDistanceFromRouteKm: destinationProjection.distanceFromCorridorKm,
+      destinationDistanceFromRouteKm:
+        destinationProjection.distanceFromCorridorKm,
       reason: "WRONG_DIRECTION",
     };
   }
@@ -337,7 +353,8 @@ export function prefilterCandidate(
   return {
     passed: true,
     pickupDistanceFromRouteKm: pickupProjection.distanceFromCorridorKm,
-    destinationDistanceFromRouteKm: destinationProjection.distanceFromCorridorKm,
+    destinationDistanceFromRouteKm:
+      destinationProjection.distanceFromCorridorKm,
     reason: "MATCH",
   };
 }
@@ -392,9 +409,12 @@ export function evaluateApproximateDetour(
   }
 
   const detourRatio =
-    Number.isFinite(baseDistanceKm) && baseDistanceKm > 0 ? detourKm / baseDistanceKm : null;
+    Number.isFinite(baseDistanceKm) && baseDistanceKm > 0
+      ? detourKm / baseDistanceKm
+      : null;
 
-  if (detourKm > MAX_APPROXIMATE_DETOUR_KM) return { passed: false, detourRatio };
+  if (detourKm > MAX_APPROXIMATE_DETOUR_KM)
+    return { passed: false, detourRatio };
   if (detourRatio !== null && detourRatio > MAX_APPROXIMATE_DETOUR_RATIO) {
     return { passed: false, detourRatio };
   }
@@ -419,7 +439,9 @@ export type SortableRouteMatch = {
 };
 
 // الغرض: ترتيب قائمة نتائج المطابقة من الأفضل للأسوأ (أقل انحراف، ثم أقل بُعد استلام، ثم أقرب موعد، ثم أعلى تقييم).
-export function sortRouteMatches<T extends SortableRouteMatch>(items: T[]): T[] {
+export function sortRouteMatches<T extends SortableRouteMatch>(
+  items: T[],
+): T[] {
   return [...items].sort((a, b) => {
     const aDetour = a.approximateDetourKm ?? Number.POSITIVE_INFINITY;
     const bDetour = b.approximateDetourKm ?? Number.POSITIVE_INFINITY;
@@ -455,14 +477,16 @@ export function getRouteMatchesForCandidates(
   query: PassengerRouteQuery,
 ): RouteMatchResult[] {
   return candidates.map((driverRoute): RouteMatchResult => {
-    const prefilter = prefilterCandidate(driverRoute, query);
+    //تمر على كل رحلات السائقين المرشحين.
+    const prefilter = prefilterCandidate(driverRoute, query); //أول فحص: هل الراكب قريب من مسار السائق وهل الاتجاه صحيح؟
 
     if (!prefilter.passed) {
       return {
         tripId: driverRoute.tripId,
         eligible: false,
         pickupDistanceFromRouteKm: prefilter.pickupDistanceFromRouteKm,
-        destinationDistanceFromRouteKm: prefilter.destinationDistanceFromRouteKm,
+        destinationDistanceFromRouteKm:
+          prefilter.destinationDistanceFromRouteKm,
         approximateDetourKm: null,
         detourRatio: null,
         reason: prefilter.reason,
@@ -476,22 +500,24 @@ export function getRouteMatchesForCandidates(
     const destination = driverRoute.destination!;
 
     const passengerDestination =
-      query.destination && !isEffectivelySameLocation(query.destination, destination)
+      query.destination &&
+      !isEffectivelySameLocation(query.destination, destination)
         ? query.destination
         : null;
 
-    const baseDistanceKm = haversineKm(origin, destination);
+    const baseDistanceKm = haversineKm(origin, destination); //طول المسار
     const detourKm = calculateApproximateDetourKm(
+      // الانحراف
       origin,
       query.pickup,
       destination,
       passengerDestination,
     );
-    const detour = evaluateApproximateDetour({ baseDistanceKm, detourKm });
+    const detour = evaluateApproximateDetour({ baseDistanceKm, detourKm }); //نفحص إذا الانحراف ضمن الحدود المسموحة.
 
     return {
       tripId: driverRoute.tripId,
-      eligible: detour.passed,
+      eligible: detour.passed, //هل الرحله مناسبه
       pickupDistanceFromRouteKm: prefilter.pickupDistanceFromRouteKm,
       destinationDistanceFromRouteKm: prefilter.destinationDistanceFromRouteKm,
       approximateDetourKm: detourKm,
