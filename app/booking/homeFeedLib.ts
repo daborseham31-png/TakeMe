@@ -455,6 +455,12 @@ const normalizeErrandJobItem = (
 ): FeedItem | null => {
   if (data.deletedForDriver === true) return null;
   if (data.status === "completed" || isCancelledTripStatus(data.status)) return null;
+  // An errand listing is always exactly one customer (see
+  // acceptErrandRequest/cancelApplication in workErrandLib.ts) — once
+  // accepted, available flips to false so it stops being offered to
+  // everyone else, mirroring normalizeWorkJobItem's own available check
+  // below.
+  if (data.available === false) return null;
   if (isErrandHiddenFromSearch(data.date, data.startTime, bookingCount)) return null;
 
   return {

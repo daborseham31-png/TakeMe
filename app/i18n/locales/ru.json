@@ -1647,6 +1647,7 @@
     "mustBeLoggedIn": "Вы должны войти в систему, чтобы отправить запрос.",
     "cannotRequestOwnListing": "Вы не можете отправить запрос на собственное объявление.",
     "jobAlreadyFull": "На эту работу уже набрано достаточно людей.",
+    "errandAlreadyBooked": "Это поручение уже забронировано.",
     "missingJobId": "Отсутствует ID работы.",
     "requestNotFound": "Запрос не найден.",
     "requestAlreadyHandled": "Этот запрос уже обработан.",

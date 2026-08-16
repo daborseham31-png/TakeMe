@@ -332,6 +332,111 @@ const getDaysText = (driver: DriverRoute) => {
 // same from/to text already shown on the card.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// TEMP DEV-ONLY diagnostic — traces EVERY "personal"/"school" candidate for
+// a route-matching-eligible search through every commonFiltered stage
+// (PASS/FAIL) plus the raw stored fields and, when computed, the full
+// RouteMatchResult and the exact coordinates being compared. Added to debug
+// a reported "ride visible on Home Feed but missing from Available Drivers"
+// case where the __DEV__-gated rejection log alone wasn't enough to pin
+// down which stage was actually excluding it. __DEV__-gated only — never
+// runs, never logs anything, in a production build. Pure observability:
+// reads already-computed values, never influences them. Safe to delete once
+// the report above is resolved and confirmed.
+// ---------------------------------------------------------------------------
+const logCandidateTrace = (
+  driver: DriverRoute,
+  category: string,
+  requestedDate: string,
+  requestedTime: string,
+  seats: number,
+  passengerPickup: LatLng | null,
+  passengerDestination: LatLng | null,
+  stages: {
+    activeMatches: boolean;
+    categoryMatches: boolean;
+    genderMatches: boolean;
+    languageMatches: boolean;
+    locationCompatible: boolean;
+    routeMatch: RouteMatchResult | undefined;
+    routeMatchInput: DriverRouteInput | undefined;
+  },
+) => {
+  const seatsMatches = Number(driver.seats || 0) >= seats;
+  const dateMatches = !requestedDate || driver.tripDate === requestedDate;
+  const timeMatches = !requestedTime || isTimeClose(driver.time, requestedTime);
+
+  const pass = (value: boolean) => (value ? "PASS" : "FAIL");
+
+  // eslint-disable-next-line no-console
+  console.log("[driverresults][trace]", {
+    tripId: driver.id,
+    driverId: driver.driverId,
+    searchedCategory: category,
+    storedFields: {
+      category: driver.category,
+      from: driver.from,
+      to: driver.to,
+      fromLat: driver.fromLat,
+      fromLng: driver.fromLng,
+      toLat: driver.toLat,
+      toLng: driver.toLng,
+      tripDate: driver.tripDate,
+      time: driver.time,
+      seats: driver.seats,
+      status: driver.status,
+      active: driver.active,
+      isBooked: driver.isBooked,
+      available: driver.available,
+      bookingId: driver.bookingId,
+      bookedBy: driver.bookedBy,
+      deletedForDriver: driver.deletedForDriver,
+    },
+    searchParams: {
+      requestedDate,
+      requestedTime,
+      requestedSeats: seats,
+      passengerPickup,
+      passengerDestination,
+    },
+    stages: {
+      activeMatches: pass(stages.activeMatches),
+      categoryMatches: pass(stages.categoryMatches),
+      genderMatches: pass(stages.genderMatches),
+      languageMatches: pass(stages.languageMatches),
+      locationCompatible: pass(stages.locationCompatible),
+      seatsMatches: pass(seatsMatches),
+      dateMatches: pass(dateMatches),
+      timeMatches: pass(timeMatches),
+    },
+    routeMatchUsed: !!stages.routeMatch,
+    routeMatchComparedCoordinates: stages.routeMatchInput
+      ? {
+          driverOrigin: stages.routeMatchInput.origin,
+          driverDestination: stages.routeMatchInput.destination,
+        }
+      : null,
+    routeMatchResult: stages.routeMatch || null,
+    finalCommonFilteredInclusion: pass(
+      stages.activeMatches &&
+        stages.categoryMatches &&
+        stages.locationCompatible &&
+        stages.genderMatches &&
+        stages.languageMatches,
+    ),
+    finalQuickBookingInclusion: pass(
+      stages.activeMatches &&
+        stages.categoryMatches &&
+        stages.locationCompatible &&
+        stages.genderMatches &&
+        stages.languageMatches &&
+        seatsMatches &&
+        dateMatches &&
+        timeMatches,
+    ),
+  });
+};
+
 const logRejectedRouteMatchCandidate = (
   driver: DriverRoute,
   match: RouteMatchResult,
@@ -556,6 +661,37 @@ export default function DriverResultsScreen() {
 
       const routeMatchInputs = new Map<string, DriverRouteInput>();
 
+      // Root cause of "ride visible on Home, absent from Personal Search"
+      // for ANY destination locality that isn't in israelLocations.ts's
+      // curated coordinate set (most of the dataset's smaller towns/
+      // villages — see resolveLocationCoordinates in locationSearch.ts):
+      // the driver's own toLat/toLng (C) and this passenger's own toLat/
+      // toLng (D) are each resolved by a SEPARATE live geocode of the exact
+      // same bare town name, at different times/devices — routinely landing
+      // a few hundred meters to a couple of km apart even though they name
+      // the identical place. routeMatchLib.ts's own isEffectivelySameLocation
+      // check (150m) is far tighter than that real-world geocode variance,
+      // so D and C get treated as two genuinely different stops and a
+      // phantom "drive to D, then to C" detour leg gets added — often
+      // enough on its own to blow a short route's 25%-of-trip detour ratio
+      // cap, even though there is no real detour at all (both sides meant
+      // the same city). Splitting candidates by whether the DRIVER's own
+      // toLocationId matches THIS search's toLocationId — the same stable,
+      // canonical id every from/to comparison in this app already prefers
+      // over raw text/coordinates (see sameLocation in locationSearch.ts) —
+      // fixes this at the source: when both sides picked the identical
+      // curated locality, there is no real second destination to route
+      // through, so D is treated as genuinely omitted (routeMatchLib.ts's
+      // own existing "no destination given -> use the driver's own C"
+      // behavior) instead of as an independently-geocoded, coincidentally-
+      // nearby-but-different point. Candidates without a matching
+      // toLocationId (a genuinely different requested destination, or a
+      // legacy document with no id at all) keep using the real
+      // passengerDestination exactly as before — nothing about
+      // routeMatchLib.ts's own algorithm/thresholds changes.
+      const sameNamedDestinationInputs: DriverRouteInput[] = [];
+      const differentDestinationInputs: DriverRouteInput[] = [];
+
       if (ROUTE_MATCH_CATEGORIES.has(category) && passengerPickup) {
         routesWithProfiles.forEach((driver) => {
           const driverCategoryMatches =
@@ -574,23 +710,39 @@ export default function DriverResultsScreen() {
             return; // legacy fallback for this specific driver
           }
 
-          routeMatchInputs.set(driver.id, {
+          const input: DriverRouteInput = {
             tripId: driver.id,
             origin: { latitude: originLat, longitude: originLng },
             destination: { latitude: destLat, longitude: destLng },
-          });
+          };
+
+          routeMatchInputs.set(driver.id, input);
+
+          const sameDestinationLocality =
+            !!toLocationId && !!driver.toLocationId && driver.toLocationId === toLocationId;
+
+          (sameDestinationLocality ? sameNamedDestinationInputs : differentDestinationInputs).push(
+            input,
+          );
         });
       }
 
-      const routeMatchResults: Map<string, RouteMatchResult> =
-        routeMatchInputs.size > 0 && passengerPickup
-          ? new Map(
-              getRouteMatchesForCandidates(Array.from(routeMatchInputs.values()), {
-                pickup: passengerPickup,
-                destination: passengerDestination,
-              }).map((result) => [result.tripId, result]),
-            )
-          : new Map();
+      const routeMatchResults: Map<string, RouteMatchResult> = passengerPickup
+        ? new Map([
+            ...(sameNamedDestinationInputs.length > 0
+              ? getRouteMatchesForCandidates(sameNamedDestinationInputs, {
+                  pickup: passengerPickup,
+                  destination: null,
+                }).map((result) => [result.tripId, result] as const)
+              : []),
+            ...(differentDestinationInputs.length > 0
+              ? getRouteMatchesForCandidates(differentDestinationInputs, {
+                  pickup: passengerPickup,
+                  destination: passengerDestination,
+                }).map((result) => [result.tripId, result] as const)
+              : []),
+          ])
+        : new Map();
 
       const commonFiltered = routesWithProfiles.filter((driver) => {
         // A trip the driver explicitly cancelled (or hid from their own
@@ -616,39 +768,98 @@ export default function DriverResultsScreen() {
         const routeMatch =
           ROUTE_MATCH_CATEGORIES.has(category) ? routeMatchResults.get(driver.id) : undefined;
 
-        let locationCompatible: boolean;
+        // Both checks are ALWAYS computed and OR'd — never one exclusively.
+        // routeMatchLib.ts's own header describes route matching as
+        // ADDITIVE ("a driver whose origin city text differs... can STILL
+        // match here as long as...", see this file's own comment above
+        // routeMatchInputs): a way to catch candidates plain text/id
+        // matching would otherwise MISS, never a replacement that can
+        // REJECT a candidate text/id matching would otherwise catch. The
+        // previous exclusive if(routeMatch){...}else{...} broke that: the
+        // instant a candidate had valid stored coordinates, an exact from/to
+        // text match became irrelevant and only route-matching geometry
+        // decided — silently regressing any caller that starts supplying a
+        // real pickup point (e.g. the Rebook flow, once it began forwarding
+        // pickupLat/pickupLng) even when its from/to text is a perfect
+        // match. routeMatchLib.ts's own algorithm/thresholds are untouched
+        // — this only changes how the two existing signals combine.
+        const fromMatches = locationMatches(
+          driver.from || driver.fromNormalized || "",
+          from,
+          driver.fromLocationId,
+          fromLocationId,
+          driver.fromLocationNames,
+          fromLocationNames,
+        );
+        const toMatches = locationMatches(
+          driver.to || driver.toNormalized || "",
+          to,
+          driver.toLocationId,
+          toLocationId,
+          driver.toLocationNames,
+          toLocationNames,
+        );
+        const textOrIdLocationCompatible = fromMatches && toMatches;
 
-        if (routeMatch) {
-          locationCompatible = routeMatch.eligible;
+        const locationCompatible =
+          textOrIdLocationCompatible || (routeMatch ? routeMatch.eligible : false);
 
-          if (__DEV__ && !routeMatch.eligible) {
-            logRejectedRouteMatchCandidate(
-              driver,
+        if (__DEV__ && routeMatch && !routeMatch.eligible && !textOrIdLocationCompatible) {
+          logRejectedRouteMatchCandidate(
+            driver,
+            routeMatch,
+            routeMatchInputs.get(driver.id)!,
+            passengerPickup!,
+            passengerDestination,
+          );
+        }
+
+        // Narrowed to candidates that plausibly match the searched route, so
+        // a driverRoutes collection with many unrelated rides doesn't flood
+        // the console with one trace line per personal-category candidate on
+        // every search. Deliberately checks THREE independent signals, ORed
+        // together, instead of only free-text — a plain from/to substring
+        // check alone would silently hide a real candidate whose from/to was
+        // stored in a different script than what was typed into this search
+        // (Arabic/Hebrew autocomplete pick vs. an English-typed search, for
+        // instance) even though it's a fully legitimate candidate the real
+        // matching logic below would still correctly evaluate. tripDate is
+        // the most reliable signal of the three for this: a ride's tripDate
+        // matching the searched date is a very strong, script-independent
+        // signal it's the trip being tested.
+        const traceLooksRelevant =
+          (!!requestedDate && driver.tripDate === requestedDate) ||
+          (!!fromLocationId && driver.fromLocationId === fromLocationId) ||
+          (!!toLocationId && driver.toLocationId === toLocationId) ||
+          normalize(driver.from || driver.fromNormalized || "").includes(normalize(from)) ||
+          normalize(from).includes(normalize(driver.from || driver.fromNormalized || "")) ||
+          normalize(driver.to || driver.toNormalized || "").includes(normalize(to)) ||
+          normalize(to).includes(normalize(driver.to || driver.toNormalized || ""));
+
+        if (
+          __DEV__ &&
+          !isWeekly &&
+          (driver.category === "personal" || driver.category === "personal_ride") &&
+          traceLooksRelevant
+        ) {
+          logCandidateTrace(
+            driver,
+            category,
+            requestedDate,
+            requestedTime,
+            seats,
+            passengerPickup,
+            passengerDestination,
+            {
+              activeMatches,
+              categoryMatches,
+              genderMatches,
+              languageMatches,
+              locationCompatible,
               routeMatch,
-              routeMatchInputs.get(driver.id)!,
-              passengerPickup!,
-              passengerDestination,
-            );
-          }
-        } else {
-          const fromMatches = locationMatches(
-            driver.from || driver.fromNormalized || "",
-            from,
-            driver.fromLocationId,
-            fromLocationId,
-            driver.fromLocationNames,
-            fromLocationNames,
+              routeMatchInput: routeMatchInputs.get(driver.id),
+            },
           );
-          const toMatches = locationMatches(
-            driver.to || driver.toNormalized || "",
-            to,
-            driver.toLocationId,
-            toLocationId,
-            driver.toLocationNames,
-            toLocationNames,
-          );
-
-          locationCompatible = fromMatches && toMatches;
         }
 
         return (

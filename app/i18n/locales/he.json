@@ -1641,6 +1641,7 @@
     "mustBeLoggedIn": "עליך להתחבר כדי לשלוח בקשה.",
     "cannotRequestOwnListing": "לא ניתן לשלוח בקשה למודעה שלך עצמך.",
     "jobAlreadyFull": "משרת עבודה זו כבר מלאה.",
+    "errandAlreadyBooked": "השליחות הזו כבר הוזמנה.",
     "missingJobId": "מזהה המשרה חסר.",
     "requestNotFound": "הבקשה לא נמצאה.",
     "requestAlreadyHandled": "בקשה זו כבר טופלה.",

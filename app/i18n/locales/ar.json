@@ -1651,6 +1651,7 @@
     "mustBeLoggedIn": "يجب تسجيل الدخول لإرسال طلب.",
     "cannotRequestOwnListing": "لا يمكنك إرسال طلب إلى إعلانك الخاص.",
     "jobAlreadyFull": "وظيفة العمل هذه مكتملة العدد بالفعل.",
+    "errandAlreadyBooked": "هذه المهمة محجوزة بالفعل.",
     "missingJobId": "معرّف الوظيفة مفقود.",
     "requestNotFound": "الطلب غير موجود.",
     "requestAlreadyHandled": "تمت معالجة هذا الطلب بالفعل.",

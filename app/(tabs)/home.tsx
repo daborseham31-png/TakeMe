@@ -37,23 +37,20 @@ import { useLanguage } from "../i18n/LanguageProvider";
 import { positionEnd } from "../i18n/rtl";
 import {
   attachDistances,
-  attachRouteMatches,
   buildErrandBookNav,
   buildQuickRideNav,
   buildSchoolTripNav,
   buildWeeklyRideNav,
   buildWorkApplyNav,
-  computeRouteMatchesForPersonalRides,
   FEED_PAGE_SIZE,
   FeedCategory,
   FeedItem,
-  filterNearbyOrRouteMatchedItems,
+  filterNearbyItems,
   isRideExpired,
   NEARBY_RIDE_RADIUS_KM,
   sortFeedItems,
   subscribeHomeFeed,
 } from "../booking/homeFeedLib";
-import { RouteMatchResult } from "../booking/routeMatchLib";
 import { useCurrentLocation } from "../booking/useCurrentLocation";
 import { WeeklyDriverDay } from "../booking/weeklyBookingLib";
 import TripFeedCard from "../booking/TripFeedCard";
@@ -415,35 +412,24 @@ export default function HomeScreen() {
     [categoryFilteredItems, coords],
   );
 
-  // Route-based/detour-aware matching (see routeMatchLib.ts) — a fully
-  // local, free, synchronous geometric approximation (no network call, no
-  // API key), so this is just another useMemo, computed only for
-  // "personal" items and only while in "nearby" mode (the only place
-  // eligibility actually depends on it; "All rides" ignores it below).
-  const routeMatches = useMemo(() => {
-    if (effectiveMode !== "nearby" || !coords) return new Map<string, RouteMatchResult>();
-
-    const personalCandidates = categoryFilteredItems.filter(
-      (item) => item.category === "personal",
-    );
-    if (personalCandidates.length === 0) return new Map<string, RouteMatchResult>();
-
-    return computeRouteMatchesForPersonalRides(personalCandidates, coords);
-  }, [categoryFilteredItems, coords, effectiveMode]);
-
-  const itemsWithRouteMatch = useMemo(
-    () => attachRouteMatches(itemsWithDistance, routeMatches),
-    [itemsWithDistance, routeMatches],
-  );
-
+  // Home Feed "Nearby" is a plain radius filter on the exact same
+  // distanceKm every card already displays as "X km away" (see
+  // itemsWithDistance/attachDistances above) — current user location to
+  // ride pickup/origin, nothing else. It deliberately does NOT use the
+  // route/corridor-based passenger<->driver matching in routeMatchLib.ts
+  // (that answers a different question — "does this driver's route pass
+  // near my chosen pickup" — and is reserved for the actual booking flow in
+  // driverresults.tsx/personal-ride, unchanged here). A ride the card
+  // already shows as within range must never be excluded from Nearby by
+  // that unrelated corridor/detour check.
   const nearbyItems = useMemo(
-    () => sortFeedItems(filterNearbyOrRouteMatchedItems(itemsWithRouteMatch)),
-    [itemsWithRouteMatch],
+    () => sortFeedItems(filterNearbyItems(itemsWithDistance)),
+    [itemsWithDistance],
   );
 
   const allItemsSorted = useMemo(
-    () => sortFeedItems(itemsWithRouteMatch),
-    [itemsWithRouteMatch],
+    () => sortFeedItems(itemsWithDistance),
+    [itemsWithDistance],
   );
 
   const visibleFeedItems = (
