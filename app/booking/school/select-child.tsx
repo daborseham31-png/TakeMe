@@ -41,7 +41,16 @@ export default function SelectChildScreen() {
     } as any);
   };
 
-  const handleAddChild = () => router.push("/booking/school/my-children" as any);
+  // Auto-opens my-children.tsx's Add form and auto-returns here on a
+  // successful save — same behavior as Home's per-ride child-select sheet
+  // (see app/(tabs)/home.tsx), so the two entry points never diverge.
+  const handleAddChild = () =>
+    router.push({
+      pathname: "/booking/school/my-children",
+      params: { autoAdd: "1" },
+    } as any);
+
+  const handleManageChildren = () => router.push("/booking/school/my-children" as any);
 
   return (
     <DirectionalScreen style={styles.page}>
@@ -53,7 +62,11 @@ export default function SelectChildScreen() {
         <Text style={styles.subtitle}>{t("schoolChildren.selectChildScreenSubtitle")}</Text>
       </View>
 
-      <ChildSelector onContinue={handleContinue} onAddChild={handleAddChild} />
+      <ChildSelector
+        onContinue={handleContinue}
+        onAddChild={handleAddChild}
+        onManageChildren={handleManageChildren}
+      />
     </DirectionalScreen>
   );
 }

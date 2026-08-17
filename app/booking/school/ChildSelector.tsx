@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -41,14 +41,35 @@ const schoolDisplayFor = (child: SchoolChild): string => {
 type Props = {
   onContinue: (entries: SelectedChildEntry[]) => void;
   onAddChild: () => void;
+  // Distinct from onAddChild — opens the full "Manage My Children" screen
+  // (edit/reset code/remove) rather than jumping straight into the add-child
+  // form. Optional so any caller that predates this stays unaffected.
+  onManageChildren?: () => void;
+  // The specific ride's own remaining seat count, when the caller already
+  // knows it (Home's per-ride School Trip card entry point) — null/undefined
+  // when no specific ride is known yet (the ride-less "pick children first"
+  // entry via select-child.tsx), in which case no capacity check applies.
+  // Never touches ride availability/matching itself — purely a client-side
+  // guard so Continue can't proceed with more children than the ride can
+  // seat; createSchoolTripsBookingAfterPayment/createWeeklyBookings still
+  // re-verify seats server-side regardless.
+  maxSeats?: number | null;
 };
 
-export default function ChildSelector({ onContinue, onAddChild }: Props) {
+export default function ChildSelector({ onContinue, onAddChild, onManageChildren, maxSeats }: Props) {
   const { t } = useTranslation();
 
   const [loading, setLoading] = useState(true);
   const [children, setChildren] = useState<SchoolChild[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Distinguishes "first snapshot ever" (nothing to compare against yet, so
+  // never auto-select anything) from "a later snapshot" (compared against
+  // this to find IDs that just appeared, so a child added via onAddChild —
+  // my-children.tsx, navigated to and back from this exact sheet — gets
+  // auto-selected the moment its own live listener there commits the write,
+  // with no route-param/return-value plumbing needed).
+  const previousIdsRef = useRef<Set<string> | null>(null);
 
   // Kept mounted for the whole time the parent may navigate to
   // "Manage Children" (Add Child) and back — the same live-listener
@@ -56,7 +77,24 @@ export default function ChildSelector({ onContinue, onAddChild }: Props) {
   // child appears here automatically with no manual refresh.
   useEffect(() => {
     const unsub = subscribeMyChildren((next) => {
-      setChildren(next.filter((c) => c.active));
+      const active = next.filter((c) => c.active);
+      setChildren(active);
+
+      const nextIds = new Set(active.map((c) => c.id));
+
+      if (previousIdsRef.current) {
+        const newlyAdded = active.filter((c) => !previousIdsRef.current!.has(c.id));
+
+        if (newlyAdded.length > 0) {
+          setSelectedIds((prev) => {
+            const merged = new Set(prev);
+            newlyAdded.forEach((c) => merged.add(c.id));
+            return merged;
+          });
+        }
+      }
+
+      previousIdsRef.current = nextIds;
       setLoading(false);
     });
     return unsub;
@@ -75,9 +113,10 @@ export default function ChildSelector({ onContinue, onAddChild }: Props) {
   };
 
   const selectedCount = selectedIds.size;
+  const overCapacity = typeof maxSeats === "number" && selectedCount > maxSeats;
 
   const handleContinue = () => {
-    if (selectedCount === 0) return;
+    if (selectedCount === 0 || overCapacity) return;
 
     const entries = children
       .filter((child) => selectedIds.has(child.id))
@@ -101,7 +140,9 @@ export default function ChildSelector({ onContinue, onAddChild }: Props) {
   if (children.length === 0) {
     return (
       <View style={styles.emptyBox}>
-        <Ionicons name="people-outline" size={40} color="#C7B9AC" />
+        <View style={styles.emptyIconCircle}>
+          <Ionicons name="people-outline" size={34} color="#F58220" />
+        </View>
         <Text style={styles.emptyTitle}>{t("schoolChildren.noChildrenAddedTitle")}</Text>
         <Text style={styles.emptyText}>{t("schoolChildren.addChildrenFirstMessage")}</Text>
 
@@ -109,6 +150,15 @@ export default function ChildSelector({ onContinue, onAddChild }: Props) {
           <Ionicons name="add" size={20} color="#FFFFFF" />
           <Text style={styles.addButtonText}>{t("schoolChildren.addChild")}</Text>
         </Pressable>
+
+        {onManageChildren ? (
+          <Pressable style={styles.manageChildrenLink} onPress={onManageChildren}>
+            <Ionicons name="settings-outline" size={15} color="#3B82F6" />
+            <Text style={styles.manageChildrenLinkText}>
+              {t("schoolChildren.manageMyChildrenButton")}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }
@@ -138,25 +188,45 @@ export default function ChildSelector({ onContinue, onAddChild }: Props) {
           );
         })}
 
-        <Pressable style={styles.manageChildrenLink} onPress={onAddChild}>
-          <Ionicons name="add-circle-outline" size={16} color="#3B82F6" />
-          <Text style={styles.manageChildrenLinkText}>{t("schoolChildren.addChild")}</Text>
-        </Pressable>
+        <View style={styles.linksRow}>
+          <Pressable style={styles.manageChildrenLink} onPress={onAddChild}>
+            <Ionicons name="add-circle-outline" size={16} color="#3B82F6" />
+            <Text style={styles.manageChildrenLinkText}>{t("schoolChildren.addChild")}</Text>
+          </Pressable>
+
+          {onManageChildren ? (
+            <Pressable style={styles.manageChildrenLink} onPress={onManageChildren}>
+              <Ionicons name="settings-outline" size={15} color="#3B82F6" />
+              <Text style={styles.manageChildrenLinkText}>
+                {t("schoolChildren.manageMyChildrenButton")}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
       </ScrollView>
 
       <View style={styles.footer}>
-        {selectedCount > 0 ? (
+        {overCapacity ? (
+          <Text style={styles.capacityWarningText}>
+            {t("schoolChildren.tooManyChildrenSelected")}
+          </Text>
+        ) : selectedCount > 0 ? (
           <Text style={styles.selectedCountText}>
             {t("schoolChildren.selectedChildrenCount", { count: selectedCount })}
           </Text>
         ) : null}
 
         <Pressable
-          style={[styles.continueButton, selectedCount === 0 && styles.continueButtonDisabled]}
+          style={[
+            styles.continueButton,
+            (selectedCount === 0 || overCapacity) && styles.continueButtonDisabled,
+          ]}
           onPress={handleContinue}
-          disabled={selectedCount === 0}
+          disabled={selectedCount === 0 || overCapacity}
         >
-          <Text style={styles.continueButtonText}>{t("common.continue")}</Text>
+          <Text style={styles.continueButtonText}>
+            {t("schoolChildren.continueWithSelectedChildren")}
+          </Text>
         </Pressable>
       </View>
     </>
@@ -166,12 +236,18 @@ export default function ChildSelector({ onContinue, onAddChild }: Props) {
 const styles = StyleSheet.create({
   loadingBox: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 40 },
   emptyBox: {
-    flex: 1,
     alignItems: "center",
-    justifyContent: "center",
     paddingHorizontal: 32,
     paddingVertical: 30,
     gap: 10,
+  },
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#FFF2E8",
+    alignItems: "center",
+    justifyContent: "center",
   },
   emptyTitle: { fontSize: 17, fontWeight: "900", color: "#111827", marginTop: 6, textAlign: "center" },
   emptyText: { color: "#7C5F46", fontWeight: "700", textAlign: "center" },
@@ -202,6 +278,12 @@ const styles = StyleSheet.create({
   cardTextBox: { flex: 1 },
   childName: { fontSize: 16, fontWeight: "900", color: "#111827" },
   schoolName: { fontSize: 13, color: "#7C5F46", fontWeight: "700", marginTop: 2 },
+  linksRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 18,
+    marginTop: 4,
+  },
   manageChildrenLink: {
     flexDirection: "row",
     alignItems: "center",
@@ -220,6 +302,13 @@ const styles = StyleSheet.create({
   },
   selectedCountText: {
     color: "#7C5F46",
+    fontWeight: "800",
+    fontSize: 13,
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  capacityWarningText: {
+    color: "#B91C1C",
     fontWeight: "800",
     fontSize: 13,
     marginBottom: 8,

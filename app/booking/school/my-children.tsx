@@ -21,8 +21,8 @@
 // ---------------------------------------------------------------------------
 
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Keyboard,
@@ -67,6 +67,18 @@ const cityDisplayName = (city: IsraelLocation, language: string): string => {
 export default function MyChildrenScreen() {
   const { t } = useTranslation();
   const { isRTL, language } = useLanguage();
+  const params = useLocalSearchParams();
+
+  // Set when this screen was reached from a School Ride booking flow's
+  // "+ Add Child" (Home's child-select sheet / select-child.tsx) rather than
+  // a plain "Manage My Children" visit — see the effect below (auto-opens
+  // the Add form) and handleSave (auto-returns to that flow on success, so
+  // the ride the passenger was booking is never lost or re-searched for).
+  // Read once via a ref: the param only matters for how THIS visit started,
+  // never re-evaluated if the route object happens to re-render.
+  const cameFromBookingFlow = useRef(
+    String(params.autoAdd || "") === "1",
+  ).current;
 
   const [loading, setLoading] = useState(true);
   const [children, setChildren] = useState<SchoolChild[]>([]);
@@ -154,6 +166,17 @@ export default function MyChildrenScreen() {
     resetFormFields();
     setModalVisible(true);
   };
+
+  // Arriving here via "+ Add Child" from the booking flow skips straight to
+  // the Add form — the passenger already tapped "Add Child" once on the
+  // previous screen; making them tap it again here would be a dead-end
+  // detour, exactly what this whole feature exists to avoid.
+  useEffect(() => {
+    if (cameFromBookingFlow) {
+      openAddModal();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openEditModal = (child: SchoolChild) => {
     setEditingChild(child);
@@ -303,6 +326,8 @@ export default function MyChildrenScreen() {
 
     // Clean, explicit payload — never the entire child document or raw
     // modal state.
+    const wasAdd = !editingChild;
+
     try {
       setSaving(true);
       if (editingChild) {
@@ -321,6 +346,19 @@ export default function MyChildrenScreen() {
         });
       }
       setModalVisible(false);
+
+      // Came here via "+ Add Child" from a School Ride booking flow — return
+      // to it now that the child exists, instead of leaving the passenger
+      // stranded on Manage My Children. The ride they were booking is still
+      // there waiting (Home's childSelectItem/select-child.tsx never lose
+      // it while this screen is on top), and its own live subscribeMyChildren
+      // listener (ChildSelector.tsx) picks up the new child and auto-selects
+      // it the moment this write commits — no data needs to be threaded
+      // through this back-navigation. Only a genuinely new child triggers
+      // this — editing an existing one here always just returns to the list.
+      if (wasAdd && cameFromBookingFlow) {
+        router.back();
+      }
     } catch (error: any) {
       handleSaveError(error);
     } finally {

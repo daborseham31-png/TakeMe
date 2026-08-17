@@ -256,14 +256,20 @@ export default function useMySchoolRows({
   const [ratingComment, setRatingComment] = useState("");
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
 
-  // Passenger "Book Again" — same pattern/route as bookings.tsx's own
-  // openRebook/submitRebook (a small modal collecting a new date/time, then
-  // router.push to the existing driver-search screen) — appears once a
-  // completed school booking has actually been rated, exactly like the
-  // Personal Ride / roadside "Book Again" button already does.
-  const [bookAgain, setBookAgain] = useState<{ from: string; to: string; seats: number } | null>(
-    null,
-  );
+  // Passenger "Book Again" — same modal pattern as bookings.tsx's own
+  // openRebook/submitRebook (a small sheet collecting a new date/time), but
+  // routes to School's OWN current search pipeline (trip-results.tsx, which
+  // queries the schoolTrips collection — see submitSchoolBookAgain below),
+  // never driverresults.tsx (that screen only ever reads the legacy
+  // driverRoutes collection, which modern School trips — created via
+  // createSchoolOutboundTrip/createSchoolReturnOnlyTrip — never write to;
+  // routing Rebook there was this feature's own root-cause bug: it searched
+  // a collection the actual ride was never in). Keeps the FULL booking (not
+  // just from/to/seats) so every field trip-results.tsx's real matching
+  // (findMatchingSchoolTrips) and its own downstream trip-confirm.tsx need —
+  // direction, schoolId, coordinates, childEntries — can be forwarded
+  // exactly like a fresh DirectionSearchForm.tsx search already does.
+  const [bookAgain, setBookAgain] = useState<SchoolBooking | null>(null);
   const [bookAgainDate, setBookAgainDate] = useState("");
   const [bookAgainTime, setBookAgainTime] = useState("");
   const [showBookAgainDatePicker, setShowBookAgainDatePicker] = useState(false);
@@ -814,7 +820,7 @@ export default function useMySchoolRows({
   // ORIGINAL booking's own date/time (same as bookings.tsx's openRebook/
   // openRideRebook), fully editable before searching again.
   const openSchoolBookAgain = (booking: SchoolBooking) => {
-    setBookAgain({ from: booking.fromAddress, to: booking.toAddress, seats: booking.seats });
+    setBookAgain(booking);
     setBookAgainDate(booking.date || "");
     setBookAgainTime(booking.departureTime || "");
   };
@@ -827,8 +833,19 @@ export default function useMySchoolRows({
     setShowBookAgainTimePicker(false);
   };
 
-  // Same target screen/params shape as bookings.tsx's own submitRebook —
-  // never a second search screen, never a raw booking object in the URL.
+  // Targets the SAME screen (/booking/school/trip-results) and SAME param
+  // shape a fresh DirectionSearchForm.tsx search already sends — never a
+  // second, incompatible search/matching path. direction is carried straight
+  // from the original booking's own bookingDirection, so a Return rebook can
+  // never accidentally search/show Outbound trips (or vice versa).
+  // fromLat/fromLng/toLat/toLng/schoolLat/schoolLng are the exact same
+  // coordinates findMatchingSchoolTrips (schoolTripsLib.ts) already matches
+  // fresh searches against — omitted (never guessed) when the original
+  // booking predates this feature and has none, exactly like a fresh search
+  // already tolerates a failed geocode. pickupLat/pickupLng are deliberately
+  // NOT forwarded — trip-confirm.tsx already treats that as legitimately
+  // absent for a standalone return leg, and School has no separate stored
+  // pickup point on a booking to recover for an outbound one either.
   const submitSchoolBookAgain = () => {
     if (!bookAgain) return;
 
@@ -837,17 +854,59 @@ export default function useMySchoolRows({
       return;
     }
 
+    // Same { localId, childId, childName } shape trip-results.tsx/
+    // trip-confirm.tsx already parse (see DirectionSearchForm.tsx's own
+    // submit) — an outbound booking's full roster (childEntries[]) is
+    // reused as-is; a return booking (always exactly one child) is
+    // normalized into that same one-entry array shape.
+    const childEntries =
+      bookAgain.childEntries && bookAgain.childEntries.length > 0
+        ? bookAgain.childEntries.map((entry) => ({
+            localId: entry.localId,
+            childId: entry.childId || "",
+            childName: entry.childName || "",
+          }))
+        : bookAgain.childId || bookAgain.childName
+          ? [
+              {
+                localId: `child_${Date.now()}`,
+                childId: bookAgain.childId || "",
+                childName: bookAgain.childName || "",
+              },
+            ]
+          : [];
+
     router.push({
-      pathname: "/booking/driverresults",
+      pathname: "/booking/school/trip-results",
       params: {
-        from: bookAgain.from,
-        to: bookAgain.to,
-        category: "school",
+        direction: bookAgain.bookingDirection,
+        schoolId: bookAgain.schoolId,
+        schoolName: bookAgain.schoolName,
+        fromArea: bookAgain.fromAddress,
+        toArea: bookAgain.toAddress,
+        ...(bookAgain.fromLocation
+          ? {
+              fromLat: String(bookAgain.fromLocation.latitude),
+              fromLng: String(bookAgain.fromLocation.longitude),
+            }
+          : {}),
+        ...(bookAgain.toLocation
+          ? {
+              toLat: String(bookAgain.toLocation.latitude),
+              toLng: String(bookAgain.toLocation.longitude),
+            }
+          : {}),
+        ...(bookAgain.schoolLocation
+          ? {
+              schoolLat: String(bookAgain.schoolLocation.latitude),
+              schoolLng: String(bookAgain.schoolLocation.longitude),
+            }
+          : {}),
+        date: bookAgainDate,
+        requestedTime: bookAgainTime,
         seats: String(bookAgain.seats || 1),
-        tripDate: bookAgainDate,
-        time: bookAgainTime,
-        bookingType: "quick",
-        bookForWholeWeek: "false",
+        roundTrip: "false",
+        childEntries: JSON.stringify(childEntries),
       },
     } as any);
 
@@ -1838,7 +1897,7 @@ export default function useMySchoolRows({
                   </Text>
                 </View>
                 <Text style={styles.routeText}>
-                  {bookAgain.from} → {bookAgain.to}
+                  {bookAgain.fromAddress} → {bookAgain.toAddress}
                 </Text>
                 <Text style={styles.metaText}>
                   {t("booking.seatsCount", { count: bookAgain.seats })}
