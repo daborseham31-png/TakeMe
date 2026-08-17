@@ -27,14 +27,18 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
+  query,
   runTransaction,
   serverTimestamp,
+  where,
 } from "firebase/firestore";
 import { Alert } from "../AppAlert";
 
 import { auth, db } from "../../firebase";
 import i18n from "../i18n";
 import { deepRemoveUndefined } from "./schoolTripsLib";
+import { isCancelledTripStatus } from "./driverViolationCore";
 import { translateStoredDayName } from "../i18n/formatters";
 import {
   formatDateToYMD,
@@ -50,14 +54,19 @@ import {
   DayKey,
   DAY_KEY_LABEL,
   dayKeyFromAnyYMD,
+  filterOutAlreadyBookedMatches,
   getAnyDateCalendarBounds,
   getDriverDayTrips,
   getLocalNowInIsrael,
+  groupDriversByWeeklySeries,
   isDateSelectableForAnyDate,
   isTimeCloseEnough,
   matchDriverWeeklyDays,
+  matchWeeklyGroupDays,
   restoreSingleDateFromWeeklyRows,
   seedWeeklyRowsFromSingleDate,
+  weeklyMatchKey,
+  weeklySeriesKey,
   WeekDayRow,
   WeeklyDayMatch,
   WeeklyDriverDay,
@@ -69,16 +78,57 @@ export {
   computeWeeklyTotal,
   DAY_KEY_LABEL,
   dayKeyFromAnyYMD,
+  filterOutAlreadyBookedMatches,
   getAnyDateCalendarBounds,
   getDriverDayTrips,
   getLocalNowInIsrael,
+  groupDriversByWeeklySeries,
   isDateSelectableForAnyDate,
   isTimeCloseEnough,
   matchDriverWeeklyDays,
+  matchWeeklyGroupDays,
   restoreSingleDateFromWeeklyRows,
   seedWeeklyRowsFromSingleDate,
+  weeklyMatchKey,
+  weeklySeriesKey,
 };
 export type { DayKey, WeekDayRow, WeeklyDayMatch, WeeklyDriverDay, WeeklyRequestDay };
+
+// ---------------------------------------------------------------------------
+// Already-booked lookup — which of the passenger's own bookings already
+// cover a given (routeId, date), so the day-picker can exclude them from
+// what's shown/selectable (item 7 of this fix's own bug report) instead of
+// only discovering a duplicate once the booking transaction below rejects
+// it. `bookings` reads are open to any signed-in user (see firestore.rules'
+// own `match /bookings/{bookingId}` — `allow read: if isSignedIn()`, no
+// per-field query-shape requirement like schoolBookings has), so a single
+// passengerId-only query needs no new composite index; category/cancelled-
+// status/date matching is done client-side over that one (typically small)
+// result set.
+// ---------------------------------------------------------------------------
+
+export const fetchPassengerBookedRouteDateKeys = async (
+  passengerId: string,
+  category: "personal" | "school",
+): Promise<Set<string>> => {
+  const snap = await getDocs(
+    query(collection(db, "bookings"), where("passengerId", "==", passengerId)),
+  );
+
+  const keys = new Set<string>();
+
+  snap.docs.forEach((docSnap) => {
+    const data = docSnap.data() as any;
+
+    if (data.category !== category) return;
+    if (!data.routeId || !data.date) return;
+    if (isCancelledTripStatus(data.status) || isCancelledTripStatus(data.tripStatus)) return;
+
+    keys.add(weeklyMatchKey(String(data.routeId), String(data.date)));
+  });
+
+  return keys;
+};
 
 // ---------------------------------------------------------------------------
 // Day keys — DAY_KEYS/getDayKeyFromDate stay here (not in weeklyBookingCore)
@@ -515,6 +565,10 @@ export type CreateWeeklyBookingsInput = {
   driverCarColor?: string;
   driverCarPlateLast3?: string;
 
+  // Kept as a display/back-compat reference only (e.g. the clicked card's
+  // own document id) — the transaction below never uses this directly, only
+  // each selectedDays[i].routeId (falling back to this when a day somehow
+  // has none, for callers that predate per-day routeId).
   routeId: string;
   from: string;
   to: string;
@@ -596,8 +650,34 @@ export const createWeeklyBookings = async (
   }
 
   const bookingGroupId = generateBookingGroupId();
-  const routeRef = doc(db, "driverRoutes", input.routeId);
-  const bookingRefs = input.selectedDays.map(() => doc(collection(db, "bookings")));
+
+  // Each selected day carries its OWN source document (see
+  // WeeklyDriverDay.routeId's own comment) — a driver's Weekly Personal
+  // Ride is one SEPARATE driverRoutes document per date, so booking several
+  // days from the same weekly series means touching several distinct
+  // documents, not one. Falls back to input.routeId only for a caller that
+  // predates per-day routeId (defensive; every current caller sets it via
+  // buildBookingDayFromMatch).
+  const daysByRouteId = new Map<string, WeeklyDriverDay[]>();
+
+  for (const day of input.selectedDays) {
+    const dayRouteId = day.routeId || input.routeId;
+    const existing = daysByRouteId.get(dayRouteId);
+    if (existing) existing.push(day);
+    else daysByRouteId.set(dayRouteId, [day]);
+  }
+
+  const routeIds = Array.from(daysByRouteId.keys());
+  const routeRefs = new Map(routeIds.map((id) => [id, doc(db, "driverRoutes", id)] as const));
+
+  // Deterministic per-(route, date, passenger) booking id — the same
+  // passenger selecting the same day twice (a duplicate submission, two
+  // tabs/devices racing, a stale retry after a partial failure) always
+  // resolves to the SAME document, so transaction.get() below can detect
+  // and reject an actual duplicate atomically instead of ever creating two
+  // bookings for the same day (item 7 of this fix's own bug report).
+  const bookingRefFor = (day: WeeklyDriverDay, dayRouteId: string) =>
+    doc(db, "bookings", `wk_${dayRouteId}_${day.date}_${user.uid}`);
 
   const paymentFields =
     input.payment.method === "cash"
@@ -610,93 +690,142 @@ export const createWeeklyBookings = async (
             cardLast4: input.payment.cardLast4.slice(-4),
           };
 
+  const bookingIds: string[] = [];
+
   await runTransaction(db, async (transaction) => {
-    const routeSnap = await transaction.get(routeRef);
-
-    if (!routeSnap.exists()) {
-      throw new Error(i18n.t("rides.tripNoLongerAvailable"));
+    // PHASE 1 — every read, for every touched document, before any write
+    // (Firestore transactions require all transaction.get calls to happen
+    // before any transaction.set/update — see schoolTripsLib.ts's own
+    // PHASE 1/PHASE 2 convention, reused here; reads are sequential rather
+    // than Promise.all'd to match every other transaction in this codebase,
+    // none of which read concurrently).
+    const routeSnaps = new Map<string, Awaited<ReturnType<typeof transaction.get>>>();
+    for (const id of routeIds) {
+      // eslint-disable-next-line no-await-in-loop
+      routeSnaps.set(id, await transaction.get(routeRefs.get(id)!));
     }
 
-    const routeData: any = routeSnap.data();
-    const hasWeeklyTrips =
-      Array.isArray(routeData.weeklyTrips) && routeData.weeklyTrips.length > 0;
+    const bookingChecks: {
+      day: WeeklyDriverDay;
+      dayRouteId: string;
+      ref: ReturnType<typeof doc>;
+      alreadyExists: boolean;
+    }[] = [];
 
-    if (hasWeeklyTrips) {
-      const weeklyTrips: any[] = [...routeData.weeklyTrips];
-
-      for (const day of input.selectedDays) {
-        const index = weeklyTrips.findIndex((trip) => trip.date === day.date);
-
-        if (index === -1) {
-          throw new Error(
-            i18n.t("booking.dayNoLongerAvailable", {
-              day: translateStoredDayName(day.dayName, i18n.t),
-            }),
-          );
-        }
-
-        const currentRemaining =
-          typeof weeklyTrips[index].remainingSeats === "number"
-            ? weeklyTrips[index].remainingSeats
-            : weeklyTrips[index].seats;
-
-        if (currentRemaining < day.seats) {
-          throw new Error(
-            i18n.t("booking.dayNotEnoughSeats", {
-              day: translateStoredDayName(day.dayName, i18n.t),
-            }),
-          );
-        }
-
-        weeklyTrips[index] = {
-          ...weeklyTrips[index],
-          remainingSeats: currentRemaining - day.seats,
-        };
-      }
-
-      transaction.update(routeRef, {
-        weeklyTrips,
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      // Normal one-day driver route matched against a single day of the
-      // passenger's weekly request. It has no per-day remainingSeats to
-      // decrement — booking its one day consumes the whole route, exactly
-      // like the quick-booking flow does.
-      const alreadyBooked =
-        routeData.status === "booked" ||
-        routeData.status === "completed" ||
-        routeData.tripStatus === "completed" ||
-        routeData.isBooked === true ||
-        routeData.available === false ||
-        !!routeData.bookingId ||
-        !!routeData.bookedBy;
-
-      if (alreadyBooked) {
-        throw new Error(i18n.t("rides.tripAlreadyBooked"));
-      }
-
-      const routeSeats = Number(routeData.seats || 0);
-      const requestedSeats = input.selectedDays[0]?.seats || 0;
-
-      if (routeSeats < requestedSeats) {
-        throw new Error(i18n.t("booking.notEnoughSeatsAvailable"));
-      }
-
-      transaction.update(routeRef, {
-        status: "booked",
-        tripStatus: "booked",
-        isBooked: true,
-        available: false,
-        bookingId: bookingRefs[0].id,
-        bookedBy: user.uid,
-        bookedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+    for (const day of input.selectedDays) {
+      const dayRouteId = day.routeId || input.routeId;
+      const ref = bookingRefFor(day, dayRouteId);
+      // eslint-disable-next-line no-await-in-loop
+      const snap = await transaction.get(ref);
+      bookingChecks.push({ day, dayRouteId, ref, alreadyExists: snap.exists() });
     }
 
-    input.selectedDays.forEach((day, index) => {
-      transaction.set(bookingRefs[index], {
+    // PHASE 2 — every write. No transaction.get() below this point.
+    const alreadyBookedDayNames = bookingChecks
+      .filter((check) => check.alreadyExists)
+      .map((check) => translateStoredDayName(check.day.dayName, i18n.t));
+
+    if (alreadyBookedDayNames.length > 0) {
+      throw new Error(
+        i18n.t("booking.daysAlreadyBooked", { days: alreadyBookedDayNames.join(", ") }),
+      );
+    }
+
+    for (const [dayRouteId, days] of daysByRouteId) {
+      const routeRef = routeRefs.get(dayRouteId)!;
+      const routeSnap = routeSnaps.get(dayRouteId)!;
+
+      if (!routeSnap.exists()) {
+        throw new Error(i18n.t("rides.tripNoLongerAvailable"));
+      }
+
+      const routeData: any = routeSnap.data();
+      const hasWeeklyTrips =
+        Array.isArray(routeData.weeklyTrips) && routeData.weeklyTrips.length > 0;
+
+      if (hasWeeklyTrips) {
+        const weeklyTrips: any[] = [...routeData.weeklyTrips];
+
+        for (const day of days) {
+          const index = weeklyTrips.findIndex((trip) => trip.date === day.date);
+
+          if (index === -1) {
+            throw new Error(
+              i18n.t("booking.dayNoLongerAvailable", {
+                day: translateStoredDayName(day.dayName, i18n.t),
+              }),
+            );
+          }
+
+          const currentRemaining =
+            typeof weeklyTrips[index].remainingSeats === "number"
+              ? weeklyTrips[index].remainingSeats
+              : weeklyTrips[index].seats;
+
+          if (currentRemaining < day.seats) {
+            throw new Error(
+              i18n.t("booking.dayNotEnoughSeats", {
+                day: translateStoredDayName(day.dayName, i18n.t),
+              }),
+            );
+          }
+
+          weeklyTrips[index] = {
+            ...weeklyTrips[index],
+            remainingSeats: currentRemaining - day.seats,
+          };
+        }
+
+        transaction.update(routeRef, {
+          weeklyTrips,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        // Normal one-day driver route matched against a single day of the
+        // passenger's weekly request. It has no per-day remainingSeats to
+        // decrement — booking its one day consumes the whole route, exactly
+        // like the quick-booking flow does.
+        const alreadyBooked =
+          routeData.status === "booked" ||
+          routeData.status === "completed" ||
+          routeData.tripStatus === "completed" ||
+          routeData.isBooked === true ||
+          routeData.available === false ||
+          !!routeData.bookingId ||
+          !!routeData.bookedBy;
+
+        if (alreadyBooked) {
+          throw new Error(i18n.t("rides.tripAlreadyBooked"));
+        }
+
+        const routeSeats = Number(routeData.seats || 0);
+        const requestedSeats = days[0]?.seats || 0;
+
+        if (routeSeats < requestedSeats) {
+          throw new Error(i18n.t("booking.notEnoughSeatsAvailable"));
+        }
+
+        const firstBookingRef = bookingChecks.find(
+          (check) => check.dayRouteId === dayRouteId,
+        )!.ref;
+
+        transaction.update(routeRef, {
+          status: "booked",
+          tripStatus: "booked",
+          isBooked: true,
+          available: false,
+          bookingId: firstBookingRef.id,
+          bookedBy: user.uid,
+          bookedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    bookingChecks.forEach(({ day, dayRouteId, ref }) => {
+      bookingIds.push(ref.id);
+
+      transaction.set(ref, {
         bookingGroupId,
         bookingType: "weekly",
         category: input.category,
@@ -713,7 +842,10 @@ export const createWeeklyBookings = async (
         driverCarColor: input.driverCarColor || "",
         driverCarPlateLast3: input.driverCarPlateLast3 || "",
 
-        routeId: input.routeId,
+        // The SPECIFIC driverRoutes document this day came from — never the
+        // single top-level input.routeId, which is only ever one member of
+        // a possibly multi-document weekly series (see daysByRouteId above).
+        routeId: dayRouteId,
         from: input.from || "",
         to: input.to || "",
         schoolName: input.schoolName || null,
@@ -796,6 +928,6 @@ export const createWeeklyBookings = async (
 
   return {
     bookingGroupId,
-    bookingIds: bookingRefs.map((ref) => ref.id),
+    bookingIds,
   };
 };

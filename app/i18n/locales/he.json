@@ -340,6 +340,8 @@
     "noPets": "לא מתיר חיות מחמד",
     "bookThisDriver": "הזמן נהג זה",
     "chooseDaysModalTitle": "בחר ימים להזמנה עם נהג זה",
+    "selectedDaysTotalToPay": "סה\"כ לתשלום: ₪{{total}}",
+    "noDaysSelectedYet": "לא נבחרו ימים",
     "continueToPayment": "המשך לתשלום",
     "departureTimeLabel": "שעת יציאה"
   },
@@ -1271,6 +1273,7 @@
     "noLocationsFound": "לא נמצאו מיקומים",
     "dayNoLongerAvailable": "לנהג זה כבר אין זמינות ביום {{day}}.",
     "dayNotEnoughSeats": "אין מספיק מקומות ביום {{day}}. יש לבחור נהג אחר.",
+    "daysAlreadyBooked": "כבר הזמנת: {{days}}. יש לבטל את הסימון ולנסות שוב.",
     "notEnoughSeatsAvailable": "אין מספיק מקומות זמינים. יש לבחור נהג אחר.",
     "finishedTripsSection": "נסיעות שהסתיימו",
     "bucketUpcoming": "קרובות",
