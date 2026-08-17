@@ -331,11 +331,27 @@ export function sameLocation(
 
 export type ResolvedCoords = { latitude: number; longitude: number } | null;
 
+// A loose bounding box around Israel (incl. the West Bank/Gaza — this app's
+// whole service area) — mirrors PickupLocationPicker.tsx's own guard.
+// Rejects an unqualified geocode match that's obviously in the wrong
+// country/region rather than silently handing a wrong coordinate to every
+// downstream consumer (Nearby distance, routeMatchLib.ts's corridor/detour
+// matching, ...) as if it were correct.
+const ISRAEL_BOUNDS = { minLat: 29.3, maxLat: 33.5, minLng: 34.1, maxLng: 35.9 };
+
+const isWithinIsraelBounds = (latitude: number, longitude: number): boolean =>
+  latitude >= ISRAEL_BOUNDS.minLat &&
+  latitude <= ISRAEL_BOUNDS.maxLat &&
+  longitude >= ISRAEL_BOUNDS.minLng &&
+  longitude <= ISRAEL_BOUNDS.maxLng;
+
 // Prefers the curated dataset's own coordinates for the selected locality
 // (instant, free, no network — see israelLocations.ts) and only falls back
 // to a live geocode of the typed text when that locality doesn't have them
-// yet. Failures (offline, no match) simply return null — the caller must
-// still save the ride without coordinates rather than blocking creation.
+// yet (most of the dataset's smaller Arab towns/villages, e.g. "Iksal",
+// currently have no curated latitude/longitude). Failures (offline, no
+// match) simply return null — the caller must still save the ride without
+// coordinates rather than blocking creation.
 export async function resolveLocationCoordinates(
   place: IsraelLocation | null,
   fallbackText: string,
@@ -348,8 +364,14 @@ export async function resolveLocationCoordinates(
   if (!trimmed) return null;
 
   try {
-    const [geo] = await Location.geocodeAsync(trimmed);
-    if (geo) {
+    // Country-qualified — geocoding just the bare locality name (e.g.
+    // "Iksal") has no way to prefer this app's own service area and can
+    // resolve to an unrelated place that happens to share the name. This is
+    // the exact failure mode PickupLocationPicker.tsx's own street search
+    // already had to guard against (a Nazareth-area address once resolved
+    // to Syria) — same fix, applied here too.
+    const [geo] = await Location.geocodeAsync(`${trimmed}, Israel`);
+    if (geo && isWithinIsraelBounds(geo.latitude, geo.longitude)) {
       return { latitude: geo.latitude, longitude: geo.longitude };
     }
   } catch {

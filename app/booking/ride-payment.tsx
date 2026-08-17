@@ -232,14 +232,41 @@ export default function RidePaymentScreen() {
 
   const weeklyTotal = computeWeeklyTotal(selectedWeeklyDays);
 
-  const resultsPassthrough = {
-    category: isSchool ? "school" : "personal",
-    schoolName: String(params.schoolName || ""),
-    from,
-    to,
-    genderPref: String(params.genderPref || "any"),
-    languages: String(params.languages || ""),
-  };
+  // The COMPLETE original search query (see driverresults.tsx's own
+  // `originalSearchParams` — the same object it built when this screen was
+  // first opened), carried through unchanged so that redirecting back to
+  // driverresults for any remaining uncovered weekly days reuses the exact
+  // same query instead of a hand-built, incomplete one. This is the actual
+  // fix for the "Location missing" bug: the previous resultsPassthrough
+  // here only forwarded category/schoolName/from/to/genderPref/languages,
+  // silently dropping pickupLat/pickupLng/pickupAddress/pickupSource/toLat/
+  // toLng/fromLocationId/toLocationId/etc. — so the next driverresults load
+  // had no pickup point at all, and ride-payment's own pickupLocation
+  // requirement then rejected the very next booking attempt.
+  const originalSearchParamsRaw = String(params.originalSearchParams || "");
+
+  const resultsPassthrough = (() => {
+    if (originalSearchParamsRaw) {
+      try {
+        const parsed = JSON.parse(originalSearchParamsRaw);
+        if (parsed && typeof parsed === "object") return parsed;
+      } catch {
+        // fall through to the minimal fallback below
+      }
+    }
+
+    // Defensive fallback only — reached for a deep link/older client build
+    // that never had originalSearchParams to begin with. Deliberately the
+    // same minimal shape as before, never a source of new location data.
+    return {
+      category: isSchool ? "school" : "personal",
+      schoolName: String(params.schoolName || ""),
+      from,
+      to,
+      genderPref: String(params.genderPref || "any"),
+      languages: String(params.languages || ""),
+    };
+  })();
 
   const [method, setMethod] = useState<Method>(null);
   const [processing, setProcessing] = useState(false);

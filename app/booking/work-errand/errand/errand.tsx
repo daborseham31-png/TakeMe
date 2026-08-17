@@ -145,10 +145,18 @@ export default function ErrandsScreen() {
       // A trip the driver explicitly cancelled (or hid from their own list)
       // must never resurface in passenger browse results — see
       // driverViolationCore.ts's isCancelledTripStatus, the one shared
-      // policy every public/search query should use.
+      // policy every public/search query should use. An errand listing is
+      // always exactly one customer (see acceptErrandRequest/
+      // cancelApplication in workErrandLib.ts) — once accepted,
+      // available flips to false so it stops showing up here too, the same
+      // way Home's normalizeErrandJobItem already excludes it.
       const openDocs = snapshot.docs.filter((docSnap: QueryDocumentSnapshot) => {
         const data = docSnap.data();
-        return !isCancelledTripStatus(data.status) && data.deletedForDriver !== true;
+        return (
+          !isCancelledTripStatus(data.status) &&
+          data.deletedForDriver !== true &&
+          data.available !== false
+        );
       });
 
       // The owner's rating is their overall driverReviews-backed rating

@@ -436,6 +436,27 @@ export const createApplication = async (
     }
   }
 
+  // Same informational check as Work above, adapted for errand's own model:
+  // an errand listing is always exactly one customer (see
+  // acceptErrandRequest/cancelApplication's own comments), so "full" just
+  // means available === false — no seat count to compare. Never the
+  // authoritative guard (that's acceptErrandRequest's own transaction).
+  if (kind === "errand" && source.sourceId) {
+    try {
+      const jobSnap = await getDoc(doc(db, "errandJobs", source.sourceId));
+
+      if (jobSnap.exists() && jobSnap.data().available === false) {
+        throw new WorkJobFullError(i18n.t("workErrand.errandAlreadyBooked"));
+      }
+    } catch (error: any) {
+      if (error instanceof WorkJobFullError) {
+        throw error;
+      }
+      // Any other read failure shouldn't block sending the request — the
+      // accept-time transaction is the authoritative guard either way.
+    }
+  }
+
   const location = {
     latitude: details.location.latitude,
     longitude: details.location.longitude,
@@ -586,19 +607,77 @@ export const acceptRequest = async (
 ) => {
   // Work jobs have finite worker capacity (workersNeeded/remainingSeats) —
   // accepting must be a transaction that decrements it safely. Errand has
-  // no such capacity concept and keeps its existing pre-service
-  // payment-pending step, unchanged.
+  // no seat-count concept, but IS always exactly one customer (see
+  // acceptErrandRequest's own header) — accepting must still atomically
+  // claim the listing so it stops being offered to anyone else.
   if (kind === "work") {
     await acceptWorkRequest(id, data);
     return;
   }
 
-  const nextStatus: FlowStatus = paymentPendingStatus(kind);
+  await acceptErrandRequest(id, data);
+};
 
-  await updateDoc(doc(db, COLLECTION[kind], id), {
-    status: nextStatus,
-    driverAcceptedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+// ---------------------------------------------------------------------------
+// Errand only — accept a request, atomically claiming the listing for this
+// one customer.
+//
+// An errand job is always exactly one customer, never a shared-seat
+// resource like a multi-worker Work job (see cancelApplication's own
+// comment on driver-cancels-the-whole-listing below) — so accepting must
+// mark the listing unavailable (available:false) the same way Work marks a
+// job full once its last seat is taken, so it stops showing up on Home
+// (normalizeErrandJobItem) and the Errand browse screen
+// (errand/errand.tsx) for every other customer. Wrapped in a transaction,
+// mirroring acceptWorkRequest, so two employers/taps racing to accept two
+// different applicants for the SAME errand can't both succeed.
+// ---------------------------------------------------------------------------
+const acceptErrandRequest = async (id: string, data: NormalizedApplication) => {
+  if (!data.sourceId) {
+    throw new Error(i18n.t("workErrand.missingJobId"));
+  }
+
+  const appRef = doc(db, "errandApplications", id);
+  const jobRef = doc(db, "errandJobs", data.sourceId);
+  const nextStatus: FlowStatus = paymentPendingStatus("errand");
+
+  await runTransaction(db, async (transaction) => {
+    const appSnap = await transaction.get(appRef);
+
+    if (!appSnap.exists()) {
+      throw new Error(i18n.t("workErrand.requestNotFound"));
+    }
+
+    const appData: any = appSnap.data();
+
+    // Idempotency guard — a double-tap (or an already-handled request)
+    // must never re-claim an already-booked listing.
+    if (appData.status !== "pending") {
+      throw new Error(i18n.t("workErrand.requestAlreadyHandled"));
+    }
+
+    const jobSnap = await transaction.get(jobRef);
+
+    if (!jobSnap.exists()) {
+      throw new Error(i18n.t("workErrand.jobNoLongerExists"));
+    }
+
+    if (jobSnap.data().available === false) {
+      throw new Error(i18n.t("workErrand.errandAlreadyBooked"));
+    }
+
+    transaction.update(jobRef, {
+      available: false,
+      status: "booked",
+      bookedApplicationId: id,
+      updatedAt: serverTimestamp(),
+    });
+
+    transaction.update(appRef, {
+      status: nextStatus,
+      driverAcceptedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
   });
 
   await notify({
@@ -607,7 +686,7 @@ export const acceptRequest = async (
     title: "Request accepted",
     message: "Driver accepted your errand request. Please continue to payment.",
     applicationId: id,
-    kind,
+    kind: "errand",
     category: data.category,
     status: nextStatus,
   });
@@ -1316,13 +1395,22 @@ notifyOtherId =
           updatedAt: serverTimestamp(),
         });
       } else {
-        // Passenger (customer) cancellation — the driver still offers this
-        // errand; just record that one fewer real request exists (see the
-        // matching increment in createApplication above). increment(-1)
-        // needs no prior read, so this can run alongside the appRef write
-        // above without an extra transaction.get().
+        // Passenger (customer) cancellation — decrement the running
+        // request counter either way (see the matching increment in
+        // createApplication above; increment(-1) needs no prior read).
+        // If THIS application is the one that actually claimed the
+        // listing — i.e. it had moved past "pending" (see
+        // acceptErrandRequest, the ONLY place that ever sets
+        // available:false) — also reopen it so it reappears on Home/
+        // browse for other customers. A still-pending cancellation never
+        // claimed the listing, so there's nothing to restore.
+        const hadClaimedListing = current.status !== "pending";
+
         transaction.update(doc(db, "errandJobs", current.sourceId), {
           bookingCount: increment(-1),
+          ...(hadClaimedListing
+            ? { available: true, status: "available", bookedApplicationId: null }
+            : {}),
           updatedAt: serverTimestamp(),
         });
       }

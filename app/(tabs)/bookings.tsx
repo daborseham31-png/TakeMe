@@ -71,6 +71,7 @@ import {
   translateCancellationError,
 } from "../booking/bookingsLib";
 import { computeApproxDistanceKm } from "../booking/pickupLocationCore";
+import PickupLocationPicker, { PickupLocation } from "../booking/PickupLocationPicker";
 import {
   CANCELLATION_WARNING_MESSAGE_KEY,
   CancellationStandingResult,
@@ -688,6 +689,16 @@ export default function BookingsScreen() {
   const [rebookTime, setRebookTime] = useState("");
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  // Personal Ride rebooking only (see rebook.category === "personal" gates
+  // below) — ride-payment.tsx requires a real pickup point for this category
+  // exactly like the normal Personal Ride search (personal-ride/index.tsx)
+  // already does; Rebook previously skipped straight to driverresults.tsx
+  // with no pickup collected at all, so booking creation failed at the very
+  // last step with "missing information". Same shared picker component,
+  // same required field, same param shape driverresults.tsx already reads
+  // and forwards to ride-payment.tsx.
+  const [rebookPickupLocation, setRebookPickupLocation] = useState<PickupLocation | null>(null);
+  const [rebookPickerVisible, setRebookPickerVisible] = useState(false);
 
   // Driver "Republish Trip" — a compact confirmation MODAL (mirrors the
   // rebook state/modal directly above), never a full-page navigation. Only
@@ -2864,6 +2875,10 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
 
     setRebookDate(booking.date || "");
     setRebookTime(booking.time || "");
+    // Not Personal Ride (see BookingItem's own category — school/work/
+    // errand bookings never reach this branch) — pickup is never collected
+    // for these, same as before.
+    setRebookPickupLocation(null);
   };
 
   const openRideRebook = (ride: RideBooking) => {
@@ -2878,6 +2893,23 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
 
     setRebookDate(ride.date || "");
     setRebookTime(ride.time || "");
+
+    // Convenience prefill from the completed ride's own saved pickup point
+    // (requirement: still changeable before confirming) — only when it's a
+    // real, valid coordinate; a legacy/partial pickupLocation (address-only,
+    // or predating this field) leaves this null so the passenger is
+    // prompted to pick one fresh, same as a brand-new search would require.
+    const original = ride.pickupLocation;
+    setRebookPickupLocation(
+      original && typeof original.latitude === "number" && typeof original.longitude === "number"
+        ? {
+            latitude: original.latitude,
+            longitude: original.longitude,
+            address: original.address,
+            source: original.source,
+          }
+        : null,
+    );
   };
 
   const submitRebook = () => {
@@ -2885,6 +2917,16 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
 
     if (!rebookDate || !rebookTime) {
       Alert.alert(t("auth.missingDetails"), t("booking.chooseNewDateTimeMessage"));
+      return;
+    }
+
+    // Same requirement personal-ride/index.tsx's own search form already
+    // enforces before it ever navigates — blocked HERE, before the driver-
+    // selection/payment steps, rather than letting the passenger reach the
+    // final "Continue" on ride-payment.tsx and only then discover it's
+    // missing (see that screen's own pickupLocation gate).
+    if (rebook.category === "personal" && !rebookPickupLocation) {
+      Alert.alert(t("auth.missingDetails"), t("pickupLocation.pickupLocationRequired"));
       return;
     }
 
@@ -2899,6 +2941,14 @@ const hideGeneralBooking = async (bookingId: string, viewer: Tab) => {
         time: rebookTime,
         bookingType: "quick",
         bookForWholeWeek: "false",
+        ...(rebookPickupLocation
+          ? {
+              pickupLat: String(rebookPickupLocation.latitude),
+              pickupLng: String(rebookPickupLocation.longitude),
+              pickupAddress: rebookPickupLocation.address,
+              pickupSource: rebookPickupLocation.source,
+            }
+          : {}),
       },
     } as any);
 
@@ -5017,7 +5067,7 @@ useEffect(() => {
           <Text style={styles.infoText}>{otherName}</Text>
         </View>
 
-        {viewer === "driver" ? (
+        {viewer === "driver" && a.city ? (
           <View style={styles.infoRow}>
             <Ionicons name="business-outline" size={15} color="#7C5F46" />
             <Text style={styles.infoText}>
@@ -5738,6 +5788,24 @@ useEffect(() => {
               setShowPicker={setShowTimePicker}
             />
 
+            {rebook?.category === "personal" ? (
+              <View style={styles.rebookPickupBlock}>
+                <Text style={styles.rebookPickupLabel}>
+                  {t("pickupLocation.fieldLabel")}
+                </Text>
+                <Pressable
+                  style={styles.rebookPickupRow}
+                  onPress={() => setRebookPickerVisible(true)}
+                >
+                  <Ionicons name="location-outline" size={18} color="#8B7B6B" />
+                  <Text style={styles.rebookPickupText} numberOfLines={1}>
+                    {rebookPickupLocation?.address || t("pickupLocation.notSelectedPlaceholder")}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#C7B9AC" />
+                </Pressable>
+              </View>
+            ) : null}
+
             <Pressable style={styles.rebookSearchButton} onPress={submitRebook}>
               <Ionicons name="search-outline" size={16} color="#FFFFFF" />
               <Text style={styles.rebookSearchText}>{t("booking.searchDrivers")}</Text>
@@ -5749,6 +5817,12 @@ useEffect(() => {
           </DirectionalCard>
         </KeyboardAvoidingWrapper>
       </Modal>
+
+      <PickupLocationPicker
+        visible={rebookPickerVisible}
+        onClose={() => setRebookPickerVisible(false)}
+        onSelect={setRebookPickupLocation}
+      />
 
       <RepublishTripModal
         visible={!!republish}
@@ -7150,6 +7224,33 @@ const styles = StyleSheet.create({
   rebookCancelText: {
     color: "#7C5F46",
     fontWeight: "800",
+  },
+  rebookPickupBlock: {
+    width: "100%",
+    marginTop: 10,
+  },
+  rebookPickupLabel: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 8,
+    alignSelf: "flex-start",
+  },
+  rebookPickupRow: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#E2D8CF",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#FFFDFC",
+  },
+  rebookPickupText: {
+    flex: 1,
+    color: "#111827",
   },
   ratingSummaryRow: {
     flexDirection: "row",

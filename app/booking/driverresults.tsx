@@ -14,7 +14,7 @@ import {
 import { Alert } from "../AppAlert";
 import { useTranslation } from "react-i18next";
 
-import { db } from "../../firebase";
+import { auth, db } from "../../firebase";
 import i18n from "../i18n";
 import {
   DirectionalCard,
@@ -43,8 +43,12 @@ import {
 import {
   buildBookingDayFromMatch,
   computeWeeklyTotal,
+  fetchPassengerBookedRouteDateKeys,
+  filterOutAlreadyBookedMatches,
   getLocalNowInIsrael,
+  groupDriversByWeeklySeries,
   matchDriverWeeklyDays,
+  matchWeeklyGroupDays,
   WeeklyDayMatch,
   WeeklyDriverDay,
   WeeklyRequestDay,
@@ -115,6 +119,11 @@ type DriverRoute = {
   price?: number;
   seats?: number;
   weeklyTrips?: WeeklyDriverDay[];
+  // Links the separate driverRoutes documents created from ONE weekly
+  // Personal Ride submission — one document per selected date (see
+  // RideForm.tsx). Absent on legacy/standalone documents, which simply act
+  // as their own group of one (see weeklySeriesKey in weeklyBookingCore.ts).
+  weeklyGroupId?: string;
   rating?: number;
   reviews?: number;
   eta?: number;
@@ -332,6 +341,111 @@ const getDaysText = (driver: DriverRoute) => {
 // same from/to text already shown on the card.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// TEMP DEV-ONLY diagnostic — traces EVERY "personal"/"school" candidate for
+// a route-matching-eligible search through every commonFiltered stage
+// (PASS/FAIL) plus the raw stored fields and, when computed, the full
+// RouteMatchResult and the exact coordinates being compared. Added to debug
+// a reported "ride visible on Home Feed but missing from Available Drivers"
+// case where the __DEV__-gated rejection log alone wasn't enough to pin
+// down which stage was actually excluding it. __DEV__-gated only — never
+// runs, never logs anything, in a production build. Pure observability:
+// reads already-computed values, never influences them. Safe to delete once
+// the report above is resolved and confirmed.
+// ---------------------------------------------------------------------------
+const logCandidateTrace = (
+  driver: DriverRoute,
+  category: string,
+  requestedDate: string,
+  requestedTime: string,
+  seats: number,
+  passengerPickup: LatLng | null,
+  passengerDestination: LatLng | null,
+  stages: {
+    activeMatches: boolean;
+    categoryMatches: boolean;
+    genderMatches: boolean;
+    languageMatches: boolean;
+    locationCompatible: boolean;
+    routeMatch: RouteMatchResult | undefined;
+    routeMatchInput: DriverRouteInput | undefined;
+  },
+) => {
+  const seatsMatches = Number(driver.seats || 0) >= seats;
+  const dateMatches = !requestedDate || driver.tripDate === requestedDate;
+  const timeMatches = !requestedTime || isTimeClose(driver.time, requestedTime);
+
+  const pass = (value: boolean) => (value ? "PASS" : "FAIL");
+
+  // eslint-disable-next-line no-console
+  console.log("[driverresults][trace]", {
+    tripId: driver.id,
+    driverId: driver.driverId,
+    searchedCategory: category,
+    storedFields: {
+      category: driver.category,
+      from: driver.from,
+      to: driver.to,
+      fromLat: driver.fromLat,
+      fromLng: driver.fromLng,
+      toLat: driver.toLat,
+      toLng: driver.toLng,
+      tripDate: driver.tripDate,
+      time: driver.time,
+      seats: driver.seats,
+      status: driver.status,
+      active: driver.active,
+      isBooked: driver.isBooked,
+      available: driver.available,
+      bookingId: driver.bookingId,
+      bookedBy: driver.bookedBy,
+      deletedForDriver: driver.deletedForDriver,
+    },
+    searchParams: {
+      requestedDate,
+      requestedTime,
+      requestedSeats: seats,
+      passengerPickup,
+      passengerDestination,
+    },
+    stages: {
+      activeMatches: pass(stages.activeMatches),
+      categoryMatches: pass(stages.categoryMatches),
+      genderMatches: pass(stages.genderMatches),
+      languageMatches: pass(stages.languageMatches),
+      locationCompatible: pass(stages.locationCompatible),
+      seatsMatches: pass(seatsMatches),
+      dateMatches: pass(dateMatches),
+      timeMatches: pass(timeMatches),
+    },
+    routeMatchUsed: !!stages.routeMatch,
+    routeMatchComparedCoordinates: stages.routeMatchInput
+      ? {
+          driverOrigin: stages.routeMatchInput.origin,
+          driverDestination: stages.routeMatchInput.destination,
+        }
+      : null,
+    routeMatchResult: stages.routeMatch || null,
+    finalCommonFilteredInclusion: pass(
+      stages.activeMatches &&
+        stages.categoryMatches &&
+        stages.locationCompatible &&
+        stages.genderMatches &&
+        stages.languageMatches,
+    ),
+    finalQuickBookingInclusion: pass(
+      stages.activeMatches &&
+        stages.categoryMatches &&
+        stages.locationCompatible &&
+        stages.genderMatches &&
+        stages.languageMatches &&
+        seatsMatches &&
+        dateMatches &&
+        timeMatches,
+    ),
+  });
+};
+
 const logRejectedRouteMatchCandidate = (
   driver: DriverRoute,
   match: RouteMatchResult,
@@ -373,6 +487,17 @@ export default function DriverResultsScreen() {
 
   const [drivers, setDrivers] = useState<DriverRoute[]>([]);
   const [weeklyMatches, setWeeklyMatches] = useState<
+    Record<string, WeeklyDayMatch[]>
+  >({});
+  // Group-combined matches, used ONLY by the "Book this driver" day-picker
+  // bottom sheet (openWeeklyDayPicker/confirmWeeklyDayPicker below) — every
+  // driverRoutes document belonging to the SAME weekly series (see
+  // weeklyGroupId) maps here to the SAME full list of days, so no matter
+  // which date's card the passenger clicked, the sheet shows every day of
+  // that driver's weekly series. Kept separate from `weeklyMatches` above
+  // (which stays per-document, unchanged) so the existing per-date results
+  // grouping/display below is never affected by this fix.
+  const [weeklyBookingMatches, setWeeklyBookingMatches] = useState<
     Record<string, WeeklyDayMatch[]>
   >({});
   const [loading, setLoading] = useState(true);
@@ -467,6 +592,36 @@ export default function DriverResultsScreen() {
     .split(",")
     .filter(Boolean);
 
+  // The COMPLETE original search query this results screen itself was
+  // opened with — carried through unchanged to ride-payment.tsx and back
+  // again whenever some requested weekly days remain uncovered after a
+  // booking (see this fix's own bug report: "Location missing" happened
+  // because that round-trip used to hand-build a NEW, incomplete params
+  // object instead of reusing this one, silently dropping pickupLat/
+  // pickupLng/toLat/toLng/fromLocationId/toLocationId/etc.). Every field
+  // this screen itself reads from its own incoming params is included, so
+  // nothing the original search collected can be lost on the way back here.
+  const originalSearchParams = JSON.stringify({
+    category,
+    from,
+    to,
+    fromLocationId,
+    toLocationId,
+    fromLocationNames: params.fromLocationNames ? String(params.fromLocationNames) : undefined,
+    toLocationNames: params.toLocationNames ? String(params.toLocationNames) : undefined,
+    destinationDetails,
+    pickupLat,
+    pickupLng,
+    pickupAddress,
+    pickupSource,
+    toLat,
+    toLng,
+    schoolName: searchedSchoolName,
+    genderPref,
+    languages: String(params.languages || ""),
+    childEntries: String(params.childEntries || ""),
+  });
+
   useEffect(() => {
     loadDrivers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -556,6 +711,37 @@ export default function DriverResultsScreen() {
 
       const routeMatchInputs = new Map<string, DriverRouteInput>();
 
+      // Root cause of "ride visible on Home, absent from Personal Search"
+      // for ANY destination locality that isn't in israelLocations.ts's
+      // curated coordinate set (most of the dataset's smaller towns/
+      // villages — see resolveLocationCoordinates in locationSearch.ts):
+      // the driver's own toLat/toLng (C) and this passenger's own toLat/
+      // toLng (D) are each resolved by a SEPARATE live geocode of the exact
+      // same bare town name, at different times/devices — routinely landing
+      // a few hundred meters to a couple of km apart even though they name
+      // the identical place. routeMatchLib.ts's own isEffectivelySameLocation
+      // check (150m) is far tighter than that real-world geocode variance,
+      // so D and C get treated as two genuinely different stops and a
+      // phantom "drive to D, then to C" detour leg gets added — often
+      // enough on its own to blow a short route's 25%-of-trip detour ratio
+      // cap, even though there is no real detour at all (both sides meant
+      // the same city). Splitting candidates by whether the DRIVER's own
+      // toLocationId matches THIS search's toLocationId — the same stable,
+      // canonical id every from/to comparison in this app already prefers
+      // over raw text/coordinates (see sameLocation in locationSearch.ts) —
+      // fixes this at the source: when both sides picked the identical
+      // curated locality, there is no real second destination to route
+      // through, so D is treated as genuinely omitted (routeMatchLib.ts's
+      // own existing "no destination given -> use the driver's own C"
+      // behavior) instead of as an independently-geocoded, coincidentally-
+      // nearby-but-different point. Candidates without a matching
+      // toLocationId (a genuinely different requested destination, or a
+      // legacy document with no id at all) keep using the real
+      // passengerDestination exactly as before — nothing about
+      // routeMatchLib.ts's own algorithm/thresholds changes.
+      const sameNamedDestinationInputs: DriverRouteInput[] = [];
+      const differentDestinationInputs: DriverRouteInput[] = [];
+
       if (ROUTE_MATCH_CATEGORIES.has(category) && passengerPickup) {
         routesWithProfiles.forEach((driver) => {
           const driverCategoryMatches =
@@ -574,23 +760,39 @@ export default function DriverResultsScreen() {
             return; // legacy fallback for this specific driver
           }
 
-          routeMatchInputs.set(driver.id, {
+          const input: DriverRouteInput = {
             tripId: driver.id,
             origin: { latitude: originLat, longitude: originLng },
             destination: { latitude: destLat, longitude: destLng },
-          });
+          };
+
+          routeMatchInputs.set(driver.id, input);
+
+          const sameDestinationLocality =
+            !!toLocationId && !!driver.toLocationId && driver.toLocationId === toLocationId;
+
+          (sameDestinationLocality ? sameNamedDestinationInputs : differentDestinationInputs).push(
+            input,
+          );
         });
       }
 
-      const routeMatchResults: Map<string, RouteMatchResult> =
-        routeMatchInputs.size > 0 && passengerPickup
-          ? new Map(
-              getRouteMatchesForCandidates(Array.from(routeMatchInputs.values()), {
-                pickup: passengerPickup,
-                destination: passengerDestination,
-              }).map((result) => [result.tripId, result]),
-            )
-          : new Map();
+      const routeMatchResults: Map<string, RouteMatchResult> = passengerPickup
+        ? new Map([
+            ...(sameNamedDestinationInputs.length > 0
+              ? getRouteMatchesForCandidates(sameNamedDestinationInputs, {
+                  pickup: passengerPickup,
+                  destination: null,
+                }).map((result) => [result.tripId, result] as const)
+              : []),
+            ...(differentDestinationInputs.length > 0
+              ? getRouteMatchesForCandidates(differentDestinationInputs, {
+                  pickup: passengerPickup,
+                  destination: passengerDestination,
+                }).map((result) => [result.tripId, result] as const)
+              : []),
+          ])
+        : new Map();
 
       const commonFiltered = routesWithProfiles.filter((driver) => {
         // A trip the driver explicitly cancelled (or hid from their own
@@ -616,39 +818,98 @@ export default function DriverResultsScreen() {
         const routeMatch =
           ROUTE_MATCH_CATEGORIES.has(category) ? routeMatchResults.get(driver.id) : undefined;
 
-        let locationCompatible: boolean;
+        // Both checks are ALWAYS computed and OR'd — never one exclusively.
+        // routeMatchLib.ts's own header describes route matching as
+        // ADDITIVE ("a driver whose origin city text differs... can STILL
+        // match here as long as...", see this file's own comment above
+        // routeMatchInputs): a way to catch candidates plain text/id
+        // matching would otherwise MISS, never a replacement that can
+        // REJECT a candidate text/id matching would otherwise catch. The
+        // previous exclusive if(routeMatch){...}else{...} broke that: the
+        // instant a candidate had valid stored coordinates, an exact from/to
+        // text match became irrelevant and only route-matching geometry
+        // decided — silently regressing any caller that starts supplying a
+        // real pickup point (e.g. the Rebook flow, once it began forwarding
+        // pickupLat/pickupLng) even when its from/to text is a perfect
+        // match. routeMatchLib.ts's own algorithm/thresholds are untouched
+        // — this only changes how the two existing signals combine.
+        const fromMatches = locationMatches(
+          driver.from || driver.fromNormalized || "",
+          from,
+          driver.fromLocationId,
+          fromLocationId,
+          driver.fromLocationNames,
+          fromLocationNames,
+        );
+        const toMatches = locationMatches(
+          driver.to || driver.toNormalized || "",
+          to,
+          driver.toLocationId,
+          toLocationId,
+          driver.toLocationNames,
+          toLocationNames,
+        );
+        const textOrIdLocationCompatible = fromMatches && toMatches;
 
-        if (routeMatch) {
-          locationCompatible = routeMatch.eligible;
+        const locationCompatible =
+          textOrIdLocationCompatible || (routeMatch ? routeMatch.eligible : false);
 
-          if (__DEV__ && !routeMatch.eligible) {
-            logRejectedRouteMatchCandidate(
-              driver,
+        if (__DEV__ && routeMatch && !routeMatch.eligible && !textOrIdLocationCompatible) {
+          logRejectedRouteMatchCandidate(
+            driver,
+            routeMatch,
+            routeMatchInputs.get(driver.id)!,
+            passengerPickup!,
+            passengerDestination,
+          );
+        }
+
+        // Narrowed to candidates that plausibly match the searched route, so
+        // a driverRoutes collection with many unrelated rides doesn't flood
+        // the console with one trace line per personal-category candidate on
+        // every search. Deliberately checks THREE independent signals, ORed
+        // together, instead of only free-text — a plain from/to substring
+        // check alone would silently hide a real candidate whose from/to was
+        // stored in a different script than what was typed into this search
+        // (Arabic/Hebrew autocomplete pick vs. an English-typed search, for
+        // instance) even though it's a fully legitimate candidate the real
+        // matching logic below would still correctly evaluate. tripDate is
+        // the most reliable signal of the three for this: a ride's tripDate
+        // matching the searched date is a very strong, script-independent
+        // signal it's the trip being tested.
+        const traceLooksRelevant =
+          (!!requestedDate && driver.tripDate === requestedDate) ||
+          (!!fromLocationId && driver.fromLocationId === fromLocationId) ||
+          (!!toLocationId && driver.toLocationId === toLocationId) ||
+          normalize(driver.from || driver.fromNormalized || "").includes(normalize(from)) ||
+          normalize(from).includes(normalize(driver.from || driver.fromNormalized || "")) ||
+          normalize(driver.to || driver.toNormalized || "").includes(normalize(to)) ||
+          normalize(to).includes(normalize(driver.to || driver.toNormalized || ""));
+
+        if (
+          __DEV__ &&
+          !isWeekly &&
+          (driver.category === "personal" || driver.category === "personal_ride") &&
+          traceLooksRelevant
+        ) {
+          logCandidateTrace(
+            driver,
+            category,
+            requestedDate,
+            requestedTime,
+            seats,
+            passengerPickup,
+            passengerDestination,
+            {
+              activeMatches,
+              categoryMatches,
+              genderMatches,
+              languageMatches,
+              locationCompatible,
               routeMatch,
-              routeMatchInputs.get(driver.id)!,
-              passengerPickup!,
-              passengerDestination,
-            );
-          }
-        } else {
-          const fromMatches = locationMatches(
-            driver.from || driver.fromNormalized || "",
-            from,
-            driver.fromLocationId,
-            fromLocationId,
-            driver.fromLocationNames,
-            fromLocationNames,
+              routeMatchInput: routeMatchInputs.get(driver.id),
+            },
           );
-          const toMatches = locationMatches(
-            driver.to || driver.toNormalized || "",
-            to,
-            driver.toLocationId,
-            toLocationId,
-            driver.toLocationNames,
-            toLocationNames,
-          );
-
-          locationCompatible = fromMatches && toMatches;
         }
 
         return (
@@ -661,7 +922,20 @@ export default function DriverResultsScreen() {
       });
 
       if (isWeekly) {
+        // A day the passenger already has an active booking for must never
+        // be shown as available/selectable again (see this fix's own bug
+        // report, item 7) — fetched once, up front, so both the per-date
+        // display below AND the day-picker sheet exclude it consistently.
+        const currentUser = auth.currentUser;
+        const alreadyBookedKeys = currentUser
+          ? await fetchPassengerBookedRouteDateKeys(
+              currentUser.uid,
+              category === "school" ? "school" : "personal",
+            )
+          : new Set<string>();
+
         const matchesMap: Record<string, WeeklyDayMatch[]> = {};
+        const bookingMatchesMap: Record<string, WeeklyDayMatch[]> = {};
 
         // Each selected date is matched INDEPENDENTLY (OR logic) —
         // matchDriverWeeklyDays already checks every requested date
@@ -670,10 +944,11 @@ export default function DriverResultsScreen() {
         // required to cover every selected date. See this fix's own bug
         // report ("Search each selected date independently... OR logic").
         const matchedDrivers = commonFiltered.filter((driver) => {
-          const matches = matchDriverWeeklyDays(
-            driver,
-            sortedRequestedDates,
-            { maxTimeDiffMinutes: MAX_TIME_DIFF_MINUTES },
+          const matches = filterOutAlreadyBookedMatches(
+            matchDriverWeeklyDays(driver, sortedRequestedDates, {
+              maxTimeDiffMinutes: MAX_TIME_DIFF_MINUTES,
+            }),
+            alreadyBookedKeys,
           );
 
           if (matches.length === 0) return false;
@@ -682,7 +957,37 @@ export default function DriverResultsScreen() {
           return true;
         });
 
+        // A driver's Weekly Personal Ride is one SEPARATE driverRoutes
+        // document PER selected date (see RideForm.tsx), so matching a
+        // single document on its own (matchesMap above) only ever surfaces
+        // the ONE day that document holds — this is why the "Book this
+        // driver" sheet used to only show the day whose card was clicked.
+        // Grouping by weekly series (weeklyGroupId, falling back to the
+        // document's own id for a legacy/standalone document) and matching
+        // against the UNION of every member's days is what lets the sheet
+        // show the whole series regardless of which member's card opened
+        // it. See weeklyBookingCore.ts's own header on groupDriversByWeekly
+        // Series/matchWeeklyGroupDays for why this is a SEPARATE map from
+        // matchesMap rather than replacing it — the per-date results
+        // grouping below must keep showing one row per (date, document),
+        // unaffected by this.
+        const weeklyGroups = groupDriversByWeeklySeries(matchedDrivers);
+
+        weeklyGroups.forEach((members) => {
+          const groupMatches = filterOutAlreadyBookedMatches(
+            matchWeeklyGroupDays(members, sortedRequestedDates, {
+              maxTimeDiffMinutes: MAX_TIME_DIFF_MINUTES,
+            }),
+            alreadyBookedKeys,
+          );
+
+          members.forEach((member) => {
+            bookingMatchesMap[member.id] = groupMatches;
+          });
+        });
+
         setWeeklyMatches(matchesMap);
+        setWeeklyBookingMatches(bookingMatchesMap);
         setDrivers(matchedDrivers);
         return;
       }
@@ -840,7 +1145,7 @@ const handleBookDriver = async (driver: DriverRoute) => {
 // ---------------------------------------------------------------------------
 
 const openWeeklyDayPicker = (driver: DriverRoute) => {
-  const matches = weeklyMatches[driver.id] || [];
+  const matches = weeklyBookingMatches[driver.id] || [];
   if (matches.length === 0) return;
 
   setDayPickerDriver(driver);
@@ -869,14 +1174,18 @@ const toggleWeeklyDaySelection = (date: string) => {
 const selectAllWeeklyDays = () => {
   if (!dayPickerDriver) return;
 
-  const matches = weeklyMatches[dayPickerDriver.id] || [];
+  // weeklyBookingMatches is already pre-filtered to exclude already-booked
+  // and full (0 remaining seats) days (see loadDrivers above) — every date
+  // present here is genuinely valid/available/unbooked, so Select All never
+  // needs a second check.
+  const matches = weeklyBookingMatches[dayPickerDriver.id] || [];
   setDayPickerSelected(new Set(matches.map((match) => match.requested.date)));
 };
 
 const confirmWeeklyDayPicker = () => {
   if (!dayPickerDriver) return;
 
-  const matches = weeklyMatches[dayPickerDriver.id] || [];
+  const matches = weeklyBookingMatches[dayPickerDriver.id] || [];
   const chosen = matches.filter((match) =>
     dayPickerSelected.has(match.requested.date),
   );
@@ -925,6 +1234,12 @@ const confirmWeeklyDayPicker = () => {
 
       selectedWeeklyDays: JSON.stringify(selectedDaysForBooking),
       remainingWeeklyDays: JSON.stringify(remainingDays),
+
+      // The ORIGINAL search query, unchanged — see this const's own header
+      // comment above. ride-payment.tsx carries it through untouched and
+      // reuses it verbatim (never reconstructs a new/incomplete one) when
+      // redirecting back here for any remaining uncovered days.
+      originalSearchParams,
 
       // Passthrough so ride-payment can rebuild this results search if
       // some requested days still need a driver after this booking.
@@ -1386,7 +1701,7 @@ const resultsByDate = isWeekly
 
             <ScrollView style={styles.modalList}>
               {dayPickerDriver &&
-                (weeklyMatches[dayPickerDriver.id] || []).map((match) => {
+                (weeklyBookingMatches[dayPickerDriver.id] || []).map((match) => {
                   const checked = dayPickerSelected.has(match.requested.date);
 
                   return (
@@ -1431,6 +1746,18 @@ const resultsByDate = isWeekly
                 </DirectionalText>
               </Pressable>
             </DirectionalRow>
+
+            <DirectionalText style={styles.modalTotalText}>
+              {dayPickerSelected.size > 0
+                ? t("rides.selectedDaysTotalToPay", {
+                    total: computeWeeklyTotal(
+                      (dayPickerDriver ? weeklyBookingMatches[dayPickerDriver.id] || [] : [])
+                        .filter((match) => dayPickerSelected.has(match.requested.date))
+                        .map((match) => ({ price: match.driverDay.price, seats: match.requested.seats })),
+                    ),
+                  })
+                : t("rides.noDaysSelectedYet")}
+            </DirectionalText>
 
             <Pressable style={styles.modalPrimaryButton} onPress={confirmWeeklyDayPicker}>
               <DirectionalText style={styles.modalPrimaryButtonText}>
@@ -1846,6 +2173,13 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#7C5F46",
     fontSize: 15,
+  },
+  modalTotalText: {
+    textAlign: "center",
+    fontWeight: "900",
+    fontSize: 17,
+    color: "#111827",
+    marginBottom: 12,
   },
   modalPrimaryButton: {
     backgroundColor: "#F58220",
