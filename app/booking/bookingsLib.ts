@@ -174,6 +174,17 @@ export const getBookingTime = (booking: any): string => {
       booking?.tripTime ||
       booking?.selectedTime ||
       booking?.rideTime ||
+      // School's own SchoolTrip/school-booking shape (schoolTripsLib.ts) has
+      // no `.time` field at all — only `departureTime`. Missing this meant
+      // this fell straight through to the "00:00" fallback below, which
+      // hasScheduledDeparturePassed (driverNoShowCore.ts) then correctly —
+      // by its own logic — treated as "already passed" the instant the
+      // trip's date became today, regardless of the real departure time
+      // (see this fix's own bug report: 14:00/20:00/22:00 trips all showing
+      // "This trip date has passed" at 13:56). No other booking shape in
+      // this app uses this field name for anything else, so this is a safe
+      // addition, not a name collision.
+      booking?.departureTime ||
       "00:00",
   );
 };

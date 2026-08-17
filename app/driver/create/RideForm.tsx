@@ -20,6 +20,8 @@ import { getCategoryMeta } from "../../booking/bookingsLib";
 import IsraelLocationAutocomplete from "../../booking/IsraelLocationAutocomplete";
 import { IsraelLocation } from "../../booking/israelLocations";
 import { resolveLocationCoordinates } from "../../booking/locationSearch";
+import SchoolAutocomplete from "../../booking/SchoolAutocomplete";
+import { SchoolLocation } from "../../booking/schools";
 import {
   generateWeeklyGroupId,
   validateWeeklyRows,
@@ -134,11 +136,41 @@ export default function RideForm({
     setTo(text);
     setToLocation(null);
     if (toError) setToError("");
+
+    // The school picker is scoped to the destination area (see
+    // schoolAreaLocationId below) — a school picked for one destination must
+    // never be silently kept once that destination changes, same as
+    // SchoolTripForm.tsx's own handleToChange.
+    if (category === "school") {
+      setSchoolQuery("");
+      setSelectedSchool(null);
+      if (schoolError) setSchoolError("");
+    }
   };
 
-  // School: the exact school/university name, so passengers don't need
-  // GPS/Waze just to know which school this route serves — required.
-  const [schoolName, setSchoolName] = useState("");
+  // School: picked from the SAME curated dataset/component the one-time
+  // School Trip form uses (SchoolAutocomplete.tsx/schools.ts) — never
+  // free-typed, so every weekly School Ride is matched by a real school
+  // (schoolQuery/selectedSchool mirror SchoolTripForm.tsx's own state
+  // exactly, not a second independent implementation).
+  const [schoolQuery, setSchoolQuery] = useState("");
+  const [selectedSchool, setSelectedSchool] = useState<SchoolLocation | null>(null);
+  const [schoolError, setSchoolError] = useState("");
+
+  // Scoped to the destination (To) area — a weekly School Ride's "to" IS the
+  // school's own city, same convention as SchoolTripForm.tsx's outbound leg.
+  const schoolAreaLocationId = toLocation?.id ?? null;
+
+  const handleSchoolChange = (text: string) => {
+    setSchoolQuery(text);
+    setSelectedSchool(null);
+    if (schoolError) setSchoolError("");
+  };
+
+  const handleSelectSchool = (school: SchoolLocation) => {
+    setSelectedSchool(school);
+    setSchoolError("");
+  };
 
   // Personal: the exact place within the destination city (a building,
   // landmark, ...) — free text, optional, never used for driver matching
@@ -209,7 +241,7 @@ export default function RideForm({
       !carPlate ||
       !from ||
       !to ||
-      (category === "school" && !schoolName.trim()) ||
+      (category === "school" && !selectedSchool) ||
       (!recurring && (!tripDate || !price || !time || !seats))
     ) {
       Alert.alert(t("auth.missingDetails"), t("validation.fillAllFields"));
@@ -231,6 +263,11 @@ export default function RideForm({
 
     if (!toLocation) {
       setToError(t("validation.selectLocationFromList"));
+      return;
+    }
+
+    if (category === "school" && !selectedSchool) {
+      setSchoolError(t("schoolTrip.selectSchoolFromList"));
       return;
     }
 
@@ -339,7 +376,26 @@ export default function RideForm({
 
         from,
         to,
-        schoolName: category === "school" ? schoolName.trim() : null,
+        // Same field names the one-time School Trip flow already writes on
+        // its own schoolTrips documents (schoolId/schoolName/schoolAddress/
+        // schoolLocation — see SchoolTripForm.tsx's CreateSchoolTripInput) —
+        // never a second, driverRoutes-only schema. schoolName alone is the
+        // field this legacy weekly flow's own search/display already reads
+        // (driverresults.tsx), so it stays required for School; schoolId/
+        // schoolAddress/schoolLocation are additive (nothing currently reads
+        // them back off a driverRoutes doc, so writing them is always safe)
+        // for parity with the modern schoolTrips schema.
+        schoolName: category === "school" ? selectedSchool?.name || null : null,
+        ...(category === "school" && selectedSchool
+          ? {
+              schoolId: selectedSchool.id,
+              schoolAddress: selectedSchool.city,
+              schoolLocation: {
+                latitude: selectedSchool.latitude,
+                longitude: selectedSchool.longitude,
+              },
+            }
+          : {}),
         destinationDetails:
           category === "personal" ? destinationDetails.trim() || null : null,
         fromNormalized: normalize(from),
@@ -496,19 +552,16 @@ export default function RideForm({
           />
 
           {category === "school" ? (
-            <>
-              <Text style={styles.label}>{t("driverCreate.schoolName")}</Text>
-              <View style={styles.inputRow}>
-                <Ionicons name="school-outline" size={18} color="#8B7B6B" />
-                <TextInput
-                  style={styles.rowInput}
-                  placeholder={t("driverCreate.enterSchoolName")}
-                  placeholderTextColor="#8B7B6B"
-                  value={schoolName}
-                  onChangeText={setSchoolName}
-                />
-              </View>
-            </>
+            <SchoolAutocomplete
+              label={t("driverCreate.schoolName")}
+              value={schoolQuery}
+              onChangeText={handleSchoolChange}
+              onSelectSchool={handleSelectSchool}
+              areaLocationId={schoolAreaLocationId}
+              placeholder={t("schoolTrip.selectSchoolTitle")}
+              error={schoolError}
+              disabledMessage={t("driverCreate.selectDestinationFirstForSchool")}
+            />
           ) : null}
 
           {category === "personal" ? (

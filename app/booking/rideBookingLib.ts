@@ -366,18 +366,22 @@ export const cancelRideBooking = async (
         ? await readExistingCancellationViolation(transaction, current.driverId, "bookings", bookingId)
         : null;
 
-    // A driver cancellation also permanently retires the linked driverRoutes
-    // listing (if any) — never left bookable again — mirroring exactly what
-    // cancelGeneralBooking already does for a whole-route booking. A
-    // personal_ride booking is a direct 1:1 driver/passenger match (see this
-    // file's own header), so there is no shared seat pool to preserve for
-    // anyone else. Read (still PHASE 1) before any write below, and only
-    // updated if it still exists — a booking's routeId could in principle
-    // point at an already-deleted route.
-    const routeRef =
-      cancelledBy === "driver" && current.routeId
-        ? doc(db, "driverRoutes", current.routeId)
-        : null;
+    // Read the linked driverRoutes listing (if any) regardless of who's
+    // cancelling — PASSENGER cancellation must free the seat/route so
+    // someone else can book it (the driver is still running this trip);
+    // DRIVER cancellation permanently retires it (never reopened/rebookable
+    // — see cancelGeneralBooking's own comment on the exact bug this
+    // distinction was already fixed for: "a driver-cancelled trip wrongly
+    // reappearing under Unbooked Trips and in passenger search"). This
+    // function previously only ever read the route for a DRIVER
+    // cancellation, so a PASSENGER cancelling their own personal_ride
+    // booking never restored the route at all — it stayed permanently
+    // isBooked:true/available:false, invisible to every other passenger,
+    // even though the driver never cancelled anything. Read (still PHASE 1)
+    // before any write below, and only updated if it still exists — a
+    // booking's routeId could in principle point at an already-deleted
+    // route.
+    const routeRef = current.routeId ? doc(db, "driverRoutes", current.routeId) : null;
     const routeSnap = routeRef ? await transaction.get(routeRef) : null;
 
     transaction.update(bookingRef, {
@@ -388,16 +392,6 @@ export const cancelRideBooking = async (
       cancelledBy,
       updatedAt: serverTimestamp(),
     });
-
-    if (routeSnap && routeSnap.exists()) {
-      transaction.update(routeRef!, {
-        status: DRIVER_CANCELLED_TRIP_STATUS,
-        isBooked: true,
-        available: false,
-        deletedForDriver: true,
-        updatedAt: serverTimestamp(),
-      });
-    }
 
     if (violationSnap && current.driverId) {
       driverIdForViolation = current.driverId;
@@ -415,6 +409,64 @@ export const cancelRideBooking = async (
     notifyPassengerName = current.passengerName;
     notifyDriverName = current.driverName;
     didCancel = true;
+
+    if (!routeRef || !routeSnap || !routeSnap.exists()) return;
+
+    const routeData: any = routeSnap.data();
+    const hasWeeklyTrips =
+      Array.isArray(routeData.weeklyTrips) && routeData.weeklyTrips.length > 0;
+
+    if (cancelledBy !== "passenger") {
+      if (!hasWeeklyTrips && routeData.bookingId === bookingId) {
+        // Whole-route booking (no per-day capacity) — this route WAS this
+        // one trip. Cancel it outright and hide it from the driver's own
+        // Upcoming/Unbooked Trips — the just-cancelled `bookings` doc above
+        // remains the retained history record — instead of reopening it.
+        transaction.update(routeRef, {
+          status: DRIVER_CANCELLED_TRIP_STATUS,
+          isBooked: true,
+          available: false,
+          deletedForDriver: true,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      // Weekly: deliberately NO write here — that occurrence's seat stays
+      // exactly as already consumed (never restored), so it can never be
+      // rebooked, while every OTHER day in the same weekly series is left
+      // completely untouched.
+      return;
+    }
+
+    if (hasWeeklyTrips && current.date) {
+      const weeklyTrips = [...routeData.weeklyTrips];
+      const index = weeklyTrips.findIndex((trip: any) => trip.date === current.date);
+      if (index === -1) return;
+
+      const currentRemaining =
+        typeof weeklyTrips[index].remainingSeats === "number"
+          ? weeklyTrips[index].remainingSeats
+          : 0;
+      const totalSeats = Number(weeklyTrips[index].seats) || currentRemaining;
+
+      weeklyTrips[index] = {
+        ...weeklyTrips[index],
+        remainingSeats: Math.min(currentRemaining + (current.seats || 1), totalSeats),
+      };
+
+      transaction.update(routeRef, { weeklyTrips, updatedAt: serverTimestamp() });
+    } else if (routeData.bookingId === bookingId) {
+      // Whole-route booking (no per-day capacity) — reopen it, mirroring
+      // the exact fields createBookingAfterPayment/createWeeklyBookings set
+      // when it was first booked.
+      transaction.update(routeRef, {
+        status: "active",
+        tripStatus: "booked",
+        isBooked: false,
+        available: true,
+        bookingId: null,
+        updatedAt: serverTimestamp(),
+      });
+    }
   });
 
   // The booking is ALREADY cancelled at this point (the transaction above

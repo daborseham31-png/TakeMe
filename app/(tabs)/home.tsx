@@ -22,6 +22,7 @@ import {
   View,
 } from "react-native";
 import { Alert } from "../AppAlert";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../firebase";
@@ -99,6 +100,7 @@ const FILTER_ICONS: Record<FilterKey, keyof typeof Ionicons.glyphMap> = {
 export default function HomeScreen() {
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
+  const insets = useSafeAreaInsets();
   // Home never unmounts once visited (expo-router Tabs keep every visited
   // tab screen mounted in the background) — this is read ONLY by the
   // "Trips near you" feed subscription below, so those 4 collection-wide
@@ -1286,10 +1288,16 @@ export default function HomeScreen() {
         <View style={styles.childSelectOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={closeChildSelect} />
 
-          <DirectionalCard style={styles.childSelectCard}>
+          <DirectionalCard
+            style={[styles.childSelectCard, { paddingBottom: Math.max(insets.bottom, 12) }]}
+          >
             <View style={styles.childSelectHandle} />
 
             <View style={styles.childSelectHeaderRow}>
+              <View style={styles.childSelectIconCircle}>
+                <Ionicons name="people" size={18} color="#F58220" />
+              </View>
+
               <View style={{ flex: 1 }}>
                 <Text style={[styles.childSelectTitle, isRTL && styles.textRTL]}>
                   {t("schoolChildren.selectChildScreenTitle")}
@@ -1306,7 +1314,20 @@ export default function HomeScreen() {
 
             <ChildSelector
               onContinue={handleChildSelectionContinue}
-              onAddChild={() => router.push("/booking/school/my-children" as any)}
+              // "+ Add Child" — auto-opens my-children.tsx's own add-child
+              // form and, on a successful save, auto-navigates back here
+              // (see my-children.tsx's own autoAdd handling) so the ride
+              // this sheet was opened for is never lost. Distinct from
+              // "Manage My Children" below, which is a plain visit with no
+              // auto-open/auto-return.
+              onAddChild={() =>
+                router.push({
+                  pathname: "/booking/school/my-children",
+                  params: { autoAdd: "1" },
+                } as any)
+              }
+              onManageChildren={() => router.push("/booking/school/my-children" as any)}
+              maxSeats={childSelectItem?.seats ?? null}
             />
           </DirectionalCard>
         </View>
@@ -1812,7 +1833,17 @@ const styles = StyleSheet.create({
   childSelectHeaderRow: {
     flexDirection: "row",
     alignItems: "flex-start",
+    gap: 10,
     paddingHorizontal: 20,
+  },
+  childSelectIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#FFF2E8",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
   },
   childSelectTitle: {
     fontSize: 19,
