@@ -170,6 +170,17 @@ export type WeeklyRequestDay = {
 export type WeeklyDriverDay = WeeklyRequestDay & {
   price: number;
   remainingSeats: number;
+  // Which driverRoutes document this specific day actually lives in. A
+  // driver's Weekly Personal Ride is stored as one SEPARATE document PER
+  // selected date (see RideForm.tsx's own comment: "Every selected date
+  // becomes its own independent driverRoutes document... instead of one
+  // document holding every day in a weeklyTrips array"), so a day's own
+  // source document id is NOT always the same as whichever card the
+  // passenger happened to click — see getDriverDayTrips below, which is the
+  // only place this gets stamped on. Absent only for day-trip objects built
+  // without a source driver document at all (there are none today, but the
+  // field stays optional so nothing is forced to fabricate one).
+  routeId?: string;
 };
 
 export type WeekDayRow = {
@@ -253,6 +264,7 @@ const normalizeDriverDayTrip = (
     seats,
     price: Number(trip?.price ?? driver?.price ?? 0) || 0,
     remainingSeats,
+    routeId: typeof driver?.id === "string" && driver.id ? driver.id : undefined,
   };
 };
 
@@ -316,27 +328,22 @@ export type WeeklyDayMatch = {
   driverDay: WeeklyDriverDay;
 };
 
-// Each requested date is matched INDEPENDENTLY (OR logic, never AND) — a
-// driver is returned with whichever requested dates it actually covers,
-// never required to cover every one of them. See driverresults.tsx's own
-// use of this (a driver is kept in results as long as matches.length > 0)
-// and this project's Personal Ride multi-date search bug report.
-export const matchDriverWeeklyDays = (
-  driver: any,
+// Shared per-date matching core — given a flat list of bookable day-trips
+// (from ONE driver document via getDriverDayTrips, or MERGED across an
+// entire weekly series via matchWeeklyGroupDays below), match each
+// requested date INDEPENDENTLY (OR logic, never AND): whichever requested
+// dates are actually covered are returned, never requiring every one of
+// them to match. See driverresults.tsx's own use of this (a driver/group is
+// kept in results as long as matches.length > 0).
+const matchDayTripsAgainstRequest = (
+  dayTrips: WeeklyDriverDay[],
   requestedDays: WeeklyRequestDay[],
-  options: { maxTimeDiffMinutes?: number } = {},
+  maxDiffMinutes: number,
 ): WeeklyDayMatch[] => {
-  const driverDayTrips = getDriverDayTrips(driver);
-
-  if (driverDayTrips.length === 0) return [];
-
-  const maxDiff = options.maxTimeDiffMinutes ?? 30;
   const matches: WeeklyDayMatch[] = [];
 
   for (const requested of requestedDays) {
-    const driverDay = driverDayTrips.find(
-      (trip) => trip.date === requested.date,
-    );
+    const driverDay = dayTrips.find((trip) => trip.date === requested.date);
 
     if (!driverDay) continue;
 
@@ -346,7 +353,7 @@ export const matchDriverWeeklyDays = (
         : driverDay.seats;
 
     if (remaining < requested.seats) continue;
-    if (!isTimeCloseEnough(driverDay.time, requested.time, maxDiff)) continue;
+    if (!isTimeCloseEnough(driverDay.time, requested.time, maxDiffMinutes)) continue;
 
     matches.push({ requested, driverDay });
   }
@@ -354,8 +361,82 @@ export const matchDriverWeeklyDays = (
   return matches;
 };
 
+export const matchDriverWeeklyDays = (
+  driver: any,
+  requestedDays: WeeklyRequestDay[],
+  options: { maxTimeDiffMinutes?: number } = {},
+): WeeklyDayMatch[] => {
+  const driverDayTrips = getDriverDayTrips(driver);
+  if (driverDayTrips.length === 0) return [];
+
+  return matchDayTripsAgainstRequest(driverDayTrips, requestedDays, options.maxTimeDiffMinutes ?? 30);
+};
+
+// ---------------------------------------------------------------------------
+// Weekly-series grouping — a driver's Weekly Personal Ride is stored as one
+// SEPARATE driverRoutes document PER selected date (see RideForm.tsx),
+// sharing a `weeklyGroupId` field that links them for traceability. Matching
+// a single such document on its own (matchDriverWeeklyDays above) can only
+// ever surface ONE day, since that's all any one document's own
+// weeklyTrips array ever holds — this is why the "Book this driver" bottom
+// sheet used to only show the one day whose card was clicked. Grouping by
+// weeklyGroupId (falling back to the document's own id when absent — a
+// legacy/standalone document is simply its own group of one) and matching
+// against the UNION of every member's day-trips is what lets the sheet show
+// every day of the SAME weekly series, regardless of which member's card
+// was clicked.
+// ---------------------------------------------------------------------------
+
+export const weeklySeriesKey = (driver: any): string =>
+  (typeof driver?.weeklyGroupId === "string" && driver.weeklyGroupId) ||
+  (typeof driver?.id === "string" && driver.id) ||
+  "";
+
+export const groupDriversByWeeklySeries = <T extends { id: string; weeklyGroupId?: string }>(
+  drivers: T[],
+): Map<string, T[]> => {
+  const groups = new Map<string, T[]>();
+
+  for (const driver of drivers) {
+    const key = weeklySeriesKey(driver);
+    if (!key) continue;
+
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(driver);
+    } else {
+      groups.set(key, [driver]);
+    }
+  }
+
+  return groups;
+};
+
+// Matches requested dates against the MERGED day-trips of every member of a
+// weekly series (see groupDriversByWeeklySeries) instead of a single
+// document's own trips — this is what the day-picker bottom sheet uses so
+// it always shows every day of the same driver's weekly series, no matter
+// which member document's card was clicked. Never mutates/reorders the
+// input members; a date covered by more than one member (should not happen
+// in practice — each date lives in exactly one document — but is handled
+// safely) keeps whichever member's trip is found first, same `find`
+// semantics as matchDayTripsAgainstRequest itself.
+export const matchWeeklyGroupDays = (
+  members: any[],
+  requestedDays: WeeklyRequestDay[],
+  options: { maxTimeDiffMinutes?: number } = {},
+): WeeklyDayMatch[] => {
+  const mergedDayTrips = members.flatMap((member) => getDriverDayTrips(member));
+  if (mergedDayTrips.length === 0) return [];
+
+  return matchDayTripsAgainstRequest(mergedDayTrips, requestedDays, options.maxTimeDiffMinutes ?? 30);
+};
+
 // Turns a match into the day object that actually gets booked: driver's
-// scheduled time + price, passenger's requested seat count.
+// scheduled time + price, passenger's requested seat count. Carries the
+// source document's routeId through unchanged — the booking transaction
+// needs it to know exactly which driverRoutes document each selected day
+// belongs to (see weeklyBookingLib.ts's createWeeklyBookings).
 export const buildBookingDayFromMatch = (
   match: WeeklyDayMatch,
 ): WeeklyDriverDay => ({
@@ -366,7 +447,29 @@ export const buildBookingDayFromMatch = (
   seats: match.requested.seats,
   price: match.driverDay.price,
   remainingSeats: match.driverDay.remainingSeats,
+  routeId: match.driverDay.routeId,
 });
+
+// ---------------------------------------------------------------------------
+// Already-booked filtering — a day the passenger already has an active
+// booking for must never be shown as selectable again (item 7 of this
+// fix's own bug report: "Select All should select only valid, available,
+// unbooked dates"). `alreadyBookedKeys` is a Set of weeklyMatchKey(routeId,
+// date) strings — see weeklyBookingLib.ts's fetchPassengerBookedRouteDateKeys
+// for how that set is actually built from Firestore. Pure/testable: the
+// live Firestore read stays in weeklyBookingLib.ts.
+// ---------------------------------------------------------------------------
+
+export const weeklyMatchKey = (routeId: string | undefined, date: string): string =>
+  `${routeId || ""}|${date}`;
+
+export const filterOutAlreadyBookedMatches = (
+  matches: WeeklyDayMatch[],
+  alreadyBookedKeys: Set<string>,
+): WeeklyDayMatch[] =>
+  matches.filter(
+    (match) => !alreadyBookedKeys.has(weeklyMatchKey(match.driverDay.routeId, match.driverDay.date)),
+  );
 
 export const computeWeeklyTotal = (
   days: { price: number; seats: number }[],

@@ -336,6 +336,8 @@
     "noPets": "No pets",
     "bookThisDriver": "Book This Driver",
     "chooseDaysModalTitle": "Choose days to book with this driver",
+    "selectedDaysTotalToPay": "Total to pay: ₪{{total}}",
+    "noDaysSelectedYet": "No days selected",
     "continueToPayment": "Continue to Payment",
     "departureTimeLabel": "Departure time"
   },
@@ -1266,6 +1268,7 @@
     "noLocationsFound": "No locations found",
     "dayNoLongerAvailable": "This driver no longer has {{day}} available.",
     "dayNotEnoughSeats": "{{day}} no longer has enough seats. Please choose another driver.",
+    "daysAlreadyBooked": "You already booked: {{days}}. Please unselect them and try again.",
     "notEnoughSeatsAvailable": "Not enough seats available. Please choose another driver.",
     "finishedTripsSection": "Finished trips",
     "bucketUpcoming": "Upcoming",

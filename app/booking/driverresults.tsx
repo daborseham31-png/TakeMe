@@ -14,7 +14,7 @@ import {
 import { Alert } from "../AppAlert";
 import { useTranslation } from "react-i18next";
 
-import { db } from "../../firebase";
+import { auth, db } from "../../firebase";
 import i18n from "../i18n";
 import {
   DirectionalCard,
@@ -43,8 +43,12 @@ import {
 import {
   buildBookingDayFromMatch,
   computeWeeklyTotal,
+  fetchPassengerBookedRouteDateKeys,
+  filterOutAlreadyBookedMatches,
   getLocalNowInIsrael,
+  groupDriversByWeeklySeries,
   matchDriverWeeklyDays,
+  matchWeeklyGroupDays,
   WeeklyDayMatch,
   WeeklyDriverDay,
   WeeklyRequestDay,
@@ -115,6 +119,11 @@ type DriverRoute = {
   price?: number;
   seats?: number;
   weeklyTrips?: WeeklyDriverDay[];
+  // Links the separate driverRoutes documents created from ONE weekly
+  // Personal Ride submission — one document per selected date (see
+  // RideForm.tsx). Absent on legacy/standalone documents, which simply act
+  // as their own group of one (see weeklySeriesKey in weeklyBookingCore.ts).
+  weeklyGroupId?: string;
   rating?: number;
   reviews?: number;
   eta?: number;
@@ -480,6 +489,17 @@ export default function DriverResultsScreen() {
   const [weeklyMatches, setWeeklyMatches] = useState<
     Record<string, WeeklyDayMatch[]>
   >({});
+  // Group-combined matches, used ONLY by the "Book this driver" day-picker
+  // bottom sheet (openWeeklyDayPicker/confirmWeeklyDayPicker below) — every
+  // driverRoutes document belonging to the SAME weekly series (see
+  // weeklyGroupId) maps here to the SAME full list of days, so no matter
+  // which date's card the passenger clicked, the sheet shows every day of
+  // that driver's weekly series. Kept separate from `weeklyMatches` above
+  // (which stays per-document, unchanged) so the existing per-date results
+  // grouping/display below is never affected by this fix.
+  const [weeklyBookingMatches, setWeeklyBookingMatches] = useState<
+    Record<string, WeeklyDayMatch[]>
+  >({});
   const [loading, setLoading] = useState(true);
   // A failed search query is a genuine error, never "no trips found" — see
   // this screen's own bug report. Kept separate from `drivers` staying `[]`
@@ -571,6 +591,36 @@ export default function DriverResultsScreen() {
   const selectedLanguages = String(params.languages || "")
     .split(",")
     .filter(Boolean);
+
+  // The COMPLETE original search query this results screen itself was
+  // opened with — carried through unchanged to ride-payment.tsx and back
+  // again whenever some requested weekly days remain uncovered after a
+  // booking (see this fix's own bug report: "Location missing" happened
+  // because that round-trip used to hand-build a NEW, incomplete params
+  // object instead of reusing this one, silently dropping pickupLat/
+  // pickupLng/toLat/toLng/fromLocationId/toLocationId/etc.). Every field
+  // this screen itself reads from its own incoming params is included, so
+  // nothing the original search collected can be lost on the way back here.
+  const originalSearchParams = JSON.stringify({
+    category,
+    from,
+    to,
+    fromLocationId,
+    toLocationId,
+    fromLocationNames: params.fromLocationNames ? String(params.fromLocationNames) : undefined,
+    toLocationNames: params.toLocationNames ? String(params.toLocationNames) : undefined,
+    destinationDetails,
+    pickupLat,
+    pickupLng,
+    pickupAddress,
+    pickupSource,
+    toLat,
+    toLng,
+    schoolName: searchedSchoolName,
+    genderPref,
+    languages: String(params.languages || ""),
+    childEntries: String(params.childEntries || ""),
+  });
 
   useEffect(() => {
     loadDrivers();
@@ -872,7 +922,20 @@ export default function DriverResultsScreen() {
       });
 
       if (isWeekly) {
+        // A day the passenger already has an active booking for must never
+        // be shown as available/selectable again (see this fix's own bug
+        // report, item 7) — fetched once, up front, so both the per-date
+        // display below AND the day-picker sheet exclude it consistently.
+        const currentUser = auth.currentUser;
+        const alreadyBookedKeys = currentUser
+          ? await fetchPassengerBookedRouteDateKeys(
+              currentUser.uid,
+              category === "school" ? "school" : "personal",
+            )
+          : new Set<string>();
+
         const matchesMap: Record<string, WeeklyDayMatch[]> = {};
+        const bookingMatchesMap: Record<string, WeeklyDayMatch[]> = {};
 
         // Each selected date is matched INDEPENDENTLY (OR logic) —
         // matchDriverWeeklyDays already checks every requested date
@@ -881,10 +944,11 @@ export default function DriverResultsScreen() {
         // required to cover every selected date. See this fix's own bug
         // report ("Search each selected date independently... OR logic").
         const matchedDrivers = commonFiltered.filter((driver) => {
-          const matches = matchDriverWeeklyDays(
-            driver,
-            sortedRequestedDates,
-            { maxTimeDiffMinutes: MAX_TIME_DIFF_MINUTES },
+          const matches = filterOutAlreadyBookedMatches(
+            matchDriverWeeklyDays(driver, sortedRequestedDates, {
+              maxTimeDiffMinutes: MAX_TIME_DIFF_MINUTES,
+            }),
+            alreadyBookedKeys,
           );
 
           if (matches.length === 0) return false;
@@ -893,7 +957,37 @@ export default function DriverResultsScreen() {
           return true;
         });
 
+        // A driver's Weekly Personal Ride is one SEPARATE driverRoutes
+        // document PER selected date (see RideForm.tsx), so matching a
+        // single document on its own (matchesMap above) only ever surfaces
+        // the ONE day that document holds — this is why the "Book this
+        // driver" sheet used to only show the day whose card was clicked.
+        // Grouping by weekly series (weeklyGroupId, falling back to the
+        // document's own id for a legacy/standalone document) and matching
+        // against the UNION of every member's days is what lets the sheet
+        // show the whole series regardless of which member's card opened
+        // it. See weeklyBookingCore.ts's own header on groupDriversByWeekly
+        // Series/matchWeeklyGroupDays for why this is a SEPARATE map from
+        // matchesMap rather than replacing it — the per-date results
+        // grouping below must keep showing one row per (date, document),
+        // unaffected by this.
+        const weeklyGroups = groupDriversByWeeklySeries(matchedDrivers);
+
+        weeklyGroups.forEach((members) => {
+          const groupMatches = filterOutAlreadyBookedMatches(
+            matchWeeklyGroupDays(members, sortedRequestedDates, {
+              maxTimeDiffMinutes: MAX_TIME_DIFF_MINUTES,
+            }),
+            alreadyBookedKeys,
+          );
+
+          members.forEach((member) => {
+            bookingMatchesMap[member.id] = groupMatches;
+          });
+        });
+
         setWeeklyMatches(matchesMap);
+        setWeeklyBookingMatches(bookingMatchesMap);
         setDrivers(matchedDrivers);
         return;
       }
@@ -1051,7 +1145,7 @@ const handleBookDriver = async (driver: DriverRoute) => {
 // ---------------------------------------------------------------------------
 
 const openWeeklyDayPicker = (driver: DriverRoute) => {
-  const matches = weeklyMatches[driver.id] || [];
+  const matches = weeklyBookingMatches[driver.id] || [];
   if (matches.length === 0) return;
 
   setDayPickerDriver(driver);
@@ -1080,14 +1174,18 @@ const toggleWeeklyDaySelection = (date: string) => {
 const selectAllWeeklyDays = () => {
   if (!dayPickerDriver) return;
 
-  const matches = weeklyMatches[dayPickerDriver.id] || [];
+  // weeklyBookingMatches is already pre-filtered to exclude already-booked
+  // and full (0 remaining seats) days (see loadDrivers above) — every date
+  // present here is genuinely valid/available/unbooked, so Select All never
+  // needs a second check.
+  const matches = weeklyBookingMatches[dayPickerDriver.id] || [];
   setDayPickerSelected(new Set(matches.map((match) => match.requested.date)));
 };
 
 const confirmWeeklyDayPicker = () => {
   if (!dayPickerDriver) return;
 
-  const matches = weeklyMatches[dayPickerDriver.id] || [];
+  const matches = weeklyBookingMatches[dayPickerDriver.id] || [];
   const chosen = matches.filter((match) =>
     dayPickerSelected.has(match.requested.date),
   );
@@ -1136,6 +1234,12 @@ const confirmWeeklyDayPicker = () => {
 
       selectedWeeklyDays: JSON.stringify(selectedDaysForBooking),
       remainingWeeklyDays: JSON.stringify(remainingDays),
+
+      // The ORIGINAL search query, unchanged — see this const's own header
+      // comment above. ride-payment.tsx carries it through untouched and
+      // reuses it verbatim (never reconstructs a new/incomplete one) when
+      // redirecting back here for any remaining uncovered days.
+      originalSearchParams,
 
       // Passthrough so ride-payment can rebuild this results search if
       // some requested days still need a driver after this booking.
@@ -1597,7 +1701,7 @@ const resultsByDate = isWeekly
 
             <ScrollView style={styles.modalList}>
               {dayPickerDriver &&
-                (weeklyMatches[dayPickerDriver.id] || []).map((match) => {
+                (weeklyBookingMatches[dayPickerDriver.id] || []).map((match) => {
                   const checked = dayPickerSelected.has(match.requested.date);
 
                   return (
@@ -1642,6 +1746,18 @@ const resultsByDate = isWeekly
                 </DirectionalText>
               </Pressable>
             </DirectionalRow>
+
+            <DirectionalText style={styles.modalTotalText}>
+              {dayPickerSelected.size > 0
+                ? t("rides.selectedDaysTotalToPay", {
+                    total: computeWeeklyTotal(
+                      (dayPickerDriver ? weeklyBookingMatches[dayPickerDriver.id] || [] : [])
+                        .filter((match) => dayPickerSelected.has(match.requested.date))
+                        .map((match) => ({ price: match.driverDay.price, seats: match.requested.seats })),
+                    ),
+                  })
+                : t("rides.noDaysSelectedYet")}
+            </DirectionalText>
 
             <Pressable style={styles.modalPrimaryButton} onPress={confirmWeeklyDayPicker}>
               <DirectionalText style={styles.modalPrimaryButtonText}>
@@ -2057,6 +2173,13 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#7C5F46",
     fontSize: 15,
+  },
+  modalTotalText: {
+    textAlign: "center",
+    fontWeight: "900",
+    fontSize: 17,
+    color: "#111827",
+    marginBottom: 12,
   },
   modalPrimaryButton: {
     backgroundColor: "#F58220",
